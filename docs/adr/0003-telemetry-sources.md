@@ -17,7 +17,7 @@ Sources, in order of use:
 |---|---|---|
 | Per-process engine utilization | PDH `\GPU Engine(*)\Utilization Percentage` | none (see below) |
 | Per-process dedicated memory | PDH `\GPU Process Memory(*)\Dedicated Usage` | none |
-| Adapter dedicated memory in use | PDH `\GPU Adapter Memory(*)\Dedicated Usage` | DXGI budget |
+| Adapter dedicated memory in use | PDH `\GPU Adapter Memory(*)\Dedicated Usage` | sum of per-process usage |
 | Total VRAM, adapter identity | DXGI `IDXGIAdapter1::GetDesc1` | config |
 | Temperature, power, fan | D3DKMT `KMTQAITYPE_ADAPTERPERFDATA` (what Task Manager uses) | none: temperature rule reports unknown |
 
@@ -31,7 +31,9 @@ usage).
 - `high`: per-process data present, owned processes visible in it, and the
   per-process sum is consistent with the adapter total.
 - `degraded`: adapter totals only, or per-process data inconsistent.
-- `none`: collection failing.
+- `none`: collection failing, unprimed, or no counter instance for the
+  target adapter (a driver reset can change the adapter LUID; the collector
+  re-enumerates on rebuild). Zeros in such a sample mean unknown, not idle.
 
 **Fallback model when confidence is degraded** (conservative multi-signal):
 

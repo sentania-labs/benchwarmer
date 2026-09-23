@@ -12,11 +12,13 @@ idling while the probe records.
 - Two llama.cpp Windows builds from the llama.cpp GitHub releases page:
   the **HIP/ROCm** build (`llama-*-bin-win-hip-*.zip`) and the **Vulkan**
   build (`llama-*-bin-win-vulkan-x64.zip`). Unzip to
-  `C:\Benchwarmer\llama-hip\` and `C:\Benchwarmer\llama-vulkan\`.
+  `C:\Program Files\Benchwarmer\runtime\rocm\` and `C:\Program Files\Benchwarmer\runtime\vulkan\`.
 - The intended model, e.g. gpt-oss-20b MXFP4 GGUF, at
-  `C:\Benchwarmer\models\`. Paths outside the user profile matter: the
-  service-identity test runs as an account that cannot read `C:\Users\...`.
-- Put `bwprobe.exe` in `C:\Benchwarmer\` and open a terminal there.
+  `C:\ProgramData\Benchwarmer\models\`. Paths outside the user profile
+  matter: the service-identity test runs as an account that cannot read
+  `C:\Users\...`.
+- Put `bwprobe.exe` in `C:\Program Files\Benchwarmer\`. Run the probe from
+  `C:\ProgramData\Benchwarmer\phase0\` so output files land there.
 
 Every step writes a `.jsonl` file into the current directory. Zip the whole
 folder at the end and bring it back.
@@ -24,7 +26,7 @@ folder at the end and bring it back.
 ## 1. Environment report (1 minute)
 
 ```powershell
-.\bwprobe.exe env -out env-user.jsonl
+& "C:\Program Files\Benchwarmer\bwprobe.exe" env -out env-user.jsonl
 ```
 
 Look at the output for: the RX 9060 XT adapter and its LUID, whether
@@ -35,13 +37,14 @@ greater than zero (E4). If the wrong adapter was chosen, pass
 ## 2. Runtime start/stop and VRAM release (10 minutes per build)
 
 ```powershell
-.\bwprobe.exe runtime -exe C:\Benchwarmer\llama-vulkan\llama-server.exe -model C:\Benchwarmer\models\<model>.gguf -cycles 4 -out runtime-vulkan.jsonl
-.\bwprobe.exe runtime -exe C:\Benchwarmer\llama-hip\llama-server.exe    -model C:\Benchwarmer\models\<model>.gguf -cycles 4 -out runtime-hip.jsonl
+& "C:\Program Files\Benchwarmer\bwprobe.exe" runtime -exe C:\Program Files\Benchwarmer\runtime\vulkan\llama-server.exe -model C:\ProgramData\Benchwarmer\models\<model>.gguf -cycles 4 -out runtime-vulkan.jsonl
+& "C:\Program Files\Benchwarmer\bwprobe.exe" runtime -exe C:\Program Files\Benchwarmer\runtime\rocm\llama-server.exe    -model C:\ProgramData\Benchwarmer\models\<model>.gguf -cycles 4 -out runtime-hip.jsonl
 ```
 
 Each cycle loads the model inside a Job Object, runs a normal and a streaming
-completion, then kills the process tree: odd cycles while idle, even cycles
-one second into a streaming response. It measures kill-to-exit, kill-to-VRAM
+completion, then stops it, rotating through three stop modes: a job kill
+while idle, a job kill mid-stream (after the first token), and a graceful
+Ctrl+C with job-kill fallback. It measures kill-to-exit, kill-to-VRAM
 released, and checks for leftover `llama-server.exe` processes. Answers E1,
 E3, E5. Per-cycle runtime logs land in `runtime-cycleNN.log`.
 
@@ -53,9 +56,9 @@ If a build never becomes ready, the summary shows its stderr tail. Try
 Run from an **Administrator** terminal, using whichever build worked in step 2:
 
 ```powershell
-.\bwprobe.exe svctest -account virtual -exe C:\Benchwarmer\llama-vulkan\llama-server.exe -model C:\Benchwarmer\models\<model>.gguf
-.\bwprobe.exe svctest -account virtual -perfmon-group -exe C:\Benchwarmer\llama-vulkan\llama-server.exe -model C:\Benchwarmer\models\<model>.gguf
-.\bwprobe.exe svctest -account system -exe C:\Benchwarmer\llama-vulkan\llama-server.exe -model C:\Benchwarmer\models\<model>.gguf
+& "C:\Program Files\Benchwarmer\bwprobe.exe" svctest -account virtual -exe C:\Program Files\Benchwarmer\runtime\vulkan\llama-server.exe -model C:\ProgramData\Benchwarmer\models\<model>.gguf
+& "C:\Program Files\Benchwarmer\bwprobe.exe" svctest -account virtual -perfmon-group -exe C:\Program Files\Benchwarmer\runtime\vulkan\llama-server.exe -model C:\ProgramData\Benchwarmer\models\<model>.gguf
+& "C:\Program Files\Benchwarmer\bwprobe.exe" svctest -account system -exe C:\Program Files\Benchwarmer\runtime\vulkan\llama-server.exe -model C:\ProgramData\Benchwarmer\models\<model>.gguf
 ```
 
 Each registers a temporary service named `BenchwarmerProbe`, runs the
@@ -75,7 +78,7 @@ Start the runtime in a second terminal first for scenarios marked *(runtime
 loaded)*:
 
 ```powershell
-C:\Benchwarmer\llama-vulkan\llama-server.exe -m C:\Benchwarmer\models\<model>.gguf -ngl 999 -c 8192 --port 18081
+C:\Program Files\Benchwarmer\runtime\vulkan\llama-server.exe -m C:\ProgramData\Benchwarmer\models\<model>.gguf -ngl 999 -c 8192 --port 18081
 ```
 
 | # | Label | Duration | What to do |
@@ -83,7 +86,7 @@ C:\Benchwarmer\llama-vulkan\llama-server.exe -m C:\Benchwarmer\models\<model>.gg
 | a | `idle-desktop` | 3 min | Nothing running but the desktop. Do not touch the mouse. |
 | b | `runtime-idle` | 3 min | *(runtime loaded)* No requests. |
 | c | `runtime-loading` | 2 min | Start recording, then start llama-server; stop after it is ready. |
-| d | `runtime-inference` | 3 min | *(runtime loaded)* In a third terminal run `.\bwprobe.exe load -duration 3m`. |
+| d | `runtime-inference` | 3 min | *(runtime loaded)* In a third terminal run `& "C:\Program Files\Benchwarmer\bwprobe.exe" load -duration 3m`. |
 | e | `launcher-idle` | 3 min | Steam (and Epic, if installed) open at the library page, no game. |
 | f | `game-launch` | 3 min | Mark, then launch a game from the launcher; mark again at the main menu. |
 | g | `game-active` | 10 min | Actually play. Two different games if possible, one label each (`game-active-<name>`). |
@@ -96,7 +99,7 @@ C:\Benchwarmer\llama-vulkan\llama-server.exe -m C:\Benchwarmer\models\<model>.gg
 Command for each, with the label from the table:
 
 ```powershell
-.\bwprobe.exe telemetry -label idle-desktop -duration 3m
+& "C:\Program Files\Benchwarmer\bwprobe.exe" telemetry -label idle-desktop -duration 3m
 ```
 
 A driver reset (E9) is optional. If you want it: with recording running,
@@ -106,7 +109,7 @@ and label the run `driver-reset`.
 ## 5. Bring it back
 
 ```powershell
-Compress-Archive -Path C:\Benchwarmer\*.jsonl, C:\Benchwarmer\*.log, C:\ProgramData\BenchwarmerProbe\*.jsonl -DestinationPath C:\Benchwarmer\phase0-results.zip
+Compress-Archive -Path C:\ProgramData\Benchwarmer\phase0\*.jsonl, C:\ProgramData\Benchwarmer\phase0\*.log, C:\ProgramData\BenchwarmerProbe\*.jsonl -DestinationPath C:\ProgramData\Benchwarmer\phase0-results.zip
 ```
 
 On the dev box:

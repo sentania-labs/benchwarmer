@@ -1,6 +1,6 @@
 # ADR 0002: Runtime process ownership
 
-Status: Accepted (2026-09-23). VRAM release timing pending Phase 0 E3.
+Status: Accepted (2026-09-23), except decision 4 which is provisional pending Phase 0 E3.
 
 ## Context
 
@@ -21,10 +21,13 @@ cannot deliver reliably.
    empty, runtime counter instances gone, adapter dedicated memory back
    within tolerance of the pre-load baseline. Each verification has a timeout
    and emits an event with the measured duration.
-4. No graceful-shutdown attempt. The worker only stops the runtime when no
-   request is active or when grace has expired; in both cases a graceful
-   stop gives the caller nothing. Revisit only if E3 shows VRAM release is
-   slower after a hard kill than after a clean exit.
+4. *(Provisional.)* No graceful-shutdown attempt. The worker only stops the
+   runtime when no request is active or when grace has expired; in both
+   cases a graceful stop gives the caller nothing, and a service has no
+   console through which to deliver llama-server's Ctrl+C. `bwprobe runtime`
+   measures a graceful Ctrl+C stop against a job kill on the target; if the
+   graceful path releases VRAM faster or more reliably, this decision
+   changes (the service would then need a console-hosting helper).
 5. The worker's own death closes the job handle and the kernel kills the tree.
    On startup the worker still scans for processes whose image path equals the
    configured runtime executable and kills them (belt and braces for a

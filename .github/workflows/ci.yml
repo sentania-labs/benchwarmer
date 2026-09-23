@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    # Public repo: GitHub-hosted runners are free, and nothing here needs the lab.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Same target the author runs locally.
+      - run: make check
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bwprobe-windows-amd64
+          path: dist/*.exe
+          if-no-files-found: error
+
+  windows:
+    # Real Windows: Job Objects, PDH, DXGI, service APIs. No AMD GPU here, so
+    # GPU values are not meaningful; this proves the Win32 plumbing.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Unit tests
+        run: go test -count=1 -v ./internal/procgroup/ ; if ($LASTEXITCODE) { exit $LASTEXITCODE } ; go test -count=1 ./...
+      - name: Build probe and fake runtime
+        run: |
+          go build -o bwprobe.exe ./cmd/bwprobe
+          go build -o fakellama.exe ./cmd/fakellama
+      - name: Probe environment report
+        run: .\bwprobe.exe env -out env.jsonl
+      - name: Probe runtime cycles against fake runtime
+        shell: pwsh
+        run: |
+          .\bwprobe.exe runtime -exe .\fakellama.exe -model x.gguf -args "-spawn-child -tokens 200" -cycles 2 -settle 1s -out rt.jsonl
+          .\bwprobe.exe summarize rt.jsonl
+          $left = Get-Process fakellama -ErrorAction SilentlyContinue
+          if ($left) { Write-Error "leftover fakellama processes: $($left.Id)"; exit 1 }
+          $c = Get-Content rt.jsonl | ConvertFrom-Json | Where-Object kind -eq 'cycle'
+          foreach ($x in $c) { if (-not $x.ready -or $x.kill_to_tree_empty_ms -lt 0) { Write-Error "cycle $($x.cycle) failed"; exit 1 } }
+      - name: Probe telemetry sample
+        run: .\bwprobe.exe telemetry -label ci -duration 5s -quiet -out tel.jsonl ; .\bwprobe.exe summarize tel.jsonl
+        continue-on-error: true

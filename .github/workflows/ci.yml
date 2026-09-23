@@ -1,9 +1,10 @@
 name: ci
 
+# Every branch push runs CI, so a branch is proven before its PR opens; PRs
+# show the push run's result for the same commit.
 on:
   push:
-    branches: [main]
-  pull_request:
+    branches: ['**']
   workflow_dispatch:
 
 concurrency:

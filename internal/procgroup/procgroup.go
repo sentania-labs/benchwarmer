@@ -24,7 +24,13 @@ type Spec struct {
 	Env    []string // nil means inherit
 	Stdout io.Writer
 	Stderr io.Writer
+	// ShareConsole attaches the child to the caller's console and process
+	// group so Interrupt can deliver Ctrl+C. Only meaningful when the caller
+	// has a console (the probe run from a terminal); a service has none.
+	ShareConsole bool
 }
+
+const pipeDrainDelay = 2 * time.Second
 
 // ErrNotRunning is returned when an operation needs a live group.
 var ErrNotRunning = errors.New("procgroup: process not running")
@@ -48,7 +54,9 @@ func (g *Group) PID() int { return g.pid }
 // Started returns when the root process was started.
 func (g *Group) Started() time.Time { return g.started }
 
-// Done is closed when the root process has exited and been reaped.
+// Done is closed when the root process has exited and been reaped. Output
+// pipes are given at most pipeDrainDelay after exit to close, so a descendant
+// holding stdout cannot delay it indefinitely.
 func (g *Group) Done() <-chan struct{} { return g.done }
 
 // ExitErr returns the root process's exit error once Done is closed.
@@ -75,6 +83,10 @@ func Start(spec Spec) (*Group, error) {
 
 // Members returns the PIDs currently inside the boundary, including the root.
 func (g *Group) Members() ([]int, error) { return g.members() }
+
+// Interrupt asks the root process to exit gracefully (Ctrl+C on Windows,
+// which requires Spec.ShareConsole; SIGINT to the group on Unix).
+func (g *Group) Interrupt() error { return g.interrupt() }
 
 // Kill terminates every process in the boundary. It does not wait.
 func (g *Group) Kill() error { return g.kill() }

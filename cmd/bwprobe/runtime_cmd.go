@@ -8,9 +8,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/sentania-labs/benchwarmer/internal/procgroup"
 	"github.com/sentania-labs/benchwarmer/internal/signals"
+	"github.com/sentania-labs/benchwarmer/internal/telemetry"
 )
 
 type runtimeOpts struct {
@@ -27,12 +30,23 @@ type runtimeOpts struct {
 	releaseTolerance                uint64
 	adapter                         string
 	logDir                          string
+	modes                           []string
 }
 
+// Kill modes. "graceful" sends Ctrl+C (SIGINT on Unix) and falls back to a
+// job kill; it answers the spec's question of whether a graceful stop
+// releases VRAM differently from a hard kill.
+const (
+	modeIdle     = "idle"
+	modeBusy     = "busy"
+	modeGraceful = "graceful"
+)
+
+// Fields are -1 when the probe could not measure them. Zero is a measurement.
 type cycleResult struct {
 	Kind  string    `json:"kind"` // "cycle"
 	Cycle int       `json:"cycle"`
-	Mode  string    `json:"kill_mode"` // "idle" or "busy"
+	Mode  string    `json:"kill_mode"`
 	Start time.Time `json:"start"`
 	PID   int       `json:"pid"`
 
@@ -43,19 +57,29 @@ type cycleResult struct {
 	Ready                bool     `json:"ready"`
 	LoadedDedicatedMiB   int64    `json:"loaded_dedicated_mib"`
 	OwnDedicatedMiB      int64    `json:"own_dedicated_mib"`
-	LoadedOwnUtilPeakPct float64  `json:"inference_own_util_peak_pct"`
+	OwnSeenInCounters    bool     `json:"own_seen_in_counters"`
+	OwnUtilPeakPct       float64  `json:"inference_own_util_peak_pct"`
 	InferenceEngineTypes []string `json:"inference_engine_types,omitempty"`
 
 	Completion *reqResult `json:"completion,omitempty"`
 	Stream     *reqResult `json:"stream,omitempty"`
 	BusyStream *reqResult `json:"busy_stream,omitempty"`
 
-	KillToRootExitMs    int64    `json:"kill_to_root_exit_ms"`
-	KillToTreeEmptyMs   int64    `json:"kill_to_tree_empty_ms"`
-	KillErr             string   `json:"kill_error,omitempty"`
-	KillToVRAMReleaseMs int64    `json:"kill_to_vram_release_ms"` // -1 = not confirmed
+	// ExitedBeforeStop is true when the runtime died on its own (crash)
+	// before the probe stopped it; ExitStatus records how it ended.
+	ExitedBeforeStop bool   `json:"exited_before_stop"`
+	ExitStatus       string `json:"exit_status,omitempty"`
+
+	// GracefulExited: the runtime exited after Ctrl+C without a job kill.
+	GracefulExited      bool  `json:"graceful_exited,omitempty"`
+	StopToRootExitMs    int64 `json:"stop_to_root_exit_ms"`
+	StopToTreeEmptyMs   int64 `json:"stop_to_tree_empty_ms"`
+	StopToVRAMReleaseMs int64 `json:"stop_to_vram_release_ms"`
+	// StopToCounterGoneMs: until no owned PID has a GPU counter instance.
+	// Only measured when an owned PID was seen in the counters after load.
+	StopToCounterGoneMs int64    `json:"stop_to_counter_instances_gone_ms"`
 	VRAMAfterMiB        int64    `json:"vram_after_mib"`
-	OwnCounterGoneMs    int64    `json:"own_counter_instances_gone_ms"` // -1 = not confirmed
+	StopErr             string   `json:"stop_error,omitempty"`
 	LeftoverProcesses   []string `json:"leftover_processes,omitempty"`
 	StderrTail          string   `json:"stderr_tail,omitempty"`
 }
@@ -77,8 +101,9 @@ func cmdRuntime(args []string) error {
 	fs.StringVar(&o.model, "model", "", "path to GGUF model (required)")
 	fs.StringVar(&o.extra, "args", "-ngl 999 -c 8192", "extra llama-server arguments (space separated)")
 	fs.StringVar(&o.host, "host", "127.0.0.1", "loopback host for the runtime")
-	fs.IntVar(&o.port, "port", 18081, "private port for the runtime")
-	fs.IntVar(&o.cycles, "cycles", 4, "load/serve/kill cycles; kill mode alternates idle, busy")
+	fs.IntVar(&o.port, "port", 18081, "private port for the runtime (must be free)")
+	fs.IntVar(&o.cycles, "cycles", 6, "load/serve/stop cycles; stop mode rotates through -modes")
+	modes := fs.String("modes", "idle,busy,graceful", "stop modes to rotate through: idle, busy, graceful")
 	fs.IntVar(&o.maxTokens, "max-tokens", 128, "max tokens per test completion")
 	fs.StringVar(&o.prompt, "prompt", "Write a short paragraph about lighthouses.", "test prompt (not recorded)")
 	fs.DurationVar(&o.loadTimeout, "load-timeout", 5*time.Minute, "max time to wait for readiness")
@@ -90,6 +115,14 @@ func cmdRuntime(args []string) error {
 	_ = fs.Parse(args)
 	if o.exe == "" || o.model == "" {
 		return errors.New("-exe and -model are required")
+	}
+	for _, m := range strings.Split(*modes, ",") {
+		switch m = strings.TrimSpace(m); m {
+		case modeIdle, modeBusy, modeGraceful:
+			o.modes = append(o.modes, m)
+		default:
+			return fmt.Errorf("unknown stop mode %q", m)
+		}
 	}
 	if *out == "" {
 		*out = "runtime-" + time.Now().Format("20060102-150405") + ".jsonl"
@@ -106,24 +139,25 @@ func cmdRuntime(args []string) error {
 }
 
 func runCycles(o runtimeOpts, w *jsonl) error {
+	if len(o.modes) == 0 {
+		o.modes = []string{modeIdle, modeBusy}
+	}
 	g, gerr := newGPUSource(o.adapter)
 	if gerr != nil {
 		fmt.Fprintln(os.Stderr, "note: GPU telemetry unavailable, VRAM measurements skipped:", gerr)
+		w.write(eventRecord{Kind: "note", Label: "runtime", Time: time.Now(), Text: "GPU telemetry unavailable: " + gerr.Error()})
 	} else {
 		defer g.Close()
-		g.Collect() // prime
+		g.Collect() // prime rate counters
 	}
 	w.write(eventRecord{Kind: "start", Label: "runtime", Time: time.Now(), Data: map[string]any{
-		"exe": o.exe, "model": filepath.Base(o.model), "args": o.extra, "cycles": o.cycles}})
+		"exe": o.exe, "model": filepath.Base(o.model), "args": o.extra, "cycles": o.cycles, "modes": o.modes}})
 	for i := 1; i <= o.cycles; i++ {
-		mode := "idle"
-		if i%2 == 0 {
-			mode = "busy"
-		}
+		mode := o.modes[(i-1)%len(o.modes)]
 		r := runCycle(o, g, i, mode, w)
 		w.write(r)
-		fmt.Fprintf(os.Stderr, "cycle %d (%s): ready=%v load=%.1fs kill->exit=%dms kill->tree-empty=%dms kill->vram=%dms leftovers=%v %s\n",
-			i, mode, r.Ready, r.LoadSeconds, r.KillToRootExitMs, r.KillToTreeEmptyMs, r.KillToVRAMReleaseMs, r.LeftoverProcesses, r.StartErr)
+		fmt.Fprintf(os.Stderr, "cycle %d (%s): ready=%v load=%.1fs stop->exit=%dms stop->tree-empty=%dms stop->vram=%dms graceful=%v crashed=%v leftovers=%v %s\n",
+			i, mode, r.Ready, r.LoadSeconds, r.StopToRootExitMs, r.StopToTreeEmptyMs, r.StopToVRAMReleaseMs, r.GracefulExited, r.ExitedBeforeStop, r.LeftoverProcesses, r.StartErr)
 		if i < o.cycles {
 			time.Sleep(o.settle)
 		}
@@ -154,12 +188,127 @@ func (r *ring) String() string {
 	return string(r.buf)
 }
 
+// timeline samples GPU telemetry in the background for one cycle. It is the
+// only caller of Collect while running, so rate intervals stay even.
+type timeline struct {
+	mu        sync.Mutex
+	latest    *telemetry.Sample
+	seenOwn   map[uint32]bool // owned PIDs seen with a counter instance
+	peakUtil  float64
+	engTypes  map[string]bool
+	stop      chan struct{}
+	done      chan struct{}
+	available bool
+}
+
+func startTimeline(g gpuSource, pg *procgroup.Group, cycle int, w *jsonl) *timeline {
+	tl := &timeline{seenOwn: map[uint32]bool{}, engTypes: map[string]bool{}, stop: make(chan struct{}), done: make(chan struct{}), available: g != nil}
+	go func() {
+		defer close(tl.done)
+		if g == nil {
+			return
+		}
+		t := time.NewTicker(500 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-tl.stop:
+				return
+			case <-t.C:
+			}
+			s := g.Collect()
+			members, _ := pg.Members()
+			own := map[uint32]bool{}
+			for _, m := range members {
+				own[uint32(m)] = true
+			}
+			var ownUtil float64
+			var ownMem uint64
+			tl.mu.Lock()
+			tl.latest = &s
+			if s.Complete {
+				for _, p := range s.Processes {
+					if !own[p.PID] {
+						continue
+					}
+					tl.seenOwn[p.PID] = true
+					ownMem += p.DedicatedBytes
+					for typ, u := range p.EngineUtil {
+						ownUtil = max(ownUtil, u)
+						if u > 1 {
+							tl.engTypes[typ] = true
+						}
+					}
+				}
+				tl.peakUtil = max(tl.peakUtil, ownUtil)
+			}
+			tl.mu.Unlock()
+			w.write(map[string]any{"kind": "vram", "cycle": cycle, "time": s.Time, "complete": s.Complete,
+				"adapter_dedicated_mib": s.DedicatedUsedBytes >> 20, "own_dedicated_mib": ownMem >> 20,
+				"own_util_pct": ownUtil, "temperature_c": s.TemperatureC, "collect_ms": s.CollectDuration.Milliseconds()})
+		}
+	}()
+	return tl
+}
+
+// waitComplete returns the next complete sample newer than after.
+func (tl *timeline) waitComplete(after time.Time, timeout time.Duration) (telemetry.Sample, bool) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		tl.mu.Lock()
+		s := tl.latest
+		tl.mu.Unlock()
+		if s != nil && s.Complete && s.Time.After(after) {
+			return *s, true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return telemetry.Sample{}, false
+}
+
+func (tl *timeline) close() {
+	close(tl.stop)
+	<-tl.done
+}
+
+// runtimePath returns the full path used to recognise leftover runtimes.
+func runtimePath(exe string) string {
+	if p, err := filepath.Abs(exe); err == nil {
+		return p
+	}
+	return exe
+}
+
+func sameRuntime(p signals.Process, full, base string) bool {
+	if p.Path != "" {
+		return strings.EqualFold(filepath.Clean(p.Path), filepath.Clean(full))
+	}
+	return strings.EqualFold(p.Name, base)
+}
+
 func runCycle(o runtimeOpts, g gpuSource, n int, mode string, w *jsonl) cycleResult {
-	r := cycleResult{Kind: "cycle", Cycle: n, Mode: mode, Start: time.Now(), KillToVRAMReleaseMs: -1, OwnCounterGoneMs: -1}
-	var baseline uint64
-	if g != nil {
-		baseline = g.Collect().DedicatedUsedBytes
-		r.BaselineDedicatedMiB = int64(baseline >> 20)
+	r := cycleResult{Kind: "cycle", Cycle: n, Mode: mode, Start: time.Now(), PID: -1,
+		BaselineDedicatedMiB: -1, LoadedDedicatedMiB: -1, OwnDedicatedMiB: -1,
+		StopToRootExitMs: -1, StopToTreeEmptyMs: -1, StopToVRAMReleaseMs: -1, StopToCounterGoneMs: -1, VRAMAfterMiB: -1}
+
+	// Refuse to start if something already listens on the port: readiness
+	// would be measured against the wrong process.
+	addr := net.JoinHostPort(o.host, strconv.Itoa(o.port))
+	if ln, err := net.Listen("tcp", addr); err != nil {
+		r.StartErr = fmt.Sprintf("port %s is in use (another llama-server running?): %v", addr, err)
+		return r
+	} else {
+		ln.Close()
+	}
+
+	full, base := runtimePath(o.exe), filepath.Base(o.exe)
+	preexisting := map[uint32]bool{}
+	if procs, err := signals.Snapshot(); err == nil {
+		for _, p := range procs {
+			if sameRuntime(p, full, base) {
+				preexisting[p.PID] = true
+			}
+		}
 	}
 
 	logf, _ := os.Create(filepath.Join(o.logDir, fmt.Sprintf("runtime-cycle%02d.log", n)))
@@ -172,92 +321,76 @@ func runCycle(o runtimeOpts, g gpuSource, n int, mode string, w *jsonl) cycleRes
 		sink = io.MultiWriter(tail, logf)
 	}
 	args := append([]string{"-m", o.model, "--host", o.host, "--port", strconv.Itoa(o.port)}, strings.Fields(o.extra)...)
-	pg, err := procgroup.Start(procgroup.Spec{Path: o.exe, Args: args, Stdout: sink, Stderr: sink})
+	// Graceful mode on Windows needs the child on our console for Ctrl+C.
+	share := mode == modeGraceful && runtime.GOOS == "windows"
+	pg, err := procgroup.Start(procgroup.Spec{Path: o.exe, Args: args, Stdout: sink, Stderr: sink, ShareConsole: share})
 	if err != nil {
 		r.StartErr = err.Error()
 		return r
 	}
 	defer pg.Close()
 	r.PID = pg.PID()
-	base := fmt.Sprintf("http://%s:%d", o.host, o.port)
+	baseURL := fmt.Sprintf("http://%s", addr)
 
-	// Background VRAM/util timeline for the whole cycle.
-	stopTL := make(chan struct{})
-	var tlMu sync.Mutex
-	var peakOwnUtil float64
-	engTypes := map[string]bool{}
-	tlDone := make(chan struct{})
-	go func() {
-		defer close(tlDone)
-		if g == nil {
-			return
+	// Baseline VRAM: the first complete sample after start, before the model
+	// has had time to allocate. Taken from a complete sample or not at all.
+	tl := startTimeline(g, pg, n, w)
+	var baseline uint64
+	haveBaseline := false
+	if tl.available {
+		if s, ok := tl.waitComplete(r.Start, 3*time.Second); ok {
+			baseline, haveBaseline = s.DedicatedUsedBytes, true
+			r.BaselineDedicatedMiB = int64(baseline >> 20)
 		}
-		t := time.NewTicker(500 * time.Millisecond)
-		defer t.Stop()
-		for {
-			select {
-			case <-stopTL:
-				return
-			case <-t.C:
-				s := g.Collect()
-				members, _ := pg.Members()
-				own := map[uint32]bool{}
-				for _, m := range members {
-					own[uint32(m)] = true
-				}
-				var ownUtil float64
-				var ownMem uint64
-				tlMu.Lock()
-				for _, p := range s.Processes {
-					if own[p.PID] {
-						ownMem += p.DedicatedBytes
-						for typ, u := range p.EngineUtil {
-							ownUtil = max(ownUtil, u)
-							if u > 1 {
-								engTypes[typ] = true
-							}
-						}
-					}
-				}
-				peakOwnUtil = max(peakOwnUtil, ownUtil)
-				tlMu.Unlock()
-				w.write(map[string]any{"kind": "vram", "cycle": n, "time": s.Time,
-					"adapter_dedicated_mib": s.DedicatedUsedBytes >> 20, "own_dedicated_mib": ownMem >> 20,
-					"own_util_pct": ownUtil, "temperature_c": s.TemperatureC, "collect_ms": s.CollectDuration.Milliseconds()})
-			}
-		}
-	}()
+	}
 
 	t0 := time.Now()
-	r.Ready = waitReady(base, o.loadTimeout, pg)
+	r.Ready = waitReady(baseURL, o.loadTimeout, pg)
 	r.LoadSeconds = time.Since(t0).Seconds()
 	if r.Ready {
-		if g != nil {
-			time.Sleep(time.Second)
-			s := g.Collect()
+		if s, ok := tl.waitComplete(time.Now().Add(500*time.Millisecond), 5*time.Second); ok {
 			r.LoadedDedicatedMiB = int64(s.DedicatedUsedBytes >> 20)
 			members, _ := pg.Members()
+			var own int64
 			for _, p := range s.Processes {
 				for _, m := range members {
 					if uint32(m) == p.PID {
-						r.OwnDedicatedMiB += int64(p.DedicatedBytes >> 20)
+						own += int64(p.DedicatedBytes >> 20)
 					}
 				}
 			}
+			r.OwnDedicatedMiB = own
 		}
-		r.Completion = doChat(base, o.prompt, o.maxTokens, false, 0)
-		r.Stream = doChat(base, o.prompt, o.maxTokens, true, 0)
+		r.Completion = doChat(baseURL, o.prompt, o.maxTokens, false, 0, nil)
+		r.Stream = doChat(baseURL, o.prompt, o.maxTokens, true, 0, nil)
 	}
 
-	var killAt time.Time
-	if mode == "busy" && r.Ready {
-		// Kill one second into a streaming response, as a forced preemption would.
+	// Was the runtime still alive when we went to stop it?
+	select {
+	case <-pg.Done():
+		r.ExitedBeforeStop = true
+	default:
+	}
+
+	var stopAt time.Time
+	switch {
+	case r.ExitedBeforeStop:
+		stopAt = time.Now()
+	case mode == modeBusy && r.Ready:
+		// Kill mid-stream, as a forced preemption would: after the first
+		// token arrives, not at a fixed delay that prompt processing might
+		// outlast.
+		first := make(chan struct{})
 		res := make(chan *reqResult, 1)
-		go func() { res <- doChat(base, o.prompt, 4*o.maxTokens, true, 0) }()
-		time.Sleep(time.Second)
-		killAt = time.Now()
-		if err := pg.Kill(); err != nil {
-			r.KillErr = err.Error()
+		go func() { res <- doChat(baseURL, o.prompt, 4*o.maxTokens, true, 0, first) }()
+		select {
+		case <-first:
+			time.Sleep(500 * time.Millisecond)
+		case <-time.After(2 * time.Minute):
+		}
+		stopAt = time.Now()
+		if err := pg.Kill(); err != nil && !errors.Is(err, procgroup.ErrNotRunning) {
+			r.StopErr = err.Error()
 		}
 		select {
 		case br := <-res:
@@ -265,70 +398,103 @@ func runCycle(o runtimeOpts, g gpuSource, n int, mode string, w *jsonl) cycleRes
 		case <-time.After(10 * time.Second):
 			r.BusyStream = &reqResult{Err: "client did not observe termination within 10s"}
 		}
-	} else {
-		killAt = time.Now()
+	case mode == modeGraceful:
+		stopAt = time.Now()
+		if err := pg.Interrupt(); err != nil {
+			r.StopErr = "interrupt: " + err.Error()
+		}
+		select {
+		case <-pg.Done():
+			r.GracefulExited = true
+		case <-time.After(15 * time.Second):
+			r.StopErr = strings.TrimPrefix(r.StopErr+"; no exit 15s after Ctrl+C, job kill", "; ")
+			_ = pg.Kill()
+		}
+	default:
+		stopAt = time.Now()
 		if err := pg.Kill(); err != nil && !errors.Is(err, procgroup.ErrNotRunning) {
-			r.KillErr = err.Error()
+			r.StopErr = err.Error()
 		}
 	}
+
 	select {
 	case <-pg.Done():
-		r.KillToRootExitMs = time.Since(killAt).Milliseconds()
+		if !r.ExitedBeforeStop {
+			r.StopToRootExitMs = time.Since(stopAt).Milliseconds()
+		}
 	case <-time.After(30 * time.Second):
-		r.KillToRootExitMs = -1
+		r.StopErr = strings.TrimPrefix(r.StopErr+"; root did not exit within 30s", "; ")
 	}
-	for time.Since(killAt) < 30*time.Second {
-		if m, _ := pg.Members(); len(m) == 0 {
-			r.KillToTreeEmptyMs = time.Since(killAt).Milliseconds()
+	if e := pg.ExitErr(); e != nil {
+		r.ExitStatus = e.Error()
+	} else {
+		r.ExitStatus = "exit 0"
+	}
+	for time.Since(stopAt) < 30*time.Second {
+		if m, err := pg.Members(); err == nil && len(m) == 0 {
+			r.StopToTreeEmptyMs = time.Since(stopAt).Milliseconds()
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	close(stopTL)
-	<-tlDone
-	tlMu.Lock()
-	r.LoadedOwnUtilPeakPct = peakOwnUtil
-	for t := range engTypes {
-		r.InferenceEngineTypes = append(r.InferenceEngineTypes, t)
-	}
-	tlMu.Unlock()
-
-	if g != nil {
+	// VRAM release: only complete samples count, and only against a real
+	// baseline. Counter instances: only if an owned PID was ever seen.
+	if tl.available {
+		tl.mu.Lock()
+		seen := make(map[uint32]bool, len(tl.seenOwn))
+		for p := range tl.seenOwn {
+			seen[p] = true
+		}
+		tl.mu.Unlock()
+		r.OwnSeenInCounters = len(seen) > 0
 		tol := o.releaseTolerance << 20
-		for time.Since(killAt) < 60*time.Second {
-			s := g.Collect()
+		last := stopAt
+		for time.Since(stopAt) < 60*time.Second {
+			s, ok := tl.waitComplete(last, 2*time.Second)
+			if !ok {
+				continue
+			}
+			last = s.Time
 			r.VRAMAfterMiB = int64(s.DedicatedUsedBytes >> 20)
-			if r.OwnCounterGoneMs < 0 {
+			if r.OwnSeenInCounters && r.StopToCounterGoneMs < 0 {
 				gone := true
 				for _, p := range s.Processes {
-					if int(p.PID) == r.PID {
+					if seen[p.PID] {
 						gone = false
 					}
 				}
 				if gone {
-					r.OwnCounterGoneMs = time.Since(killAt).Milliseconds()
+					r.StopToCounterGoneMs = s.Time.Sub(stopAt).Milliseconds()
 				}
 			}
-			if r.KillToVRAMReleaseMs < 0 && s.DedicatedUsedBytes <= baseline+tol {
-				r.KillToVRAMReleaseMs = time.Since(killAt).Milliseconds()
+			if haveBaseline && r.StopToVRAMReleaseMs < 0 && s.DedicatedUsedBytes <= baseline+tol {
+				r.StopToVRAMReleaseMs = s.Time.Sub(stopAt).Milliseconds()
 			}
-			if r.KillToVRAMReleaseMs >= 0 && r.OwnCounterGoneMs >= 0 {
+			if (!haveBaseline || r.StopToVRAMReleaseMs >= 0) && (!r.OwnSeenInCounters || r.StopToCounterGoneMs >= 0) {
 				break
 			}
-			time.Sleep(100 * time.Millisecond)
 		}
+		tl.mu.Lock()
+		r.OwnUtilPeakPct = tl.peakUtil
+		for t := range tl.engTypes {
+			r.InferenceEngineTypes = append(r.InferenceEngineTypes, t)
+		}
+		tl.mu.Unlock()
 	}
+	tl.close()
 
-	exeName := filepath.Base(o.exe)
+	// Leftovers: runtime processes (same executable path) that did not exist
+	// before this cycle. Checked while the job handle is still open, so this
+	// tests TerminateJobObject, not kill-on-close.
 	if procs, err := signals.Snapshot(); err == nil {
 		for _, p := range procs {
-			if strings.EqualFold(p.Name, exeName) {
+			if sameRuntime(p, full, base) && !preexisting[p.PID] {
 				r.LeftoverProcesses = append(r.LeftoverProcesses, fmt.Sprintf("%s(pid %d)", p.Name, p.PID))
 			}
 		}
 	}
-	if !r.Ready {
+	if !r.Ready || r.ExitedBeforeStop {
 		r.StderrTail = tail.String()
 	}
 	return r
@@ -356,7 +522,9 @@ func waitReady(base string, timeout time.Duration, pg *procgroup.Group) bool {
 	return false
 }
 
-func doChat(base, prompt string, maxTokens int, stream bool, timeout time.Duration) *reqResult {
+// doChat sends one chat completion. For streams, firstChunk (if non-nil) is
+// closed when the first data line arrives.
+func doChat(base, prompt string, maxTokens int, stream bool, timeout time.Duration, firstChunk chan struct{}) *reqResult {
 	body := fmt.Sprintf(`{"messages":[{"role":"user","content":%q}],"max_tokens":%d,"stream":%v}`, prompt, maxTokens, stream)
 	ctx := context.Background()
 	if timeout > 0 {
@@ -392,8 +560,12 @@ func doChat(base, prompt string, maxTokens int, stream bool, timeout time.Durati
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
-		if res.Chunks == 0 {
+		if res.Chunks == 0 && !res.SawDone {
 			res.TTFTms = time.Since(t0).Milliseconds()
+			if firstChunk != nil {
+				close(firstChunk)
+				firstChunk = nil
+			}
 		}
 		if line == "data: [DONE]" {
 			res.SawDone = true

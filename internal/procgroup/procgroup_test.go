@@ -158,3 +158,18 @@ func contains(s []int, v int) bool {
 	}
 	return false
 }
+
+func TestInterruptUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows Ctrl+C delivery needs a console; exercised by bwprobe on the target")
+	}
+	g, _ := startParent(t)
+	if err := g.Interrupt(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-g.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("root did not exit on interrupt")
+	}
+}

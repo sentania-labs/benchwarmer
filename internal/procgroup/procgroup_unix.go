@@ -28,6 +28,7 @@ func start(spec Spec) (*Group, error) {
 	cmd.Env = spec.Env
 	cmd.Stdout = spec.Stdout
 	cmd.Stderr = spec.Stderr
+	cmd.WaitDelay = pipeDrainDelay
 	cmd.SysProcAttr = sysProcAttr()
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("procgroup: start: %w", err)
@@ -88,6 +89,16 @@ func scanGroup(pgid int) []int {
 	return out
 }
 
+func (g *Group) interrupt() error {
+	if err := syscall.Kill(-g.plat.pgid, syscall.SIGINT); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return ErrNotRunning
+		}
+		return err
+	}
+	return nil
+}
+
 func (g *Group) kill() error {
 	g.plat.mu.Lock()
 	defer g.plat.mu.Unlock()
@@ -107,7 +118,10 @@ func (g *Group) close() error {
 		return nil
 	}
 	g.plat.closed = true
-	// Mirror Windows kill-on-close semantics.
-	_ = syscall.Kill(-g.plat.pgid, syscall.SIGKILL)
+	// Mirror Windows kill-on-close semantics, but only while the group still
+	// has members: once empty, the PGID could be reused by an unrelated group.
+	if m := scanGroup(g.plat.pgid); len(m) > 0 {
+		_ = syscall.Kill(-g.plat.pgid, syscall.SIGKILL)
+	}
 	return nil
 }

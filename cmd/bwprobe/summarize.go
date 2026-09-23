@@ -225,8 +225,10 @@ func (a *aggregator) write(w io.Writer) {
 	if len(a.cycles) > 0 {
 		fmt.Fprintln(w, "## Runtime cycles")
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "| # | Kill mode | Ready | Load s | Own VRAM MiB | Engine types | Stream TTFT ms | Kill->exit ms | Kill->tree empty ms | Kill->VRAM released ms | Counter gone ms | Leftovers | Busy client saw |")
-		fmt.Fprintln(w, "|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+		fmt.Fprintln(w, "-1 means not measured (no data, or the event never happened within the timeout).")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "| # | Stop mode | Ready | Load s | Own VRAM MiB | Seen in counters | Engine types | Stream TTFT ms | Crashed first | Graceful exit | Stop->exit ms | Stop->tree empty ms | Stop->VRAM released ms | Counter gone ms | Leftovers | Busy client saw | Exit status |")
+		fmt.Fprintln(w, "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 		for _, c := range a.cycles {
 			ttft, busy := "", ""
 			if c.Stream != nil {
@@ -238,14 +240,16 @@ func (a *aggregator) write(w io.Writer) {
 					busy = "clean end"
 				}
 			}
-			fmt.Fprintf(w, "| %d | %s | %v | %.1f | %d | %s | %s | %d | %d | %d | %d | %s | %s |\n",
-				c.Cycle, c.Mode, c.Ready, c.LoadSeconds, c.OwnDedicatedMiB, strings.Join(c.InferenceEngineTypes, ","), ttft,
-				c.KillToRootExitMs, c.KillToTreeEmptyMs, c.KillToVRAMReleaseMs, c.OwnCounterGoneMs, strings.Join(c.LeftoverProcesses, ","), busy)
+			fmt.Fprintf(w, "| %d | %s | %v | %.1f | %d | %v | %s | %s | %v | %v | %d | %d | %d | %d | %s | %s | %s |\n",
+				c.Cycle, c.Mode, c.Ready, c.LoadSeconds, c.OwnDedicatedMiB, c.OwnSeenInCounters, strings.Join(c.InferenceEngineTypes, ","), ttft,
+				c.ExitedBeforeStop, c.GracefulExited, c.StopToRootExitMs, c.StopToTreeEmptyMs, c.StopToVRAMReleaseMs, c.StopToCounterGoneMs,
+				strings.Join(c.LeftoverProcesses, ","), busy, c.ExitStatus)
 		}
 		fmt.Fprintln(w)
 		for _, c := range a.cycles {
-			if c.StartErr != "" || !c.Ready {
-				fmt.Fprintf(w, "Cycle %d did not become ready. start error: %q. stderr tail:\n\n```\n%s\n```\n\n", c.Cycle, c.StartErr, c.StderrTail)
+			if c.StartErr != "" || !c.Ready || c.ExitedBeforeStop || c.StopErr != "" {
+				fmt.Fprintf(w, "Cycle %d: ready=%v crashed_first=%v start error: %q stop error: %q. stderr tail:\n\n```\n%s\n```\n\n",
+					c.Cycle, c.Ready, c.ExitedBeforeStop, c.StartErr, c.StopErr, c.StderrTail)
 			}
 		}
 	}

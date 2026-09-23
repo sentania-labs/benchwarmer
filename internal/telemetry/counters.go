@@ -112,6 +112,7 @@ func FromCounters(rc RawCounters, luid string) Sample {
 	for name, v := range rc.AdapterDedicated {
 		if in, ok := parseInstance(name); ok && in.LUID == luid {
 			s.DedicatedUsedBytes += uint64(v)
+			s.HasAdapterInstances = true
 		}
 	}
 	for name, v := range rc.AdapterShared {

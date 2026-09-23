@@ -18,9 +18,10 @@ type Sample struct {
 	// Adapter-wide dedicated usage from the GPU Adapter Memory counter.
 	DedicatedUsedBytes uint64 `json:"dedicated_used_bytes"`
 	SharedUsedBytes    uint64 `json:"shared_used_bytes"`
-	// OS budget for local memory as seen by this process (DXGI). Shrinks when
-	// other processes need VRAM.
-	LocalBudgetBytes uint64 `json:"local_budget_bytes,omitempty"`
+	// HasAdapterInstances is true when the adapter memory counter had at
+	// least one instance for the target LUID. False means the memory figures
+	// are unknown, not zero.
+	HasAdapterInstances bool `json:"has_adapter_instances"`
 
 	TemperatureC *float64 `json:"temperature_c,omitempty"`
 	PowerPct     *float64 `json:"power_pct,omitempty"`
@@ -34,7 +35,10 @@ type Sample struct {
 	// CollectDuration is how long the collection itself took; GPU Engine
 	// counters are known to be expensive on some systems.
 	CollectDuration time.Duration `json:"collect_duration_ns"`
-	// Complete is false when any source failed; Errors says which.
+	// Complete is true when the counter-derived fields are real measurements
+	// (primed, error-free, adapter present). Consumers must treat zeros in an
+	// incomplete sample as unknown. Errors lists every failed source,
+	// including temperature, which does not affect Complete.
 	Complete bool     `json:"complete"`
 	Errors   []string `json:"errors,omitempty"`
 }

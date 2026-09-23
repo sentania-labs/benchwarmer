@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -31,12 +32,13 @@ var (
 )
 
 const (
-	pdhFmtDouble    = 0x00000200
-	pdhFmtNoCap100  = 0x00008000
-	pdhMoreData     = 0x800007D2
-	pdhNoData       = 0x800007D5
-	pdhCstatusValid = 0x0
-	pdhCstatusNew   = 0x1
+	pdhFmtDouble         = 0x00000200
+	pdhFmtNoCap100       = 0x00008000
+	pdhMoreData          = 0x800007D2
+	pdhNoData            = 0x800007D5
+	pdhCstatusNoInstance = 0x800007D1
+	pdhCstatusValid      = 0x0
+	pdhCstatusNew        = 0x1
 )
 
 type pdhCounterSet struct {
@@ -96,13 +98,14 @@ func (c *PDHCollector) build() error {
 func (c *PDHCollector) Rebuild() error { return c.build() }
 
 // Collect samples all counter sets. The first call after (re)building only
-// primes rate counters; utilization values appear from the second call.
-func (c *PDHCollector) Collect() (RawCounters, error) {
+// primes rate counters: primed reports whether utilization values in this
+// collection are real.
+func (c *PDHCollector) Collect() (raw RawCounters, primed bool, err error) {
 	if c.query == 0 {
-		return RawCounters{}, errors.New("pdh query closed")
+		return RawCounters{}, false, errors.New("pdh query closed")
 	}
 	if r, _, _ := procPdhCollectQueryData.Call(c.query); r != 0 && r != pdhNoData {
-		return RawCounters{}, fmt.Errorf("PdhCollectQueryData: 0x%x", r)
+		return RawCounters{}, false, fmt.Errorf("PdhCollectQueryData: 0x%x", r)
 	}
 	wasPrimed := c.primed
 	c.primed = true
@@ -111,11 +114,7 @@ func (c *PDHCollector) Collect() (RawCounters, error) {
 	for i, cs := range c.counters {
 		m, err := formattedArray(cs.h)
 		if err != nil {
-			// A counter set with zero instances reports an error; that is data,
-			// not a failure, except for the adapter set which must exist.
-			if i >= 3 {
-				errs = append(errs, cs.path+": "+err.Error())
-			}
+			errs = append(errs, cs.path+": "+err.Error())
 			m = map[string]float64{}
 		}
 		switch i {
@@ -135,13 +134,10 @@ func (c *PDHCollector) Collect() (RawCounters, error) {
 		}
 	}
 	if len(errs) > 0 {
-		return out, errors.New(strings.Join(errs, "; "))
+		return out, wasPrimed, errors.New(strings.Join(errs, "; "))
 	}
-	return out, nil
+	return out, wasPrimed, nil
 }
-
-// Primed reports whether utilization values are available yet.
-func (c *PDHCollector) Primed() bool { return c.primed }
 
 // Close releases the PDH query.
 func (c *PDHCollector) Close() {
@@ -160,22 +156,35 @@ type pdhFmtCounterValueItemDouble struct {
 	Value   float64
 }
 
+// formattedArray reads every instance of a wildcard counter. "No instances"
+// is data (an empty map); any other failure is an error, never silently idle.
 func formattedArray(h uintptr) (map[string]float64, error) {
 	var size, count uint32
-	r, _, _ := procPdhGetFormattedCounterArray.Call(h, pdhFmtDouble|pdhFmtNoCap100,
-		uintptr(unsafe.Pointer(&size)), uintptr(unsafe.Pointer(&count)), 0)
-	if r != pdhMoreData {
-		if r == 0 {
-			return map[string]float64{}, nil
+	var buf []uint64
+	for attempt := 0; ; attempt++ {
+		var p uintptr
+		if len(buf) > 0 {
+			p = uintptr(unsafe.Pointer(&buf[0]))
 		}
-		return nil, fmt.Errorf("PdhGetFormattedCounterArray size: 0x%x", r)
+		r, _, _ := procPdhGetFormattedCounterArray.Call(h, pdhFmtDouble|pdhFmtNoCap100,
+			uintptr(unsafe.Pointer(&size)), uintptr(unsafe.Pointer(&count)), p)
+		switch {
+		case r == 0 && (len(buf) > 0 || count == 0):
+		case r == pdhMoreData && attempt < 4:
+			// Size query, or instances appeared between the size query and
+			// the fill (a game creating GPU contexts). Grow and retry.
+			// Allocate as uint64s for 8-byte alignment; names point into it.
+			buf = make([]uint64, (size+7)/8+64)
+			continue
+		case r == pdhNoData || r == pdhCstatusNoInstance:
+			return map[string]float64{}, nil
+		default:
+			return nil, fmt.Errorf("PdhGetFormattedCounterArray: 0x%x", r)
+		}
+		break
 	}
-	// Allocate as uint64s for 8-byte alignment; names point into the buffer.
-	buf := make([]uint64, (size+7)/8+1)
-	r, _, _ = procPdhGetFormattedCounterArray.Call(h, pdhFmtDouble|pdhFmtNoCap100,
-		uintptr(unsafe.Pointer(&size)), uintptr(unsafe.Pointer(&count)), uintptr(unsafe.Pointer(&buf[0])))
-	if r != 0 {
-		return nil, fmt.Errorf("PdhGetFormattedCounterArray: 0x%x", r)
+	if count == 0 {
+		return map[string]float64{}, nil
 	}
 	items := unsafe.Slice((*pdhFmtCounterValueItemDouble)(unsafe.Pointer(&buf[0])), count)
 	out := make(map[string]float64, count)
@@ -200,10 +209,10 @@ type Adapter struct {
 	DedicatedBytes uint64 `json:"dedicated_bytes"`
 	SharedBytes    uint64 `json:"shared_bytes"`
 	Software       bool   `json:"software"`
-	// LocalBudgetBytes and LocalUsageBytes come from IDXGIAdapter3 and are
-	// scoped to the calling process (budget reflects system-wide pressure).
+	// LocalBudgetBytes is IDXGIAdapter3's local-memory budget for the
+	// calling process at enumeration time. Diagnostic only (env report); it
+	// is not sampled.
 	LocalBudgetBytes uint64 `json:"local_budget_bytes"`
-	LocalUsageBytes  uint64 `json:"local_usage_bytes"`
 }
 
 var (
@@ -278,7 +287,7 @@ func Adapters() ([]Adapter, error) {
 				var mi dxgiQueryVideoMemoryInfo
 				// IDXGIAdapter3::QueryVideoMemoryInfo is slot 14; group 0 is local.
 				if comCall(ad3, 14, 0, 0, uintptr(unsafe.Pointer(&mi))) == 0 {
-					a.LocalBudgetBytes, a.LocalUsageBytes = mi.Budget, mi.CurrentUsage
+					a.LocalBudgetBytes = mi.Budget
 				}
 				comRelease(ad3)
 			}
@@ -358,9 +367,13 @@ func QueryPerfData(a Adapter) (PerfData, error) {
 }
 
 // WindowsCollector combines PDH, DXGI and D3DKMT into Samples for one adapter.
+// It is safe for concurrent use; collections are serialised, since two
+// collections close together would shrink the rate-counter interval.
 type WindowsCollector struct {
-	pdh     *PDHCollector
-	adapter Adapter
+	mu       sync.Mutex
+	pdh      *PDHCollector
+	adapter  Adapter
+	selector string
 }
 
 // NewWindowsCollector selects the adapter by LUID, or by name substring when
@@ -379,7 +392,7 @@ func NewWindowsCollector(selector string) (*WindowsCollector, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &WindowsCollector{pdh: p, adapter: a}, nil
+	return &WindowsCollector{pdh: p, adapter: a, selector: selector}, nil
 }
 
 // SelectAdapter picks the target adapter from an enumeration.
@@ -388,7 +401,9 @@ func SelectAdapter(ads []Adapter, selector string) (Adapter, error) {
 	var best *Adapter
 	for i := range ads {
 		a := &ads[i]
-		if a.Software {
+		// Microsoft Basic Render Driver (vendor 0x1414) is not always flagged
+		// as software; after a driver failure it can be the only adapter.
+		if a.Software || a.VendorID == 0x1414 {
 			continue
 		}
 		if sel != "" {
@@ -408,37 +423,76 @@ func SelectAdapter(ads []Adapter, selector string) (Adapter, error) {
 }
 
 // Adapter returns the selected adapter.
-func (w *WindowsCollector) Adapter() Adapter { return w.adapter }
+func (w *WindowsCollector) Adapter() Adapter {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.adapter
+}
 
-// Rebuild recreates the counter query, e.g. after resume.
-func (w *WindowsCollector) Rebuild() error { return w.pdh.Rebuild() }
+// Rebuild re-enumerates adapters (a driver reset can change the LUID) and
+// recreates the counter query, e.g. after resume.
+func (w *WindowsCollector) Rebuild() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	ads, err := Adapters()
+	if err != nil {
+		return err
+	}
+	a, err := SelectAdapter(ads, w.selector)
+	if err != nil {
+		return err
+	}
+	w.adapter = a
+	return w.pdh.Rebuild()
+}
 
-// Collect takes one Sample.
+// Collect takes one Sample. Complete means the counter data is real: primed,
+// error-free, and containing instances for the target adapter. Temperature
+// is a separate source: its failure is recorded in Errors and leaves
+// TemperatureC nil without marking the counters incomplete.
 func (w *WindowsCollector) Collect() Sample {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	t0 := time.Now()
-	raw, err := w.pdh.Collect()
+	raw, primed, err := w.pdh.Collect()
 	s := FromCounters(raw, w.adapter.LUID)
 	s.Time = t0
 	s.AdapterName = w.adapter.Name
 	s.DedicatedTotalBytes = w.adapter.DedicatedBytes
-	s.Complete = w.pdh.Primed()
+	s.Complete = primed && err == nil
 	if err != nil {
-		s.Complete = false
 		s.Errors = append(s.Errors, err.Error())
+	}
+	if !primed {
+		s.Errors = append(s.Errors, "priming sample: utilization not yet available")
+	}
+	if !s.HasAdapterInstances {
+		// No counter instance for the adapter's LUID: the adapter vanished or
+		// changed identity (driver reset). Zero here means unknown, not idle.
+		s.Complete = false
+		s.Errors = append(s.Errors, "no GPU Adapter Memory instance for adapter LUID "+w.adapter.LUID)
 	}
 	if pd, err := QueryPerfData(w.adapter); err == nil {
 		if pd.TemperatureC > 0 {
 			t := pd.TemperatureC
 			s.TemperatureC = &t
 		}
-		p, f := pd.PowerPct, pd.FanRPM
-		s.PowerPct, s.FanRPM = &p, &f
+		if pd.PowerPct > 0 {
+			p := pd.PowerPct
+			s.PowerPct = &p
+		}
+		f := pd.FanRPM // zero is real: fan-stop mode
+		s.FanRPM = &f
 	} else {
-		s.Errors = append(s.Errors, err.Error())
+		s.Errors = append(s.Errors, "perf data: "+err.Error())
 	}
 	s.CollectDuration = time.Since(t0)
 	return s
 }
 
 // Close releases resources.
-func (w *WindowsCollector) Close() { w.pdh.Close() }
+func (w *WindowsCollector) Close() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.pdh.Close()
+}

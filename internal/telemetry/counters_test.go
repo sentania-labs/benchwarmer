@@ -128,3 +128,13 @@ func TestFormatLUID(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestMissingAdapterIsNotIdle(t *testing.T) {
+	s := FromCounters(fixture(), "0x00000000_0x0000ffff")
+	if s.HasAdapterInstances {
+		t.Fatal("unknown LUID reported as present")
+	}
+	if !FromCounters(fixture(), gpu).HasAdapterInstances {
+		t.Fatal("known LUID reported missing")
+	}
+}

@@ -12,7 +12,13 @@ type gpuSource interface {
 }
 
 func newGPUSource(selector string) (gpuSource, error) {
-	return telemetry.NewWindowsCollector(selector)
+	c, err := telemetry.NewWindowsCollector(selector)
+	if err != nil {
+		// Return an untyped nil: a nil *WindowsCollector in the interface
+		// would pass callers' nil checks and crash on use.
+		return nil, err
+	}
+	return c, nil
 }
 
 func listAdapters() (any, error) {

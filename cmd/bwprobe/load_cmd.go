@@ -17,7 +17,7 @@ func cmdLoad(args []string) error {
 	_ = fs.Parse(args)
 	end := time.Now().Add(*duration)
 	for i := 1; time.Now().Before(end); i++ {
-		r := doChat(*url, "Write a long story about a lighthouse keeper.", *maxTokens, true, 5*time.Minute)
+		r := doChat(*url, "Write a long story about a lighthouse keeper.", *maxTokens, true, 5*time.Minute, nil)
 		fmt.Fprintf(os.Stderr, "request %d: status=%d chunks=%d ttft=%dms total=%dms %s\n", i, r.Status, r.Chunks, r.TTFTms, r.TotalMs, r.Err)
 		if r.Status != 200 {
 			time.Sleep(time.Second)

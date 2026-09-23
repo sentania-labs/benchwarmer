@@ -181,6 +181,8 @@ func cmdSvcRun(args []string) error {
 	o.prompt = "Write a short paragraph about lighthouses."
 	o.loadTimeout, o.settle, o.releaseTolerance = 5*time.Minute, 5*time.Second, 256
 	o.logDir = filepath.Dir(*out)
+	// No console in a service, so no graceful (Ctrl+C) mode.
+	o.modes = []string{modeIdle, modeBusy}
 
 	isSvc, err := svc.IsWindowsService()
 	if err != nil {

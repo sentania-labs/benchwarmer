@@ -32,8 +32,10 @@ jobs:
           if-no-files-found: error
 
   windows:
-    # Real Windows: Job Objects, PDH, DXGI, service APIs. No AMD GPU here, so
-    # GPU values are not meaningful; this proves the Win32 plumbing.
+    # Real Windows: Job Objects, process-tree kill, service APIs, and the
+    # probe's start/serve/stop loop. The runner has no hardware GPU, so the
+    # PDH array parsing and D3DKMT perf data are NOT exercised here; that
+    # evidence comes from the target PC.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -51,12 +53,17 @@ jobs:
       - name: Probe runtime cycles against fake runtime
         shell: pwsh
         run: |
-          .\bwprobe.exe runtime -exe .\fakellama.exe -model x.gguf -args "-spawn-child -tokens 200" -cycles 2 -settle 1s -out rt.jsonl
+          .\bwprobe.exe runtime -exe .\fakellama.exe -model x.gguf -args "-spawn-child -tokens 200" -cycles 2 -modes idle,busy -settle 1s -out rt.jsonl
           .\bwprobe.exe summarize rt.jsonl
           $left = Get-Process fakellama -ErrorAction SilentlyContinue
           if ($left) { Write-Error "leftover fakellama processes: $($left.Id)"; exit 1 }
           $c = Get-Content rt.jsonl | ConvertFrom-Json | Where-Object kind -eq 'cycle'
-          foreach ($x in $c) { if (-not $x.ready -or $x.kill_to_tree_empty_ms -lt 0) { Write-Error "cycle $($x.cycle) failed"; exit 1 } }
+          if (@($c).Count -lt 2) { Write-Error "expected 2 cycle records"; exit 1 }
+          foreach ($x in $c) {
+            if (-not $x.ready -or $x.exited_before_stop -or $x.stop_to_root_exit_ms -lt 0 -or $x.stop_to_tree_empty_ms -lt 0 -or $x.leftover_processes) {
+              Write-Error "cycle $($x.cycle) failed: $($x | ConvertTo-Json -Compress)"; exit 1
+            }
+          }
       - name: Probe telemetry sample
         run: .\bwprobe.exe telemetry -label ci -duration 5s -quiet -out tel.jsonl ; .\bwprobe.exe summarize tel.jsonl
         continue-on-error: true

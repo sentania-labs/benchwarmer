@@ -14,9 +14,40 @@ import (
 )
 
 type platform struct {
-	mu     sync.Mutex
-	job    windows.Handle
-	closed bool
+	mu           sync.Mutex
+	job          windows.Handle
+	closed       bool
+	shareConsole bool
+}
+
+var (
+	modkernel32               = windows.NewLazySystemDLL("kernel32.dll")
+	procSetConsoleCtrlHandler = modkernel32.NewProc("SetConsoleCtrlHandler")
+)
+
+// interrupt sends Ctrl+C to every process on our console. This process
+// ignores Ctrl+C for a moment so only the child reacts.
+func (g *Group) interrupt() error {
+	if !g.plat.shareConsole {
+		return errors.New("procgroup: Interrupt requires Spec.ShareConsole")
+	}
+	select {
+	case <-g.done:
+		return ErrNotRunning
+	default:
+	}
+	if r, _, err := procSetConsoleCtrlHandler.Call(0, 1); r == 0 {
+		return fmt.Errorf("procgroup: SetConsoleCtrlHandler: %w", err)
+	}
+	err := windows.GenerateConsoleCtrlEvent(windows.CTRL_C_EVENT, 0)
+	go func() {
+		time.Sleep(2 * time.Second)
+		procSetConsoleCtrlHandler.Call(0, 0)
+	}()
+	if err != nil {
+		return fmt.Errorf("procgroup: GenerateConsoleCtrlEvent: %w", err)
+	}
+	return nil
 }
 
 func start(spec Spec) (*Group, error) {
@@ -44,13 +75,15 @@ func start(spec Spec) (*Group, error) {
 	cmd.Env = spec.Env
 	cmd.Stdout = spec.Stdout
 	cmd.Stderr = spec.Stderr
-	cmd.SysProcAttr = &windows.SysProcAttr{
-		// Suspended so the process is inside the job before it can run or
-		// spawn anything. No console window, and its own process group so a
-		// console control event aimed at us never reaches it by accident.
-		CreationFlags: windows.CREATE_SUSPENDED | windows.CREATE_NO_WINDOW | windows.CREATE_NEW_PROCESS_GROUP,
-		HideWindow:    true,
+	cmd.WaitDelay = pipeDrainDelay
+	// Suspended so the process is inside the job before it can run or spawn
+	// anything. By default: no console window, and its own process group so a
+	// console control event aimed at us never reaches it by accident.
+	flags := uint32(windows.CREATE_SUSPENDED)
+	if !spec.ShareConsole {
+		flags |= windows.CREATE_NO_WINDOW | windows.CREATE_NEW_PROCESS_GROUP
 	}
+	cmd.SysProcAttr = &windows.SysProcAttr{CreationFlags: flags, HideWindow: !spec.ShareConsole}
 	if err := cmd.Start(); err != nil {
 		_ = windows.CloseHandle(job)
 		return nil, fmt.Errorf("procgroup: start: %w", err)
@@ -79,6 +112,7 @@ func start(spec Spec) (*Group, error) {
 
 	g := &Group{pid: pid, started: time.Now(), done: make(chan struct{})}
 	g.plat.job = job
+	g.plat.shareConsole = spec.ShareConsole
 	go func() { g.setExit(cmd.Wait()) }()
 	return g, nil
 }

@@ -3,6 +3,7 @@
 package signals
 
 import (
+	"errors"
 	"path/filepath"
 	"time"
 	"unsafe"
@@ -26,6 +27,10 @@ var (
 	procGetTickCount64               = modkernel32.NewProc("GetTickCount64")
 )
 
+// ErrSession0 means the caller runs in the services session, where the
+// user's foreground window and input are not observable (ADR 0005).
+var ErrSession0 = errors.New("signals: session signals are not observable from session 0")
+
 type rect struct{ Left, Top, Right, Bottom int32 }
 
 type monitorInfo struct {
@@ -47,6 +52,9 @@ func ReadSessionSignals() (SessionSignals, error) {
 	var sid uint32
 	_ = windows.ProcessIdToSessionId(windows.GetCurrentProcessId(), &sid)
 	s.SessionID = sid
+	if sid == 0 {
+		return s, ErrSession0
+	}
 
 	hwnd, _, _ := procGetForegroundWindow.Call()
 	if hwnd != 0 {

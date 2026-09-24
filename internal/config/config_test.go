@@ -87,12 +87,6 @@ func TestValidationRejectsUnsafeValues(t *testing.T) {
 		{"PEM without key", func(c *Config) {
 			c.Listen.InferenceTLS = TLS{Enabled: true, CertFile: `C:\x\server.crt`}
 		}, "listen.inference_tls.key_file"},
-		{"PFX file", func(c *Config) {
-			c.Listen.InferenceTLS = TLS{Enabled: true, CertFile: `tls\server.pfx`}
-		}, "listen.inference_tls.cert_file"},
-		{"legacy PFX password file", func(c *Config) {
-			c.Listen.InferenceTLS = TLS{Enabled: true, StoreSubject: "ss8510", LegacyPFXPasswordFile: `tls\pfx.pass`}
-		}, "listen.inference_tls.pfx_password_file"},
 		{"file and store together", func(c *Config) {
 			c.Listen.InferenceTLS = TLS{Enabled: true, CertFile: `tls\\a.crt`, KeyFile: `tls\\a.key`, StoreSubject: "ss8510"}
 		}, "listen.inference_tls"},
@@ -289,5 +283,33 @@ func TestLegacyEmptyPFXPasswordFileParses(t *testing.T) {
 	out, _ := Marshal(c)
 	if strings.Contains(string(out), "pfx_password_file") {
 		t.Fatal("empty legacy key written back")
+	}
+}
+
+// A PFX left in a file written by an older version must still load (only
+// the inference listener fails, at run time); saving one is rejected.
+func TestPFXLoadsButCannotBeSaved(t *testing.T) {
+	c := Default()
+	c.Listen.InferenceTLS = TLS{Enabled: true, CertFile: `tls\server.pfx`, LegacyPFXPasswordFile: `tls\pfx.pass`, SelfSignedHosts: []string{}}
+	b, _ := Marshal(c)
+	got, err := Parse(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(got); err != nil {
+		t.Fatalf("old PFX config must load: %v", err)
+	}
+	if err := ValidateChange(got); err == nil || !strings.Contains(err.Error(), "listen.inference_tls.cert_file") {
+		t.Fatalf("saving a PFX config: %v", err)
+	}
+	// A password file left behind after switching to the store is dropped.
+	c.Listen.InferenceTLS = TLS{Enabled: false, LegacyPFXPasswordFile: `tls\pfx.pass`, SelfSignedHosts: []string{}}
+	b, _ = Marshal(c)
+	got, err = Parse(b)
+	if err != nil || got.Listen.InferenceTLS.LegacyPFXPasswordFile != "" {
+		t.Fatalf("leftover password file kept: %v %q", err, got.Listen.InferenceTLS.LegacyPFXPasswordFile)
+	}
+	if err := ValidateChange(got); err != nil {
+		t.Fatal(err)
 	}
 }

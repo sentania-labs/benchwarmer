@@ -111,7 +111,9 @@ the host name, and any names in `self_signed_hosts`. Clients must be given
 
 ## Upgrading from a version that read PFX files
 
-A config with a `.pfx` `cert_file` or a set `pfx_password_file` now fails
-validation, so the service falls back to its last good (or default)
-configuration, and the dashboard and events say why. Import the PFX (step 1) and switch the config to
+A config that still points `cert_file` at a `.pfx` loads, but the inference
+listener stays down with a `tls_certificate_problem` event saying to import
+the PFX; the dashboard and every other setting keep working. Saving a config
+with a `.pfx` `cert_file` is rejected. A leftover `pfx_password_file` is
+dropped. Import the PFX (step 1) and switch the config to
 `store_subject` or `store_thumbprint`.

@@ -21,6 +21,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -240,6 +241,9 @@ func (m *Manager) load() error {
 }
 
 func loadPair(src Source) (*tls.Certificate, error) {
+	if e := strings.ToLower(filepath.Ext(src.CertFile)); e == ".pfx" || e == ".p12" {
+		return nil, fmt.Errorf("tls: %s: PFX files are not read; import it into the LocalMachine\\My certificate store (Import-PfxCertificate) and set store_thumbprint or store_subject", src.CertFile)
+	}
 	cert, err := tls.LoadX509KeyPair(src.CertFile, src.KeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("tls: load %s / %s: %w", src.CertFile, src.KeyFile, err)

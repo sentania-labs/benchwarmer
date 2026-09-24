@@ -124,7 +124,7 @@ func (c *Controller) UpdateConfig(_ context.Context, nc config.Config, actor str
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.d.Now()
-	if err := config.Validate(nc); err != nil {
+	if err := config.ValidateChange(nc); err != nil {
 		c.emit(events.Event{Time: now, Type: events.ConfigRejected, Severity: policy.SeverityNotice,
 			Message: "Configuration change rejected: " + err.Error(), Data: map[string]any{"actor": actor}})
 		return config.Impact{}, err

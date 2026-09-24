@@ -211,3 +211,13 @@ func TestBadRenewalWarnsOnce(t *testing.T) {
 		t.Fatalf("bad renewal reported %d times, want 1", calls)
 	}
 }
+
+// PFX files are no longer read; the error says what to do instead.
+func TestPFXRejectedWithDirections(t *testing.T) {
+	pf := filepath.Join(t.TempDir(), "server.PFX")
+	_ = os.WriteFile(pf, []byte("x"), 0o600)
+	_, err := New(Source{CertFile: pf}, nil)
+	if err == nil || !strings.Contains(err.Error(), "Import-PfxCertificate") {
+		t.Fatalf("got %v", err)
+	}
+}

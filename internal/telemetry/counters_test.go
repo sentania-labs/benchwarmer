@@ -138,3 +138,16 @@ func TestMissingAdapterIsNotIdle(t *testing.T) {
 		t.Fatal("known LUID reported missing")
 	}
 }
+
+func TestImpossibleUtilizationIsDropped(t *testing.T) {
+	rc := fixture()
+	rc.EngineUtil[eng(900, gpu, "5", "Compute_0")] = 3.734e14
+	s := FromCounters(rc, gpu)
+	if s.InvalidReadings != 1 {
+		t.Fatalf("invalid readings %d", s.InvalidReadings)
+	}
+	d := Split(s, map[uint32]bool{100: true})
+	if d.ExternalUtilPct != 45 {
+		t.Fatalf("glitch leaked into external util: %v", d.ExternalUtilPct)
+	}
+}

@@ -75,3 +75,6 @@ func BootTime() (time.Time, error) {
 	}
 	return time.Now().Add(-time.Duration(secs * float64(time.Second))).Truncate(time.Second), nil
 }
+
+// ProcessIdentity is Windows-only.
+func ProcessIdentity(uint32) (string, []string, error) { return "", nil, ErrUnsupported }

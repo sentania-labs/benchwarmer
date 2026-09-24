@@ -135,6 +135,13 @@ func FromCounters(rc RawCounters, luid string) Sample {
 		if !ok || in.LUID != luid {
 			continue
 		}
+		// Observed on the target: a freshly created engine instance can
+		// report absurd values (3.7e14 %). A single engine instance cannot
+		// exceed 100%, so treat such a reading as missing, not saturated.
+		if v < 0 || v > 100.5 || v != v {
+			s.InvalidReadings++
+			continue
+		}
 		key := "phys_" + in.Phys + "_eng_" + in.Eng
 		class := EngineClass(in.EngType)
 		e := engines[key]

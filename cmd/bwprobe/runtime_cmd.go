@@ -83,6 +83,10 @@ type cycleResult struct {
 	StopErr             string   `json:"stop_error,omitempty"`
 	LeftoverProcesses   []string `json:"leftover_processes,omitempty"`
 	StderrTail          string   `json:"stderr_tail,omitempty"`
+	// RuntimeUser and RuntimePrivileges are read from the running process's
+	// token: evidence of the identity it actually ran under.
+	RuntimeUser       string   `json:"runtime_user,omitempty"`
+	RuntimePrivileges []string `json:"runtime_privileges,omitempty"`
 }
 
 type reqResult struct {
@@ -346,6 +350,11 @@ func runCycle(o runtimeOpts, g gpuSource, n int, mode string, w *jsonl) cycleRes
 		}
 	}
 
+	if u, privs, err := signals.ProcessIdentity(uint32(pg.PID())); err == nil {
+		r.RuntimeUser, r.RuntimePrivileges = u, privs
+	} else {
+		r.RuntimeUser = "unknown: " + err.Error()
+	}
 	t0 := time.Now()
 	r.Ready = waitReady(baseURL, o.loadTimeout, pg)
 	r.LoadSeconds = time.Since(t0).Seconds()

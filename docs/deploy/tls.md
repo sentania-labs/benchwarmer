@@ -14,16 +14,23 @@ PFX files are not read; import one into the store instead (below).
 
 ### 1. Get the certificate into LocalMachine\My
 
+Benchwarmer signs through CNG, so the private key must be held by a Key
+Storage Provider (for example *Microsoft Software Key Storage Provider* or
+the *Microsoft Platform Crypto Provider* for TPM keys). A key in a legacy
+CryptoAPI provider (CSP) is refused with an error saying so. Each route
+below produces a KSP key.
+
 Any one of these:
 
 - **Autoenrollment (fleet).** Publish a server-authentication template (for
   example a copy of *Web Server*, subject built from the DNS name, enroll and
-  autoenroll granted to the computers' group) and enable certificate
-  autoenrollment in a computer GPO. Each PC enrolls and renews its own
+  autoenroll granted to the computers' group). On the template's
+  Cryptography tab choose **Key Storage Provider** (Windows Server 2008 or
+  later compatibility). Enable certificate autoenrollment in a computer GPO. Each PC enrolls and renews its own
   certificate.
 - **Request on the PC.** From an elevated PowerShell. The template must allow
-  server authentication and "Supply in the request" for the subject so the
-  SANs are honoured:
+  server authentication, "Supply in the request" for the subject so the SANs
+  are honoured, and a Key Storage Provider:
 
   ```powershell
   @"
@@ -33,6 +40,7 @@ Any one of these:
   KeyLength = 2048
   Exportable = FALSE
   MachineKeySet = TRUE
+  ProviderName = "Microsoft Software Key Storage Provider"
   [Extensions]
   2.5.29.17 = "{text}"
   _continue_ = "dns=ss8510.example.lan&"
@@ -45,15 +53,19 @@ Any one of these:
   certreq -accept -machine cert.cer
   ```
 
-- **Import a PFX** (for example a wildcard certificate issued elsewhere):
+- **Import a PFX** (for example a wildcard certificate issued elsewhere).
+  `certutil` can force the key into a Key Storage Provider, whatever
+  provider the PFX names, and prompts for the password:
 
   ```powershell
-  Import-PfxCertificate -FilePath .\server.pfx -CertStoreLocation Cert:\LocalMachine\My `
-    -Password (Read-Host -AsSecureString 'PFX password')
+  certutil -csp "Microsoft Software Key Storage Provider" -importpfx .\server.pfx NoExport
   ```
 
-  The key is imported non-exportable unless `-Exportable` is given. Delete
-  the PFX afterwards.
+  This imports into `LocalMachine\My` with a non-exportable key.
+  `Import-PfxCertificate -CertStoreLocation Cert:\LocalMachine\My` also
+  works when the PFX came from a CNG key (a PFX exported from a modern
+  Windows machine usually did). If Benchwarmer reports a legacy provider,
+  re-import with `certutil` as above. Delete the PFX afterwards.
 
 List every name clients will use (DNS names and, if needed, IPs) in the
 subject alternative names; clients validate against those, not the CN.

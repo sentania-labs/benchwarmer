@@ -217,7 +217,7 @@ func TestPFXRejectedWithDirections(t *testing.T) {
 	pf := filepath.Join(t.TempDir(), "server.PFX")
 	_ = os.WriteFile(pf, []byte("x"), 0o600)
 	_, err := New(Source{CertFile: pf}, nil)
-	if err == nil || !strings.Contains(err.Error(), "Import-PfxCertificate") {
+	if err == nil || !strings.Contains(err.Error(), "certutil -importpfx") {
 		t.Fatalf("got %v", err)
 	}
 }

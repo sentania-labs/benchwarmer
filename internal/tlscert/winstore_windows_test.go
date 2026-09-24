@@ -85,3 +85,13 @@ func TestStoreCertificateNotFound(t *testing.T) {
 		t.Fatal("expected not found")
 	}
 }
+
+// A certificate whose key sits in a legacy CSP is reported as such, not as
+// missing.
+func TestStoreCertificateLegacyCSPExplained(t *testing.T) {
+	tp := newStoreCert(t, "bw-store-legacy.example.lan", "-KeyAlgorithm RSA -KeyLength 2048 -Provider 'Microsoft Enhanced RSA and AES Cryptographic Provider' -KeySpec KeyExchange")
+	_, err := New(Source{StoreThumbprint: tp}, nil)
+	if err == nil || !strings.Contains(err.Error(), "legacy CryptoAPI provider") {
+		t.Fatalf("got %v", err)
+	}
+}

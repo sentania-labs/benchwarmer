@@ -66,7 +66,7 @@ function network() {
       { path: "listen.inference", label: "Inference (OpenAI-compatible /v1)", help: "The only listener meant for LAN exposure." },
       { path: "listen.management", label: "Management (this UI, /api/v1, /metrics)", help: "Keep on 127.0.0.1 unless you need remote management; remote access always needs the token." },
     ] },
-    { title: "Inference HTTPS", note: "Required when the inference listener is not on loopback. Use a certificate from your CA in the computer's certificate store (LocalMachine\\My, where AD CS enrollment and Import-PfxCertificate put it), or PEM files. Set a store selection or files, not both. Renewals are picked up automatically. Changes here need a service restart.", fields: [
+    { title: "Inference HTTPS", note: "Required when the inference listener is not on loopback. Use a certificate from your CA in the computer's certificate store (LocalMachine\\My, where AD CS enrollment and a PFX import put it; the key must be in a Key Storage Provider), or PEM files. Set a store selection or files, not both. Renewals are picked up automatically. Changes here need a service restart.", fields: [
       { path: "listen.inference_tls.enabled", label: "Serve inference over HTTPS", type: "bool" },
       { path: "listen.inference_tls.store_subject", label: "Certificate store: DNS name or subject", help: "For example ss8510.example.lan. The newest valid certificate for that name with a private key and server authentication is used, so autoenrollment renewals need no change." },
       { path: "listen.inference_tls.store_thumbprint", label: "Certificate store: thumbprint", help: "Pins one certificate (40 hex characters). Use instead of the name; a renewal then needs the new thumbprint." },

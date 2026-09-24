@@ -317,7 +317,7 @@ func ValidateChange(c Config) error {
 }
 
 // PFXHelp explains what to do instead of pointing at a PFX file.
-const PFXHelp = "PFX files are not read: import the PFX into the LocalMachine\\My certificate store (Import-PfxCertificate) and set store_thumbprint or store_subject"
+const PFXHelp = "PFX files are not read: import the PFX into the LocalMachine\\My certificate store (see docs/deploy/tls.md: certutil -importpfx) and set store_thumbprint or store_subject"
 
 func isPFXPath(p string) bool {
 	l := strings.ToLower(p)

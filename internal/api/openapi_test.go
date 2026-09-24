@@ -22,7 +22,7 @@ func TestOpenAPIMatchesWireTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := string(b)
+	doc := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	schemas := map[string]any{
 		"Error": Error{}, "FieldError": config.FieldError{}, "Health": Health{}, "Status": Status{},
 		"ModeStatus": ModeStatus{}, "ProfileStatus": ProfileStatus{}, "RuntimeStatus": RuntimeStatus{},

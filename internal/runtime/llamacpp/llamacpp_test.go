@@ -275,7 +275,9 @@ func TestReconcileKillsOrphanOnly(t *testing.T) {
 	if err := owned.WaitReady(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, func() bool { return len(owned.Members()) == 2 }, "owned child")
+	// On Windows the job also holds the hidden conhost.exe of the console
+	// process, so count at least root plus child.
+	waitFor(t, func() bool { return len(owned.Members()) >= 2 }, "owned child")
 
 	// An orphan: same executable, started outside the adapter.
 	orphan := exec.Command(fakeExe, "-port", "0", "-load-delay", "1h")

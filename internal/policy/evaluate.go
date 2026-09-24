@@ -99,6 +99,12 @@ func Evaluate(s Snapshot, c config.Config) Decision {
 	if d.IdleState == "" {
 		d.IdleState = state.Stopped
 	}
+	// While suppressed, a competing workload that is still present does not
+	// hide the suppression: the idle state stays SUPPRESSED so the UI shows
+	// why reload is blocked and until when.
+	if end := e.suppressEnd(); !end.IsZero() && s.Now.Before(end) && d.IdleState == state.Cooldown {
+		d.IdleState = state.Suppressed
+	}
 	return d
 }
 

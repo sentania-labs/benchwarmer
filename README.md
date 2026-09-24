@@ -23,8 +23,19 @@ stand.
 | `internal/procgroup` | Runtime process-tree ownership (Windows Job Objects) |
 | `internal/telemetry` | GPU telemetry collection and own/external demand split |
 | `internal/signals` | Processes, foreground/fullscreen/idle, sessions |
+| `internal/webui` | Embedded local web UI (dashboard, events, configuration) |
 | `docs/adr` | Architecture decision records |
 | `docs/phase0` | Phase 0 plan, runbook, findings, provisional thresholds |
+
+## Web UI
+
+The management listener (default `http://127.0.0.1:8481/`) serves a small
+dashboard, an events log, and configuration forms. It is plain HTML, CSS, and
+JavaScript embedded in the binary: no build step, no external requests, and a
+strict Content-Security-Policy. Reading status from the PC itself needs no
+token while `security.loopback_trust` is on; any change (mode, drain, reload,
+config) asks once for the management token, which the page keeps only for that
+browser tab. Use "Forget token" to clear it.
 
 ## Development
 

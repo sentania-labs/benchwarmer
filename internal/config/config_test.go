@@ -90,6 +90,12 @@ func TestValidationRejectsUnsafeValues(t *testing.T) {
 		{"PFX with key file", func(c *Config) {
 			c.Listen.InferenceTLS = TLS{Enabled: true, CertFile: `tls\server.pfx`, KeyFile: `tls\server.key`}
 		}, "listen.inference_tls.key_file"},
+		{"file and store together", func(c *Config) {
+			c.Listen.InferenceTLS = TLS{Enabled: true, CertFile: `tls\\a.pfx`, StoreSubject: "ss8510"}
+		}, "listen.inference_tls"},
+		{"bad thumbprint", func(c *Config) {
+			c.Listen.InferenceTLS = TLS{Enabled: true, StoreThumbprint: "abc"}
+		}, "listen.inference_tls.store_thumbprint"},
 		{"wrong schema version", func(c *Config) { c.SchemaVersion = 2 }, "schema_version"},
 		{"backoff max below initial", func(c *Config) { c.Recovery.CrashBackoffMax = Duration(time.Second) }, "recovery.crash_backoff_max"},
 	}

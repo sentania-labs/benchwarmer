@@ -37,7 +37,7 @@ func upgrade(c *Config) {
 	if c.Runtime.RunAs == "" {
 		c.Runtime.RunAs = RunAsLocalService
 	}
-	if c.Listen.InferenceTLS.SelfSignedHosts == nil {
+	if c.Listen.InferenceTLS.SelfSignedHosts == nil { // added with inference_tls
 		c.Listen.InferenceTLS.SelfSignedHosts = []string{}
 	}
 }

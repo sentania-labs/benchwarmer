@@ -286,7 +286,8 @@ func (s *Service) tlsManager(t config.TLS) (*tlscert.Manager, error) {
 		return secrets.Resolve(s.o.DataDir, p)
 	}
 	src := tlscert.Source{CertFile: res(t.CertFile), KeyFile: res(t.KeyFile), PFXPasswordFile: res(t.PFXPasswordFile),
-		SelfSigned: t.SelfSigned, Hosts: t.SelfSignedHosts, Dir: filepath.Join(s.o.DataDir, "tls")}
+		SelfSigned: t.SelfSigned, Hosts: t.SelfSignedHosts, Dir: filepath.Join(s.o.DataDir, "tls"),
+		StoreThumbprint: t.StoreThumbprint, StoreSubject: t.StoreSubject}
 	m, err := tlscert.New(src, func(i tlscert.Info, err error) {
 		if err != nil {
 			s.sink.Emit(events.Event{Time: time.Now(), Type: events.TLSCertificateProblem, Severity: policy.SeverityWarning,

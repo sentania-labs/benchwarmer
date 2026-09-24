@@ -200,6 +200,9 @@ func validateRuntime(v *validator, r Runtime) {
 	}
 	v.intRange("runtime.context_size", r.ContextSize, 256, 1<<20)
 	v.intRange("runtime.gpu_layers", r.GPULayers, 0, 9999)
+	if r.RunAs != RunAsLocalService && r.RunAs != RunAsService {
+		v.add("runtime.run_as", "must be %q or %q (got %q)", RunAsLocalService, RunAsService, r.RunAs)
+	}
 	if ip := net.ParseIP(r.Host); ip == nil || !ip.IsLoopback() {
 		v.add("runtime.host", "must be a loopback address; the runtime must not be reachable from other machines (got %q)", r.Host)
 	}

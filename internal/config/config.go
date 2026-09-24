@@ -3,6 +3,12 @@
 // atomic persistence with a last-known-good copy (ADR 0008).
 package config
 
+// Runtime identities.
+const (
+	RunAsLocalService = "localservice"
+	RunAsService      = "service"
+)
+
 // SchemaVersion is the current configuration schema version.
 const SchemaVersion = 1
 
@@ -46,6 +52,11 @@ type Runtime struct {
 	Args        []string `json:"args"`
 	ContextSize int      `json:"context_size"`
 	GPULayers   int      `json:"gpu_layers"`
+	// RunAs is the runtime's identity: RunAsLocalService (default) starts
+	// llama-server as NT AUTHORITY\LocalService with no privileges, so a
+	// flaw in the runtime cannot act with the service's LocalSystem rights;
+	// RunAsService runs it under the service's own account (ADR 0006).
+	RunAs string `json:"run_as"`
 	// Host and Port are the private loopback listener for the runtime.
 	Host string `json:"host"`
 	Port int    `json:"port"`

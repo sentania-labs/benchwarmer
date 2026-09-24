@@ -137,6 +137,7 @@ func (a *Adapter) Start(ctx context.Context, cfg config.Runtime) (runtime.Instan
 		Dir:    filepath.Dir(cfg.Executable),
 		Stdout: i.out,
 		Stderr: i.out,
+		RunAs:  runAs(cfg.RunAs),
 	})
 	if err != nil {
 		return nil, err
@@ -336,4 +337,12 @@ func (i *Instance) Stop(timeout time.Duration) (runtime.StopResult, error) {
 	i.stopped, i.stopRes = true, res
 	i.a.release(i)
 	return res, nil
+}
+
+// runAs maps the config value onto procgroup's identity switch.
+func runAs(v string) string {
+	if v == config.RunAsLocalService {
+		return procgroup.RunAsLocalService
+	}
+	return ""
 }

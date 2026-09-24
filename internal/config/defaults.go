@@ -19,6 +19,7 @@ func Default() Config {
 			Args:                    []string{},
 			ContextSize:             8192,
 			GPULayers:               999,
+			RunAs:                   RunAsLocalService,
 			Host:                    "127.0.0.1",
 			Port:                    18481,
 			LoadTimeout:             d(180 * time.Second),

@@ -881,6 +881,10 @@ components:
           description: Extra llama-server arguments. Secret values are redacted on read.
         context_size: { type: integer }
         gpu_layers: { type: integer }
+        run_as:
+          type: string
+          enum: [localservice, service]
+          description: Runtime identity. localservice runs llama-server as NT AUTHORITY\LocalService with no privileges; service runs it as the service account.
         host: { type: string, description: Must be a loopback address. }
         port: { type: integer }
         load_timeout: { $ref: "#/components/schemas/Duration" }

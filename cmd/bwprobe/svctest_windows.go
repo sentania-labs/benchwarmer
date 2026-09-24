@@ -32,6 +32,7 @@ func cmdSvcTest(args []string) error {
 	cycles := fs.Int("cycles", 2, "runtime cycles to run inside the service")
 	perfmon := fs.Bool("perfmon-group", false, "add the virtual account to Performance Monitor Users for this run")
 	timeout := fs.Duration("timeout", 15*time.Minute, "max time to wait for the service run")
+	runtimeAs := fs.String("runtime-as", "", "runtime identity inside the service: empty or localservice")
 	_ = fs.Parse(args)
 	if *exe == "" || *model == "" {
 		return errors.New("-exe and -model are required")
@@ -74,6 +75,9 @@ func cmdSvcTest(args []string) error {
 	}
 
 	label := "svc-" + *account
+	if *runtimeAs != "" {
+		label += "-runtime-" + *runtimeAs
+	}
 	if *perfmon {
 		label += "-perfmon"
 	}
@@ -82,7 +86,7 @@ func cmdSvcTest(args []string) error {
 		DisplayName:      "Benchwarmer Phase 0 probe (temporary)",
 		StartType:        mgr.StartManual,
 		ServiceStartName: startName,
-	}, "svcrun", "-exe", *exe, "-model", *model, "-args", *extra, "-out", resultFile, "-cycles", fmt.Sprint(*cycles))
+	}, "svcrun", "-exe", *exe, "-model", *model, "-args", *extra, "-out", resultFile, "-cycles", fmt.Sprint(*cycles), "-runtime-as", *runtimeAs)
 	if err != nil {
 		return fmt.Errorf("create service: %w", err)
 	}
@@ -176,6 +180,7 @@ func cmdSvcRun(args []string) error {
 	fs.StringVar(&o.extra, "args", "", "")
 	out := fs.String("out", "", "")
 	fs.IntVar(&o.cycles, "cycles", 2, "")
+	fs.StringVar(&o.runAs, "runtime-as", "", "")
 	_ = fs.Parse(args)
 	o.host, o.port, o.maxTokens = "127.0.0.1", 18081, 64
 	o.prompt = "Write a short paragraph about lighthouses."

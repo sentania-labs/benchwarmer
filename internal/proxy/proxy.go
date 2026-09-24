@@ -101,19 +101,21 @@ func New(o Options) http.Handler {
 				if errors.Is(context.Cause(ctx), errMaxDuration) {
 					outcome = "timeout"
 				}
-				o.Gate.release(t)
+				// Only metadata: never the path's query, body, or headers.
+				o.Log.Info("inference request cut", "request_id", t.ID, "outcome", outcome, "duration_ms", d.Milliseconds())
 				if o.Observer != nil {
 					o.Observer.RequestFinished(t.ID, d, outcome)
 				}
-				// Only metadata: never the path's query, body, or headers.
-				o.Log.Info("inference request cut", "request_id", t.ID, "outcome", outcome, "duration_ms", d.Milliseconds())
+				// Release last: it signals the controller that the request
+				// is fully accounted for.
+				o.Gate.release(t)
 				panic(rec)
 			}
-			o.Gate.release(t)
+			o.Log.Debug("inference request", "request_id", t.ID, "method", r.Method, "path", r.URL.Path, "outcome", outcome, "duration_ms", d.Milliseconds())
 			if o.Observer != nil {
 				o.Observer.RequestFinished(t.ID, d, outcome)
 			}
-			o.Log.Debug("inference request", "request_id", t.ID, "method", r.Method, "path", r.URL.Path, "outcome", outcome, "duration_ms", d.Milliseconds())
+			o.Gate.release(t)
 		}()
 		if o.MaxDuration != nil {
 			if max := o.MaxDuration(); max > 0 {

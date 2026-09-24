@@ -25,6 +25,7 @@ import (
 	"github.com/sentania-labs/benchwarmer/internal/logfile"
 	"github.com/sentania-labs/benchwarmer/internal/service"
 	"github.com/sentania-labs/benchwarmer/internal/version"
+	"github.com/sentania-labs/benchwarmer/internal/webui"
 	"github.com/sentania-labs/benchwarmer/internal/winsvc"
 )
 
@@ -80,7 +81,7 @@ func cmdRun(args []string) error {
 	log := slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: level(cfg.Logging.Level)}))
 	slog.SetDefault(log)
 
-	svc, err := service.New(service.Options{DataDir: *data, SimulateGPU: *sim, SimControl: *simCtl, Log: log})
+	svc, err := service.New(service.Options{DataDir: *data, SimulateGPU: *sim, SimControl: *simCtl, Log: log, UI: webui.Handler()})
 	if err != nil {
 		return err
 	}

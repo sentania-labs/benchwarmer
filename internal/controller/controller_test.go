@@ -469,9 +469,11 @@ func TestHardContentionBeatsGrace(t *testing.T) {
 	if res := <-s.done; res.sawDone {
 		t.Fatal("request should have been cut by hard contention")
 	}
-	e, _ := r.ev.find(events.Preempted)
-	if e.Rule != policy.RuleCriticalVRAMExt {
-		t.Fatalf("preempted by %q", e.Rule)
+	e, ok := r.ev.find(events.Preempted)
+	if !ok || e.Rule != policy.RuleCriticalVRAMExt {
+		// Reported once as flaky by another worker; not reproduced in 300+
+		// runs. Print the full trail if it recurs.
+		t.Fatalf("preempted event found=%v rule=%q; events %v", ok, e.Rule, r.ev.types())
 	}
 }
 

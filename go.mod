@@ -4,6 +4,7 @@ go 1.26.6
 
 require (
 	fyne.io/systray v1.12.2
+	github.com/prometheus/client_golang v1.24.1
 	golang.org/x/sys v0.48.0
 	modernc.org/sqlite v1.59.0
 )
@@ -11,10 +12,16 @@ require (
 require (
 	github.com/BurntSushi/toml v1.4.1-0.20240526193622-a339e1f7089c // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
+	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/prometheus/client_model v0.6.2 // indirect
+	github.com/prometheus/common v0.70.1 // indirect
+	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/exp/typeparams v0.0.0-20231108232855-2478ac86f678 // indirect
 	golang.org/x/mod v0.41.0 // indirect
@@ -22,6 +29,7 @@ require (
 	golang.org/x/telemetry v0.0.0-20260908163034-4bcc4b2ee518 // indirect
 	golang.org/x/tools v0.50.0 // indirect
 	golang.org/x/vuln v1.8.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	honnef.co/go/tools v0.8.1 // indirect
 	modernc.org/libc v1.75.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

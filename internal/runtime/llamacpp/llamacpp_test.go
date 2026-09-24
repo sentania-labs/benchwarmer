@@ -392,3 +392,31 @@ func TestTailBounded(t *testing.T) {
 		t.Fatalf("oversized write without newline should yield empty tail, got %d bytes", len(s))
 	}
 }
+
+func TestGracefulStopAndKillFallback(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("Ctrl+C on a CI console would reach the test runner too; graceful stop on Windows is verified on the target")
+	}
+	cfg := testConfig(t, "-load-delay", "50ms")
+	cfg.StopMode, cfg.GracefulStopTimeout = config.StopGraceful, config.Duration(2*time.Second)
+	i := start(t, New(), cfg)
+	if err := i.WaitReady(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	res, err := i.Stop(5 * time.Second)
+	if err != nil || !res.Graceful || res.KillFallback {
+		t.Fatalf("graceful stop: %+v %v", res, err)
+	}
+
+	cfg = testConfig(t, "-load-delay", "50ms", "-ignore-interrupt")
+	cfg.StopMode, cfg.GracefulStopTimeout = config.StopGraceful, config.Duration(time.Second)
+	i = start(t, New(), cfg)
+	if err := i.WaitReady(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Now()
+	res, err = i.Stop(5 * time.Second)
+	if err != nil || res.Graceful || !res.KillFallback || time.Since(t0) < time.Second {
+		t.Fatalf("fallback: %+v %v after %s", res, err, time.Since(t0))
+	}
+}

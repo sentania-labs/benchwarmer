@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // Parse decodes and validates a config document. Unknown fields are
@@ -36,6 +37,12 @@ func Parse(b []byte) (Config, error) {
 func upgrade(c *Config) {
 	if c.Runtime.RunAs == "" {
 		c.Runtime.RunAs = RunAsLocalService
+	}
+	if c.Runtime.StopMode == "" {
+		c.Runtime.StopMode = StopGraceful
+	}
+	if c.Runtime.GracefulStopTimeout == 0 {
+		c.Runtime.GracefulStopTimeout = Duration(10 * time.Second)
 	}
 	if c.Listen.InferenceTLS.SelfSignedHosts == nil { // added with inference_tls
 		c.Listen.InferenceTLS.SelfSignedHosts = []string{}

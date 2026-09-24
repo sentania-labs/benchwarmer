@@ -397,7 +397,12 @@ func (c *Controller) onStopped(now time.Time, r stopResult) {
 	}
 	c.emit(events.Event{Time: now, Type: events.RuntimeStopped, RuntimePID: pid, Rule: y.Rule,
 		Message: "Runtime process tree terminated and verified empty",
-		Data:    map[string]any{"root_exit_ms": r.res.RootExit.Milliseconds(), "tree_empty_ms": r.res.TreeEmpty.Milliseconds(), "already_exited": r.res.AlreadyExited}})
+		Data: map[string]any{"root_exit_ms": r.res.RootExit.Milliseconds(), "tree_empty_ms": r.res.TreeEmpty.Milliseconds(),
+			"already_exited": r.res.AlreadyExited, "graceful": r.res.Graceful, "kill_fallback": r.res.KillFallback}})
+	if r.res.KillFallback {
+		c.emit(events.Event{Time: now, Type: events.KillFailed, Severity: policy.SeverityWarning, RuntimePID: pid,
+			Message: "Runtime did not exit on Ctrl+C within the graceful timeout; it was hard-killed (risk of a GPU driver hang on this PC)"})
+	}
 	c.vram.active, c.vram.since = true, now
 	if y.CountsAsPreemption {
 		c.timers.Preemptions = append(pruneTimes(c.timers.Preemptions, now, c.cfg.AntiThrash.Window.D()), now)

@@ -887,6 +887,11 @@ components:
           description: Runtime identity. localservice runs llama-server as NT AUTHORITY\LocalService with no privileges; service runs it as the service account.
         host: { type: string, description: Must be a loopback address. }
         port: { type: integer }
+        stop_mode:
+          type: string
+          enum: [graceful, kill]
+          description: graceful sends Ctrl+C and hard-kills only after graceful_stop_timeout; kill always hard-kills.
+        graceful_stop_timeout: { $ref: "#/components/schemas/Duration" }
         load_timeout: { $ref: "#/components/schemas/Duration" }
         required_free_vram_mib: { type: integer }
         kill_verify_timeout: { $ref: "#/components/schemas/Duration" }

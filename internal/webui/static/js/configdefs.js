@@ -46,6 +46,9 @@ function runtime() {
       { path: "runtime.port", label: "Port", type: "int", min: 1, max: 65535 },
     ] },
     { title: "Process handling", note: "These apply live without a reload.", fields: [
+      { path: "runtime.stop_mode", label: "How to stop the runtime", type: "select", options: [["graceful", "Graceful (Ctrl+C, kill only if it hangs)"], ["kill", "Hard kill"]],
+        help: "Graceful is strongly recommended: on AMD hardware a hard kill of a long-running runtime can hang the GPU driver." },
+      { path: "runtime.graceful_stop_timeout", label: "Graceful stop timeout", type: D, help: "How long to wait after Ctrl+C before a hard kill." },
       { path: "runtime.load_timeout", label: "Load timeout", type: D, help: "How long a model load may take before it counts as failed." },
       { path: "runtime.required_free_vram_mib", label: "Required free VRAM before loading", type: "int", unit: "MiB" },
       { path: "runtime.kill_verify_timeout", label: "Kill verify timeout", type: D, help: "How long to wait for the process tree to exit after termination." },

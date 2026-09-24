@@ -3,6 +3,12 @@
 // atomic persistence with a last-known-good copy (ADR 0008).
 package config
 
+// Runtime stop modes.
+const (
+	StopGraceful = "graceful"
+	StopKill     = "kill"
+)
+
 // Runtime identities.
 const (
 	RunAsLocalService = "localservice"
@@ -60,6 +66,13 @@ type Runtime struct {
 	// Host and Port are the private loopback listener for the runtime.
 	Host string `json:"host"`
 	Port int    `json:"port"`
+
+	// StopMode is StopGraceful (default: Ctrl+C, then a hard kill only if
+	// the runtime has not exited within GracefulStopTimeout) or StopKill.
+	// On the target PC a hard kill of a long-running runtime wedged the AMD
+	// driver (blue screen 0x116); a graceful exit did not (ADR 0002).
+	StopMode            string   `json:"stop_mode"`
+	GracefulStopTimeout Duration `json:"graceful_stop_timeout"`
 
 	LoadTimeout             Duration `json:"load_timeout"`
 	RequiredFreeVRAMMiB     int      `json:"required_free_vram_mib"`

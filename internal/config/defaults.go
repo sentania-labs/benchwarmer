@@ -20,6 +20,8 @@ func Default() Config {
 			ContextSize:             8192,
 			GPULayers:               999,
 			RunAs:                   RunAsLocalService,
+			StopMode:                StopGraceful,
+			GracefulStopTimeout:     d(10 * time.Second),
 			Host:                    "127.0.0.1",
 			Port:                    18481,
 			LoadTimeout:             d(180 * time.Second),

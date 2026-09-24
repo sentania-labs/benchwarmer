@@ -200,6 +200,10 @@ func validateRuntime(v *validator, r Runtime) {
 	}
 	v.intRange("runtime.context_size", r.ContextSize, 256, 1<<20)
 	v.intRange("runtime.gpu_layers", r.GPULayers, 0, 9999)
+	if r.StopMode != StopGraceful && r.StopMode != StopKill {
+		v.add("runtime.stop_mode", "must be %q or %q (got %q)", StopGraceful, StopKill, r.StopMode)
+	}
+	v.durRange("runtime.graceful_stop_timeout", r.GracefulStopTimeout, time.Second, 2*time.Minute)
 	if r.RunAs != RunAsLocalService && r.RunAs != RunAsService {
 		v.add("runtime.run_as", "must be %q or %q (got %q)", RunAsLocalService, RunAsService, r.RunAs)
 	}

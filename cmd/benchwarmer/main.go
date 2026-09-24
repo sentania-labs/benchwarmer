@@ -23,6 +23,7 @@ import (
 
 	"github.com/sentania-labs/benchwarmer/internal/config"
 	"github.com/sentania-labs/benchwarmer/internal/logfile"
+	"github.com/sentania-labs/benchwarmer/internal/procgroup"
 	"github.com/sentania-labs/benchwarmer/internal/service"
 	"github.com/sentania-labs/benchwarmer/internal/version"
 	"github.com/sentania-labs/benchwarmer/internal/webui"
@@ -81,6 +82,13 @@ func cmdRun(args []string) error {
 	log := slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: level(cfg.Logging.Level)}))
 	slog.SetDefault(log)
 
+	if *asService {
+		// A service has no console; give it one so the runtime can be
+		// stopped with Ctrl+C rather than killed (ADR 0002).
+		if err := procgroup.EnsureConsole(); err != nil {
+			log.Warn("no console for graceful runtime stop; runtime stops will hard-kill", "err", err)
+		}
+	}
 	svc, err := service.New(service.Options{DataDir: *data, SimulateGPU: *sim, SimControl: *simCtl, Log: log, UI: webui.Handler()})
 	if err != nil {
 		return err

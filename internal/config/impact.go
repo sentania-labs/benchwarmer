@@ -25,6 +25,7 @@ var liveRuntimeFields = map[string]bool{
 	"load_timeout": true, "required_free_vram_mib": true, "kill_verify_timeout": true,
 	"vram_release_timeout": true, "vram_release_tolerance_mib": true,
 	"max_request_duration": true, "diagnostics_tail_bytes": true,
+	"stop_mode": true, "graceful_stop_timeout": true,
 }
 
 // Classify compares two configs.

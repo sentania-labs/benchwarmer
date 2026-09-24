@@ -138,11 +138,16 @@ func (a *Adapter) Start(ctx context.Context, cfg config.Runtime) (runtime.Instan
 		Stdout: i.out,
 		Stderr: i.out,
 		RunAs:  runAs(cfg.RunAs),
+		// Graceful stop needs the child on this process's console (Ctrl+C).
+		ShareConsole: cfg.StopMode == config.StopGraceful && procgroup.HasConsole(),
 	})
 	if err != nil {
 		return nil, err
 	}
 	i.g = g
+	if cfg.StopMode == config.StopGraceful && procgroup.HasConsole() {
+		i.graceful = cfg.GracefulStopTimeout.D()
+	}
 	a.mu.Lock()
 	a.owned[i] = struct{}{}
 	a.mu.Unlock()
@@ -183,6 +188,10 @@ type Instance struct {
 	out     *tail
 	secrets []string
 	client  *http.Client
+
+	// graceful is how long Stop waits after Ctrl+C before a hard kill;
+	// zero means hard kill only.
+	graceful time.Duration
 
 	stopMu  sync.Mutex
 	stopped bool
@@ -305,8 +314,23 @@ func (i *Instance) Stop(timeout time.Duration) (runtime.StopResult, error) {
 	default:
 	}
 	t0 := time.Now()
-	if err := i.g.Kill(); err != nil && !errors.Is(err, procgroup.ErrNotRunning) {
-		return res, err
+	if !res.AlreadyExited && i.graceful > 0 {
+		// Ctrl+C first: llama-server then releases its GPU device itself.
+		// A hard kill of a long-running runtime wedged the AMD driver on
+		// the target (ADR 0002).
+		if err := i.g.Interrupt(); err == nil {
+			select {
+			case <-i.g.Done():
+				res.Graceful = true
+			case <-time.After(i.graceful):
+			}
+		}
+	}
+	if !res.Graceful {
+		res.KillFallback = !res.AlreadyExited && i.graceful > 0
+		if err := i.g.Kill(); err != nil && !errors.Is(err, procgroup.ErrNotRunning) {
+			return res, err
+		}
 	}
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()

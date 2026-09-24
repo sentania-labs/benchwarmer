@@ -152,6 +152,7 @@ export function pct(n) {
 // titleize turns "school-hours" or "school_hours" into "School hours".
 export function titleize(s) {
   s = String(s || "").replace(/[-_]+/g, " ").trim();
+  s = s.replace(/\bai\b/gi, "AI");
   return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
 

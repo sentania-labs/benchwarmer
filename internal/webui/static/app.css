@@ -170,6 +170,7 @@ textarea.json { min-height: 420px; white-space: pre; overflow-wrap: normal; }
 input[type=checkbox], input[type=radio] { width: 18px; height: 18px; accent-color: var(--accent); }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .field.check { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+.field.check label { flex: 1; min-width: 0; }
 .field.check .help, .field.check .field-error { flex-basis: 100%; }
 .field.inline { flex-direction: row; align-items: center; gap: 8px; }
 .field.inline select { width: auto; }
@@ -210,7 +211,7 @@ ol.events { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 
 .event summary time { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 7.5em; }
 .event .etype { font-weight: 700; }
 .event .change { font-family: ui-monospace, Consolas, monospace; font-size: 0.88em; }
-.event .rule { color: var(--muted); }
+.event .erule { color: var(--muted); }
 .event .msg { flex-basis: 100%; }
 .event-body { padding: 0 12px 12px; }
 
@@ -247,7 +248,12 @@ dialog form { display: grid; gap: 8px; }
 dialog h2 { margin: 0; }
 dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 
+/* Tables scroll inside their card rather than breaking words mid-token. */
+th, td { overflow-wrap: normal; word-break: normal; }
+.meters > .meter:last-child { grid-column: 1 / -1; }
+
 @media (max-width: 520px) {
+  .topbar nav { flex-basis: 100%; }
   .badge { font-size: 1.3rem; padding: 8px 14px; }
   dl.kv { grid-template-columns: 1fr; gap: 0; }
   dl.kv dd { margin-bottom: 6px; }

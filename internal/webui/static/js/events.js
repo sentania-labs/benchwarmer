@@ -124,7 +124,7 @@ function row(e, now) {
         h("time", { datetime: e.time }, t ? clockTime(t, now, { seconds: true }) : ""),
         h("span", { class: "etype" }, titleize(e.type)),
         change && h("span", { class: "change" }, change),
-        e.rule && h("code", { class: "rule" }, e.rule),
+        e.rule && h("code", { class: "erule" }, e.rule),
         h("span", { class: "msg" }, e.message || "")),
       h("div", { class: "event-body" }, details)));
 }

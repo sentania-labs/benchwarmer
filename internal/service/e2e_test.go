@@ -90,6 +90,9 @@ func TestEndToEndLifecycle(t *testing.T) {
 	c.Runtime.Executable, c.Runtime.ModelPath = fake, model
 	c.Runtime.Args = []string{"-token-delay", "30ms", "-tokens", "120"}
 	c.Runtime.Port = freePort(t)
+	// The test process is not LocalSystem, so it cannot log on LocalService
+	// (the production default); run the fake runtime as the test's account.
+	c.Runtime.RunAs = config.RunAsService
 	inf, mgmt := freePort(t), freePort(t)
 	c.Listen.Inference = "127.0.0.1:" + strconv.Itoa(inf)
 	c.Listen.Management = "127.0.0.1:" + strconv.Itoa(mgmt)

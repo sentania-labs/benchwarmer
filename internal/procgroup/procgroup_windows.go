@@ -94,7 +94,8 @@ func start(spec Spec) (*Group, error) {
 		tok, err := localServiceToken()
 		if err != nil {
 			_ = windows.CloseHandle(job)
-			return nil, fmt.Errorf("procgroup: LocalService token: %w", err)
+			// Never fall back to launching with this process's own rights.
+			return nil, fmt.Errorf("procgroup: cannot start the runtime as LocalService (the service must run as LocalSystem; set runtime.run_as to \"service\" only for development): %w", err)
 		}
 		// The token is only needed for process creation.
 		defer tok.Close()

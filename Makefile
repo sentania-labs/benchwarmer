@@ -8,8 +8,9 @@ LDFLAGS  := -s -w -X github.com/sentania-labs/benchwarmer/internal/version.Versi
 
 all: check
 
+# Only this module's packages (not agent worktrees or other nested checkouts).
 fmt-check:
-	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+	@out=$$(gofmt -l $$($(GO) list -f '{{.Dir}}' ./...)); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 
 vet:
 	$(GO) vet ./...
@@ -38,6 +39,7 @@ windows:
 	mkdir -p $(DIST)
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/bwprobe.exe ./cmd/bwprobe
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/fakellama.exe ./cmd/fakellama
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS) -H windowsgui" -o $(DIST)/bwtray.exe ./cmd/bwtray
 
 check: lint test-race vuln windows
 

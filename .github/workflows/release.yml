@@ -1,0 +1,55 @@
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Refuse a bad tag
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad tag $GITHUB_REF_NAME"; exit 1; }
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag is not on main"; exit 1; }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Check
+        run: make check VERSION="$GITHUB_REF_NAME"
+      - name: Package
+        run: |
+          set -euo pipefail
+          V="$GITHUB_REF_NAME"
+          OUT="benchwarmer-$V-windows-amd64"
+          mkdir -p "$OUT"
+          L="-s -w -X github.com/sentania-labs/benchwarmer/internal/version.Version=$V"
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$L" -o "$OUT/benchwarmer.exe" ./cmd/benchwarmer
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$L -H windowsgui" -o "$OUT/bwtray.exe" ./cmd/bwtray
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$L" -o "$OUT/bwprobe.exe" ./cmd/bwprobe
+          go run ./cmd/benchwarmer config default > "$OUT/config.example.json"
+          cp installer/install.ps1 installer/uninstall.ps1 "$OUT/"
+          echo "$V" > "$OUT/VERSION"
+          (cd "$OUT" && sha256sum * > SHA256SUMS)
+          zip -r "$OUT.zip" "$OUT"
+      - name: Publish (idempotent per tag)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="$GITHUB_REF_NAME"
+          if gh release view "$V" >/dev/null 2>&1; then
+            gh release upload "$V" "benchwarmer-$V-windows-amd64.zip" --clobber
+          else
+            gh release create "$V" "benchwarmer-$V-windows-amd64.zip" --title "$V" --notes "Windows build of $V. Install: unzip, then run install.ps1 from an elevated PowerShell."
+          fi

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The Unix implementation reads /proc and exists for development only.
@@ -54,3 +55,23 @@ func ReadSessionSignals() (SessionSignals, error) { return SessionSignals{}, Err
 
 // Sessions is Windows-only.
 func Sessions() ([]Session, error) { return nil, ErrUnsupported }
+
+// WorkstationLocked is Windows-only; it reports false elsewhere.
+func WorkstationLocked() bool { return false }
+
+// BootTime returns when the system booted, from /proc/uptime.
+func BootTime() (time.Time, error) {
+	b, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		return time.Time{}, err
+	}
+	f := strings.Fields(string(b))
+	if len(f) == 0 {
+		return time.Time{}, errors.New("empty /proc/uptime")
+	}
+	secs, err := strconv.ParseFloat(f[0], 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Now().Add(-time.Duration(secs * float64(time.Second))).Truncate(time.Second), nil
+}

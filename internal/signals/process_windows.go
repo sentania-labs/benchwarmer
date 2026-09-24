@@ -102,3 +102,9 @@ func wtsState(s uint32) string {
 	}
 	return "unknown"
 }
+
+// BootTime returns when the system booted (to the second).
+func BootTime() (time.Time, error) {
+	ms, _, _ := procGetTickCount64.Call()
+	return time.Now().Add(-time.Duration(ms) * time.Millisecond).Truncate(time.Second), nil
+}

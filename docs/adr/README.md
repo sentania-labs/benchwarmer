@@ -10,6 +10,7 @@
 | [0006](0006-service-identity.md) | Service identity | Provisional |
 | [0007](0007-authentication.md) | Authentication | Accepted |
 | [0008](0008-persistence.md) | Persistence | Accepted |
+| [0009](0009-installer.md) | Installer and packaging | Accepted |
 
 Format: context, decision, consequences. "Provisional" means the decision
 stands unless the Phase 0 measurement named in it contradicts it.

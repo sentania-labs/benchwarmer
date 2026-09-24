@@ -910,6 +910,8 @@ components:
         cert_file: { type: string, description: PEM chain (leaf first) or .pfx/.p12. Relative paths are in the data directory. }
         key_file: { type: string, description: PEM private key; empty for PFX. }
         pfx_password_file: { type: string, description: File containing the PFX password. }
+        store_thumbprint: { type: string, description: Hex SHA-1 thumbprint of a certificate in the Windows LocalMachine\My store. }
+        store_subject: { type: string, description: Subject or DNS name to match in LocalMachine\My; the newest valid match with a private key is used. }
         self_signed: { type: boolean }
         self_signed_hosts: { type: array, items: { type: string } }
     TelemetryConfig:

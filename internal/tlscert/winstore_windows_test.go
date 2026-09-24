@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -17,14 +18,20 @@ import (
 // returns its thumbprint. Needs an elevated process (true on CI runners).
 func newStoreCert(t *testing.T, dns, keyArgs string) string {
 	t.Helper()
-	ps := `$c = New-SelfSignedCertificate -DnsName '` + dns + `' -CertStoreLocation Cert:\LocalMachine\My -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddDays(2) ` + keyArgs + `; $c.Thumbprint`
-	out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).CombinedOutput()
-	if err != nil {
-		t.Skipf("cannot create a LocalMachine certificate (not elevated?): %v %s", err, out)
-	}
+	ps := `$ErrorActionPreference = 'Stop'; Import-Module Microsoft.PowerShell.Security, PKI; $c = New-SelfSignedCertificate -DnsName '` + dns + `' -CertStoreLocation Cert:\LocalMachine\My -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddDays(2) ` + keyArgs + `; $c.Thumbprint`
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", ps)
+	// A PowerShell 7 module path inherited from the runner hides the
+	// Windows PowerShell PKI module and the Cert: drive.
+	cmd.Env = append(os.Environ(), "PSModulePath=")
+	out, err := cmd.CombinedOutput()
 	tp := strings.TrimSpace(string(out))
+	if err != nil || len(tp) != 40 {
+		t.Fatalf("could not create a LocalMachine certificate: %v %s", err, out)
+	}
 	t.Cleanup(func() {
-		_ = exec.Command("powershell", "-NoProfile", "-Command", `Remove-Item Cert:\LocalMachine\My\`+tp+` -DeleteKey`).Run()
+		c := exec.Command("powershell", "-NoProfile", "-Command", `Import-Module Microsoft.PowerShell.Security; Remove-Item Cert:\LocalMachine\My\`+tp+` -DeleteKey`)
+		c.Env = append(os.Environ(), "PSModulePath=")
+		_ = c.Run()
 	})
 	return tp
 }

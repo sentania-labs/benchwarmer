@@ -16,8 +16,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/sentania-labs/benchwarmer/internal/gpureset"
 	"github.com/sentania-labs/benchwarmer/internal/procgroup"
 	"github.com/sentania-labs/benchwarmer/internal/signals"
 	"github.com/sentania-labs/benchwarmer/internal/telemetry"
@@ -159,17 +161,60 @@ func runCycles(o runtimeOpts, w *jsonl) error {
 	}
 	w.write(eventRecord{Kind: "start", Label: "runtime", Time: time.Now(), Data: map[string]any{
 		"exe": o.exe, "model": filepath.Base(o.model), "args": o.extra, "cycles": o.cycles, "modes": o.modes}})
-	for i := 1; i <= o.cycles; i++ {
+	// Tripwire: on the first GPU driver reset, kill the runtime and stop
+	// the whole run. On the target a second hang a minute after the first
+	// escalated to a blue screen.
+	stopWatch := make(chan struct{})
+	defer close(stopWatch)
+	go func() {
+		watcher := gpureset.New(gpureset.DefaultDirs())
+		t := time.NewTicker(500 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-stopWatch:
+				return
+			case <-t.C:
+			}
+			if resets := watcher.Poll(); len(resets) > 0 {
+				tripped.Store(true)
+				killCurrent()
+				w.write(map[string]any{"kind": "gpu_reset", "time": time.Now(), "resets": resets})
+				fmt.Fprintf(os.Stderr, "GPU driver reset detected (%v); runtime killed, run aborted\n", resets)
+				return
+			}
+		}
+	}()
+	for i := 1; i <= o.cycles && !tripped.Load(); i++ {
 		mode := o.modes[(i-1)%len(o.modes)]
 		r := runCycle(o, g, i, mode, w)
 		w.write(r)
 		fmt.Fprintf(os.Stderr, "cycle %d (%s): ready=%v load=%.1fs stop->exit=%dms stop->tree-empty=%dms stop->vram=%dms graceful=%v crashed=%v leftovers=%v %s\n",
 			i, mode, r.Ready, r.LoadSeconds, r.StopToRootExitMs, r.StopToTreeEmptyMs, r.StopToVRAMReleaseMs, r.GracefulExited, r.ExitedBeforeStop, r.LeftoverProcesses, r.StartErr)
-		if i < o.cycles {
+		if i < o.cycles && !tripped.Load() {
 			time.Sleep(o.settle)
 		}
 	}
+	if tripped.Load() {
+		return errors.New("aborted after a GPU driver reset")
+	}
 	return nil
+}
+
+var (
+	tripped   atomic.Bool
+	currentMu sync.Mutex
+	current   *procgroup.Group
+)
+
+func setCurrent(g *procgroup.Group) { currentMu.Lock(); current = g; currentMu.Unlock() }
+
+func killCurrent() {
+	currentMu.Lock()
+	defer currentMu.Unlock()
+	if current != nil {
+		_ = current.Kill()
+	}
 }
 
 // ring keeps the tail of a stream.
@@ -336,6 +381,11 @@ func runCycle(o runtimeOpts, g gpuSource, n int, mode string, w *jsonl) cycleRes
 		return r
 	}
 	defer pg.Close()
+	setCurrent(pg)
+	defer setCurrent(nil)
+	if tripped.Load() {
+		_ = pg.Kill()
+	}
 	r.PID = pg.PID()
 	baseURL := fmt.Sprintf("http://%s", addr)
 

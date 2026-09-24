@@ -407,7 +407,8 @@ func (e *eval) eligibility() (match, bool) {
 		idle := state.Cooldown
 		switch {
 		case strings.HasPrefix(t.RecoveryReason, "crash"), strings.HasPrefix(t.RecoveryReason, "device"),
-			strings.HasPrefix(t.RecoveryReason, "telemetry"), strings.HasPrefix(t.RecoveryReason, "kill"):
+			strings.HasPrefix(t.RecoveryReason, "telemetry"), strings.HasPrefix(t.RecoveryReason, "kill"),
+			strings.HasPrefix(t.RecoveryReason, "GPU"):
 			idle = state.Error
 		}
 		return match{action: ActionHold, rule: RuleRecovery, tier: TierEligibility, severity: SeverityInfo,

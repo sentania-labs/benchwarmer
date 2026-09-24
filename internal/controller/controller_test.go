@@ -18,6 +18,7 @@ import (
 	"github.com/sentania-labs/benchwarmer/internal/api"
 	"github.com/sentania-labs/benchwarmer/internal/config"
 	"github.com/sentania-labs/benchwarmer/internal/events"
+	"github.com/sentania-labs/benchwarmer/internal/gpureset"
 	"github.com/sentania-labs/benchwarmer/internal/policy"
 	"github.com/sentania-labs/benchwarmer/internal/proxy"
 	"github.com/sentania-labs/benchwarmer/internal/runtime"
@@ -748,7 +749,7 @@ func TestFailedKillIsRetriedAndBlocksNewRuntime(t *testing.T) {
 	// The game leaves and every timer expires, but the old runtime is
 	// unverified: nothing new may start.
 	r.facts.set(func(_ *policy.GPUFacts, a *policy.AppFacts) { a.Games = nil })
-	r.clk.Advance(6 * time.Minute)
+	r.clk.Advance(31 * time.Minute) // past the kill-failure (device-lost) cooldown
 	for i := 0; i < 20; i++ {
 		r.c.Step(true)
 		time.Sleep(2 * time.Millisecond)
@@ -788,5 +789,38 @@ func TestUntilRebootSurvivesServiceRestartInSameBoot(t *testing.T) {
 	}
 	if r3 := mk(boot.Add(time.Hour)); r3.c.mode.Mode != policy.ModeAuto {
 		t.Fatalf("after reboot: mode %s", r3.c.mode.Mode)
+	}
+}
+
+func TestGPUResetPreemptsAndEscalates(t *testing.T) {
+	r := newRig(t, nil)
+	var pending []gpureset.Reset
+	var mu sync.Mutex
+	r.c.d.GPUResets = func() []gpureset.Reset { mu.Lock(); defer mu.Unlock(); p := pending; pending = nil; return p }
+	r.toReady()
+	s := r.startStream()
+	mu.Lock()
+	pending = []gpureset.Reset{{File: `C:\Windows\LiveKernelReports\WATCHDOG\WATCHDOG-1.dmp`}}
+	mu.Unlock()
+	r.stepUntil(state.Error)
+	if res := <-s.done; res.sawDone {
+		t.Fatal("request should be cut: no grace after a GPU reset")
+	}
+	if e, ok := r.ev.find(events.DeviceLost); !ok || e.Severity != policy.SeverityCritical {
+		t.Fatalf("device_lost event: %+v", e)
+	}
+	st := r.c.Status()
+	if st.Timers.RecoveryUntil == nil || st.Timers.RecoveryUntil.Sub(r.clk.Now()) != 30*time.Minute {
+		t.Fatalf("recovery %+v", st.Timers.RecoveryUntil)
+	}
+	// Cooldown over: loads again. A second reset doubles the wait.
+	r.clk.Advance(30*time.Minute + time.Second)
+	r.stepUntil(state.Ready)
+	mu.Lock()
+	pending = []gpureset.Reset{{File: "WATCHDOG-2.dmp"}}
+	mu.Unlock()
+	r.stepUntil(state.Error)
+	if d := r.c.Status().Timers.RecoveryUntil.Sub(r.clk.Now()); d != time.Hour {
+		t.Fatalf("second reset cooldown %s, want 1h", d)
 	}
 }

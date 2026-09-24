@@ -19,6 +19,7 @@ import (
 	"github.com/sentania-labs/benchwarmer/internal/api"
 	"github.com/sentania-labs/benchwarmer/internal/config"
 	"github.com/sentania-labs/benchwarmer/internal/events"
+	"github.com/sentania-labs/benchwarmer/internal/gpureset"
 	"github.com/sentania-labs/benchwarmer/internal/humantime"
 	"github.com/sentania-labs/benchwarmer/internal/policy"
 	"github.com/sentania-labs/benchwarmer/internal/proxy"
@@ -74,6 +75,7 @@ type Persisted struct {
 	// "until reboot" mode survives a service restart within the same boot.
 	BootTime        time.Time         `json:"boot_time,omitzero"`
 	TelemetryLosses int               `json:"telemetry_losses,omitempty"`
+	GPUResets       int               `json:"gpu_resets,omitempty"`
 	Timers          policy.TimerFacts `json:"timers"`
 	CrashCount      int               `json:"crash_count"`
 	FootprintMiB    int               `json:"footprint_mib"`
@@ -120,6 +122,9 @@ type Deps struct {
 	Persist      Persist     // optional
 	Metrics      Metrics     // optional
 	Now          func() time.Time
+	// GPUResets reports GPU driver resets detected since the last call
+	// (optional). Any reset stops the runtime at once (ADR 0011).
+	GPUResets func() []gpureset.Reset
 	// BootTime reports the system boot time (optional).
 	BootTime func() (time.Time, error)
 	Log      *slog.Logger
@@ -186,6 +191,7 @@ type Controller struct {
 	lastEvaluated   time.Time
 	telemetryLost   bool
 	telemetryLosses int    // consecutive losses, for escalating recovery
+	gpuResets       int    // GPU driver resets without a stable run since, for escalating recovery
 	manualPending   string // "drain" or "reload" requested by the API
 	persisted       []byte
 	recentErrors    []events.Event
@@ -260,6 +266,7 @@ func (c *Controller) Start() {
 				c.mode, c.modeSetAt, c.untilReboot = p.Mode, p.ModeSetAt, p.UntilReboot
 			}
 			c.telemetryLosses = p.TelemetryLosses
+			c.gpuResets = p.GPUResets
 		}
 	}
 	c.emit(events.Event{Time: now, Type: events.ServiceStarted, State: c.st, Condition: c.st.Condition(),
@@ -384,7 +391,8 @@ func (c *Controller) persist() {
 		return
 	}
 	p := Persisted{Mode: c.mode, ModeSetAt: c.modeSetAt, UntilReboot: c.untilReboot, Timers: c.timers,
-		CrashCount: c.crashCount, FootprintMiB: c.footprint, LastLoadSeconds: c.lastLoadS, TelemetryLosses: c.telemetryLosses}
+		CrashCount: c.crashCount, FootprintMiB: c.footprint, LastLoadSeconds: c.lastLoadS, TelemetryLosses: c.telemetryLosses,
+		GPUResets: c.gpuResets}
 	if c.d.BootTime != nil {
 		p.BootTime, _ = c.d.BootTime()
 	}

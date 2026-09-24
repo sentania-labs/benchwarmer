@@ -115,8 +115,10 @@ func Default() Config {
 			CrashBackoffInitial:       d(30 * time.Second),
 			CrashBackoffMax:           d(30 * time.Minute),
 			TelemetryRecoveryCooldown: d(2 * time.Minute),
-			DeviceLostCooldown:        d(5 * time.Minute),
-			CrashResetAfter:           d(30 * time.Minute),
+			// Long: on the target, a second GPU hang soon after a first
+			// escalated to a blue screen (ADR 0011).
+			DeviceLostCooldown: d(30 * time.Minute),
+			CrashResetAfter:    d(30 * time.Minute),
 		},
 		Modes: Modes{
 			PauseDurations:      []Duration{d(30 * time.Minute), d(time.Hour), d(2 * time.Hour), d(4 * time.Hour)},

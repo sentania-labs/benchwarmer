@@ -16,6 +16,7 @@ import (
 
 func (c *Controller) step(now time.Time, collect bool) {
 	c.absorbAsync(now)
+	c.checkGPUResets(now)
 	c.expireMode(now)
 	if collect || c.lastEvaluated.IsZero() {
 		c.observe(now)
@@ -475,7 +476,7 @@ func (c *Controller) checkVRAMRelease(now time.Time) {
 
 func (c *Controller) checkCrashReset(now time.Time) {
 	if c.st.Admitting() && !c.loadedAt.IsZero() && now.Sub(c.loadedAt) >= c.cfg.Recovery.CrashResetAfter.D() {
-		c.crashCount, c.telemetryLosses = 0, 0
+		c.crashCount, c.telemetryLosses, c.gpuResets = 0, 0, 0
 	}
 	// Learn the loaded footprint in the first 30 s after loading. With
 	// attribution, own VRAM is measured directly; without it, the growth of
@@ -582,6 +583,35 @@ func (c *Controller) onCrash(now time.Time) {
 	c.drainStart, c.drainDeadline, c.yield = time.Time{}, time.Time{}, policy.Decision{}
 	c.backoff(now)
 	c.transition(now, state.Error, c.decision, "Runtime crashed", nil)
+}
+
+// checkGPUResets reacts to a GPU driver reset: the runtime is preempted at
+// once (the next hang can be a blue screen) and loading waits for an
+// escalating cooldown. The device-lost flag clears once the runtime is gone;
+// the recovery timer then holds loading.
+func (c *Controller) checkGPUResets(now time.Time) {
+	if c.d.GPUResets != nil {
+		if resets := c.d.GPUResets(); len(resets) > 0 {
+			c.gpuResets++
+			c.power.DeviceLost = true
+			files := make([]string, 0, len(resets))
+			for _, r := range resets {
+				files = append(files, r.File)
+			}
+			d := c.cfg.Recovery.DeviceLostCooldown.D()
+			for i := 1; i < c.gpuResets && d < 24*time.Hour; i++ {
+				d *= 2
+			}
+			d = min(d, 24*time.Hour)
+			c.emit(events.Event{Time: now, Type: events.DeviceLost, Severity: policy.SeverityCritical,
+				Message: fmt.Sprintf("GPU driver reset detected (%d since the last stable run); stopping the runtime and waiting %s", c.gpuResets, d),
+				Data:    map[string]any{"watchdog_dumps": files, "resets": c.gpuResets, "cooldown": d.String()}})
+			c.setRecovery(now, d, fmt.Sprintf("GPU driver reset (%d)", c.gpuResets))
+		}
+	}
+	if c.power.DeviceLost && !c.st.RuntimeRunning() && c.inst == nil && c.zombie == nil {
+		c.power.DeviceLost = false
+	}
 }
 
 // retryZombie starts (or re-starts, after backoff) terminating an

@@ -22,17 +22,18 @@ type InstallConfig struct {
 	// ExePath is the service binary; Args are passed on every start.
 	ExePath string
 	Args    []string
-	// Account is AccountVirtual (default) or AccountLocalSystem.
+	// Account must be empty or AccountLocalSystem: the service runs as
+	// LocalSystem only (ADR 0006, 0012).
 	Account string
 	// PreshutdownTimeout is how long Windows waits for the service after
 	// the pre-shutdown notification; zero uses DefaultPreshutdownTimeout.
 	PreshutdownTimeout time.Duration
 }
 
-// MgrConfig returns the SCM configuration: automatic start (delayed), the
-// resolved account, and an unrestricted service SID for virtual accounts.
+// MgrConfig returns the SCM configuration: automatic start (delayed) as
+// LocalSystem.
 func (c InstallConfig) MgrConfig() (mgr.Config, error) {
-	name, sid, err := startName(c.Account, c.Name)
+	name, err := startName(c.Account)
 	if err != nil {
 		return mgr.Config{}, err
 	}
@@ -44,9 +45,6 @@ func (c InstallConfig) MgrConfig() (mgr.Config, error) {
 		Description:      c.Description,
 		ServiceStartName: name,
 		DelayedAutoStart: true,
-	}
-	if sid {
-		mc.SidType = windows.SERVICE_SID_TYPE_UNRESTRICTED
 	}
 	return mc, nil
 }
@@ -141,15 +139,9 @@ func applySettings(s *mgr.Service, preshutdown time.Duration) ([]string, error) 
 	if cfg, err := s.Config(); err != nil {
 		fail("read service config", err)
 	} else {
-		if cfg.StartType != mgr.StartAutomatic {
-			n := uint32(windows.SERVICE_NO_CHANGE)
-			if err := windows.ChangeServiceConfig(s.Handle, n, mgr.StartAutomatic, n, nil, nil, nil, nil, nil, nil, nil); err != nil {
-				fail("automatic start", err)
-			} else {
-				changed = append(changed, "automatic start")
-			}
-		}
-		if !cfg.DelayedAutoStart {
+		// The start type itself is the admin's (or a GPO System Services
+		// setting's) to choose; only an automatic start is made delayed.
+		if cfg.StartType == mgr.StartAutomatic && !cfg.DelayedAutoStart {
 			info := windows.SERVICE_DELAYED_AUTO_START_INFO{IsDelayedAutoStartUp: 1}
 			if err := windows.ChangeServiceConfig2(s.Handle, windows.SERVICE_CONFIG_DELAYED_AUTO_START_INFO, (*byte)(unsafe.Pointer(&info))); err != nil {
 				fail("delayed automatic start", err)

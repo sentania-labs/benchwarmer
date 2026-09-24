@@ -2,6 +2,25 @@
 
 package provision
 
-// applyACL is a no-op off Windows: the folders and tokens are created with
-// owner-only POSIX modes instead, and there is no target ACL to maintain.
-func applyACL(Target) (bool, error) { return false, nil }
+import (
+	"io/fs"
+	"os"
+)
+
+// Off Windows there are no ACLs or owners to manage: folders and tokens get
+// owner-only POSIX modes instead. Symbolic links are still refused.
+var platform fsOps = posixOps{}
+
+type posixOps struct{}
+
+func (posixOps) inspect(path string) (entry, error) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return entry{}, err
+	}
+	return entry{Dir: fi.IsDir(), Reparse: fi.Mode()&fs.ModeSymlink != 0, Links: 1, Owner: SIDAdministrators}, nil
+}
+
+func (posixOps) secure(Target) (bool, error) { return false, nil }
+
+func (posixOps) privileges() (func(), error) { return func() {}, nil }

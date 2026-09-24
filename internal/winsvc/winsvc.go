@@ -7,7 +7,6 @@ package winsvc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 )
@@ -221,29 +220,20 @@ func waitHint(deadline, now time.Time) uint32 {
 	return uint32(d / time.Millisecond)
 }
 
-// Service accounts accepted by Install.
-const (
-	// AccountVirtual runs as the virtual account NT SERVICE\<name> (ADR 0006
-	// default).
-	AccountVirtual = "virtual"
-	// AccountLocalSystem runs as LocalSystem.
-	AccountLocalSystem = "LocalSystem"
-)
+// AccountLocalSystem is the only service account Install accepts. The
+// service must be LocalSystem: the runtime starts as LocalService from it
+// (ADR 0006), and the data folder ACLs the service applies to itself grant
+// SYSTEM and Administrators only (ADR 0012), which would lock out a
+// virtual account.
+const AccountLocalSystem = "LocalSystem"
 
-// startName resolves an account choice to the SCM's service start name and
-// whether the service SID must be unrestricted (required for a virtual
-// account's SID to be usable in ACLs).
-func startName(account, service string) (name string, serviceSID bool, err error) {
+// startName resolves an account choice to the SCM's service start name.
+func startName(account string) (string, error) {
 	switch account {
-	case "", AccountVirtual:
-		if service == "" {
-			return "", false, errors.New("winsvc: a virtual account needs the service name")
-		}
-		return `NT SERVICE\` + service, true, nil
-	case AccountLocalSystem, "system":
-		return "LocalSystem", false, nil
+	case "", AccountLocalSystem, "system":
+		return "LocalSystem", nil
 	}
-	return "", false, fmt.Errorf("winsvc: unsupported account %q (use %q or %q)", account, AccountVirtual, AccountLocalSystem)
+	return "", fmt.Errorf("winsvc: unsupported account %q: the service runs as LocalSystem only", account)
 }
 
 // RecoveryStep is one SCM failure action.

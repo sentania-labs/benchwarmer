@@ -52,7 +52,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Unit tests
-        run: go test -count=1 -v ./internal/procgroup/ ; if ($LASTEXITCODE) { exit $LASTEXITCODE } ; go test -count=1 ./...
+        run: go test -count=1 -v ./internal/procgroup/ ./internal/provision/ ; if ($LASTEXITCODE) { exit $LASTEXITCODE } ; go test -count=1 ./...
       - name: Build probe and fake runtime
         run: |
           go build -o bwprobe.exe ./cmd/bwprobe

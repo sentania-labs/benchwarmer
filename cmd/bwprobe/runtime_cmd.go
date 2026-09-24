@@ -87,6 +87,7 @@ type cycleResult struct {
 	// token: evidence of the identity it actually ran under.
 	RuntimeUser       string   `json:"runtime_user,omitempty"`
 	RuntimePrivileges []string `json:"runtime_privileges,omitempty"`
+	RuntimeIntegrity  string   `json:"runtime_integrity,omitempty"`
 }
 
 type reqResult struct {
@@ -355,6 +356,7 @@ func runCycle(o runtimeOpts, g gpuSource, n int, mode string, w *jsonl) cycleRes
 	} else {
 		r.RuntimeUser = "unknown: " + err.Error()
 	}
+	r.RuntimeIntegrity, _ = signals.ProcessIntegrity(uint32(pg.PID()))
 	t0 := time.Now()
 	r.Ready = waitReady(baseURL, o.loadTimeout, pg)
 	r.LoadSeconds = time.Since(t0).Seconds()

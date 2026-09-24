@@ -137,8 +137,6 @@ func start(spec Spec) (*Group, error) {
 	return g, nil
 }
 
-// resumeProcess resumes the threads of a process created suspended. A freshly
-// created suspended process has exactly one thread.
 // localServiceToken logs on NT AUTHORITY\LocalService (only LocalSystem may
 // do this without a password) and removes every privilege from the token
 // except SeChangeNotify, so the runtime holds no special rights even if an
@@ -160,9 +158,24 @@ func localServiceToken() (windows.Token, error) {
 	if r == 0 {
 		return 0, fmt.Errorf("CreateRestrictedToken: %w", err)
 	}
+	// Service logons run at System integrity; drop to Medium so the runtime
+	// cannot write to or open objects that other services protect with
+	// integrity labels.
+	medium, err := windows.CreateWellKnownSid(windows.WinMediumLabelSid)
+	if err != nil {
+		restricted.Close()
+		return 0, fmt.Errorf("medium integrity SID: %w", err)
+	}
+	tml := windows.Tokenmandatorylabel{Label: windows.SIDAndAttributes{Sid: medium, Attributes: windows.SE_GROUP_INTEGRITY}}
+	if err := windows.SetTokenInformation(restricted, windows.TokenIntegrityLevel, (*byte)(unsafe.Pointer(&tml)), tml.Size()); err != nil {
+		restricted.Close()
+		return 0, fmt.Errorf("set integrity level: %w", err)
+	}
 	return restricted, nil
 }
 
+// resumeProcess resumes the threads of a process created suspended. A freshly
+// created suspended process has exactly one thread.
 func resumeProcess(pid uint32) error {
 	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
 	if err != nil {

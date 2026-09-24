@@ -180,10 +180,12 @@ func FromCounters(rc RawCounters, luid string) Sample {
 }
 
 func busiestLUID(m map[string]float64) string {
+	// Adapter memory, not utilization, so the >100 % glitch does not apply;
+	// still ignore impossible negative or NaN readings.
 	best, bestV := "", -1.0
 	per := map[string]float64{}
 	for name, v := range m {
-		if in, ok := parseInstance(name); ok {
+		if in, ok := parseInstance(name); ok && v >= 0 && v == v {
 			per[in.LUID] += v
 		}
 	}

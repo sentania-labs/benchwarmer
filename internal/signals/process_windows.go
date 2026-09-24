@@ -3,6 +3,7 @@
 package signals
 
 import (
+	"errors"
 	"time"
 	"unsafe"
 
@@ -111,8 +112,8 @@ func BootTime() (time.Time, error) {
 
 var procLookupPrivilegeNameW = windows.NewLazySystemDLL("advapi32.dll").NewProc("LookupPrivilegeNameW")
 
-// ProcessIdentity reports the account a process runs as and its enabled
-// privileges, for verifying the runtime's reduced identity (ADR 0006).
+// ProcessIdentity reports the account a process runs as and every privilege
+// present in its token (enabled or not), for verifying the runtime's reduced identity (ADR 0006).
 func ProcessIdentity(pid uint32) (user string, privileges []string, err error) {
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
@@ -152,4 +153,40 @@ func ProcessIdentity(pid uint32) (user string, privileges []string, err error) {
 		}
 	}
 	return user, privileges, nil
+}
+
+// ProcessIntegrity returns the process's integrity level: "Low", "Medium",
+// "High", "System", or the raw SID.
+func ProcessIntegrity(pid uint32) (string, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(h)
+	var tok windows.Token
+	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok); err != nil {
+		return "", err
+	}
+	defer tok.Close()
+	var n uint32
+	_ = windows.GetTokenInformation(tok, windows.TokenIntegrityLevel, nil, 0, &n)
+	if n == 0 {
+		return "", errors.New("no integrity level")
+	}
+	buf := make([]byte, n)
+	if err := windows.GetTokenInformation(tok, windows.TokenIntegrityLevel, &buf[0], n, &n); err != nil {
+		return "", err
+	}
+	sid := (*windows.Tokenmandatorylabel)(unsafe.Pointer(&buf[0])).Label.Sid.String()
+	switch sid {
+	case "S-1-16-4096":
+		return "Low", nil
+	case "S-1-16-8192":
+		return "Medium", nil
+	case "S-1-16-12288":
+		return "High", nil
+	case "S-1-16-16384":
+		return "System", nil
+	}
+	return sid, nil
 }

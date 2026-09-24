@@ -28,11 +28,18 @@ so the virtual account cannot run the service.
 - The runtime does **not** inherit that: by default (`runtime.run_as =
   localservice`) the service logs on `NT AUTHORITY\LocalService` and starts
   llama-server with a restricted copy of that token (every privilege
-  removed except `SeChangeNotifyPrivilege`), still created suspended inside
-  the Job Object. A flaw in llama-server's parsing of network-sourced input
+  removed except `SeChangeNotifyPrivilege`, integrity lowered from System to
+  Medium), still created suspended inside the Job Object. If the token cannot
+  be obtained the runtime does not start; there is no fallback to the
+  service's own rights. A flaw in llama-server's parsing of network-sourced input
   then yields a low-privilege account, not SYSTEM.
-- `runtime.run_as = service` exists as an escape hatch and is not
-  recommended.
+- `runtime.run_as = service` exists for development and is not
+  recommended. The installer supports only LocalSystem, and the service
+  raises `service_misconfigured` if it is not LocalSystem while
+  `run_as = localservice`.
+- Known limit: LocalService is shared by other Windows services, so the
+  runtime is isolated from SYSTEM, not from them. A per-runtime restricting
+  SID would tighten this later.
 - The runtime directory (Program Files) and the models directory must be
   readable by Users, which the installer ensures.
 

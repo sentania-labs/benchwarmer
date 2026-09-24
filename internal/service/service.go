@@ -142,12 +142,18 @@ func (s *Service) Run(ctx context.Context, evs <-chan winsvc.Event) error {
 	if t := s.cfg.Listen.InferenceTLS; t.Enabled {
 		m, err := s.tlsManager(t)
 		if err != nil {
+			// Keep the service and its dashboard up so the operator can fix
+			// the certificate; only the inference listener stays down.
+			s.log.Error("inference listener disabled: certificate unusable", "err", err)
+			s.sink.Emit(events.Event{Time: time.Now(), Type: events.TLSCertificateProblem, Severity: policy.SeverityCritical,
+				Message: "Inference listener not started: " + err.Error()})
 			infLn.Close()
-			return err
+			infLn = nil
+		} else {
+			s.tlsMgr = m
+			infLn = tls.NewListener(infLn, m.TLSConfig())
+			scheme = "https"
 		}
-		s.tlsMgr = m
-		infLn = tls.NewListener(infLn, m.TLSConfig())
-		scheme = "https"
 	}
 	mgmtLn, err := net.Listen("tcp", s.cfg.Listen.Management)
 	if err != nil {
@@ -179,10 +185,16 @@ func (s *Service) Run(ctx context.Context, evs <-chan winsvc.Event) error {
 			s.log.Error("listener failed", "listener", name, "err", err)
 		}
 	}
-	wg.Add(2)
-	go serve(inf, infLn, "inference")
+	infAddr := "disabled"
+	if infLn != nil {
+		wg.Add(1)
+		go serve(inf, infLn, "inference")
+		infAddr = scheme + "://" + infLn.Addr().String()
+	}
+	wg.Add(1)
 	go serve(mgmt, mgmtLn, "management")
-	s.log.Info("benchwarmer running", "inference", scheme+"://"+infLn.Addr().String(), "management", mgmtLn.Addr().String(), "version", version.Version)
+	s.log.Info("benchwarmer running", "inference", infAddr, "management", mgmtLn.Addr().String(), "version", version.Version)
+	s.checkIdentity()
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	ctlDone := make(chan struct{})
@@ -239,6 +251,7 @@ func (s *Service) housekeeping(ctx context.Context) {
 	defer t.Stop()
 	last := time.Now()
 	lastPrune := time.Time{}
+	lastCertCheck := time.Time{}
 	for {
 		select {
 		case <-ctx.Done():
@@ -247,7 +260,8 @@ func (s *Service) housekeeping(ctx context.Context) {
 			st := s.ctl.Status()
 			_ = s.store.AddAvailability(last, now, st.Condition == state.Available)
 			last = now
-			if now.Sub(lastPrune) >= time.Hour && s.tlsMgr != nil {
+			if s.tlsMgr != nil && now.YearDay() != lastCertCheck.YearDay() {
+				lastCertCheck = now
 				s.checkCertExpiry(now)
 			}
 			if now.Sub(lastPrune) >= time.Hour {
@@ -303,7 +317,19 @@ func certData(i tlscert.Info) map[string]any {
 		"not_after": i.NotAfter.Format(time.RFC3339), "self_signed": i.SelfSigned, "file": i.File}
 }
 
-// checkCertExpiry warns when the certificate is within 21 days of expiry.
+// checkIdentity warns when the configured runtime identity cannot work:
+// starting the runtime as LocalService requires the service to be
+// LocalSystem (ADR 0006).
+func (s *Service) checkIdentity() {
+	if s.cfg.Runtime.RunAs != config.RunAsLocalService || !requiresSystemForLocalService || isLocalSystem() {
+		return
+	}
+	s.sink.Emit(events.Event{Time: time.Now(), Type: events.ServiceMisconfigured, Severity: policy.SeverityCritical,
+		Message: "The service is not running as LocalSystem, so the runtime cannot start as LocalService; reinstall the service as LocalSystem (ADR 0006)"})
+	s.log.Error("service is not LocalSystem; runtime.run_as=localservice will fail")
+}
+
+// checkCertExpiry warns once a day when the certificate is within 21 days of expiry.
 func (s *Service) checkCertExpiry(now time.Time) {
 	i := s.tlsMgr.Info()
 	if left := i.NotAfter.Sub(now); left < 21*24*time.Hour {

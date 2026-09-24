@@ -59,6 +59,10 @@ const (
 	AgentDisconnected Type = "agent_disconnected"
 	DeviceLost        Type = "device_lost"
 
+	// ServiceMisconfigured flags a setup that cannot work (e.g. wrong
+	// service identity for the configured runtime identity).
+	ServiceMisconfigured Type = "service_misconfigured"
+
 	TLSCertificateLoaded   Type = "tls_certificate_loaded"
 	TLSCertificateReloaded Type = "tls_certificate_reloaded"
 	TLSCertificateProblem  Type = "tls_certificate_problem"

@@ -9,15 +9,15 @@
   for every user session, starts the service, and verifies it responds.
   Creates no firewall rules: inbound LAN access is a GPO change.
 .PARAMETER Account
-  Service identity: "system" (LocalSystem, default; the runtime itself runs as a
-  privilege-stripped LocalService, ADR 0006) or "virtual" (NT SERVICE\Benchwarmer,
-  which cannot read GPU counters on the target and is not recommended).
+  Service identity. Only "system" (LocalSystem) is supported: a virtual account
+  cannot read GPU counters or the user's processes. The runtime itself runs as a
+  privilege-stripped LocalService at Medium integrity (ADR 0006).
 .PARAMETER RuntimeZip
   Optional llama.cpp release zip to unpack into ...\runtime\<RuntimeName>.
 #>
 [CmdletBinding()]
 param(
-  [ValidateSet('system', 'virtual')] [string] $Account = 'system',
+  [ValidateSet('system')] [string] $Account = 'system',
   [string] $RuntimeZip,
   [string] $RuntimeName = 'vulkan'
 )

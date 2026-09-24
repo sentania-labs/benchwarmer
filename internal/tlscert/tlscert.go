@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 
 	"software.sslmate.com/src/go-pkcs12"
 )
@@ -116,6 +117,13 @@ func (m *Manager) current() *tls.Certificate {
 	m.mu.Unlock()
 	if changed {
 		err := m.load()
+		if err != nil {
+			// Keep serving the previous certificate, and do not retry (or
+			// warn again) until the files change once more.
+			m.mu.Lock()
+			m.mtimes = m.statFiles()
+			m.mu.Unlock()
+		}
 		if m.onReload != nil {
 			m.onReload(m.Info(), err)
 		}
@@ -133,6 +141,16 @@ func (m *Manager) files() []string {
 		}
 	}
 	return f
+}
+
+func (m *Manager) statFiles() map[string]time.Time {
+	mt := map[string]time.Time{}
+	for _, p := range m.files() {
+		if st, err := os.Stat(p); err == nil {
+			mt[p] = st.ModTime()
+		}
+	}
+	return mt
 }
 
 func (m *Manager) filesChanged() bool {
@@ -154,12 +172,7 @@ func (m *Manager) load() error {
 		return err
 	}
 	leaf := cert.Leaf
-	mt := map[string]time.Time{}
-	for _, p := range m.files() {
-		if st, err := os.Stat(p); err == nil {
-			mt[p] = st.ModTime()
-		}
-	}
+	mt := m.statFiles()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cert, m.mtimes = cert, mt
@@ -186,7 +199,7 @@ func loadPair(src Source) (*tls.Certificate, error) {
 			if err != nil {
 				return nil, fmt.Errorf("tls: read PFX password file: %w", err)
 			}
-			pw = strings.TrimRight(string(p), "\r\n")
+			pw = passwordText(p)
 		}
 		key, leaf, chain, err := pkcs12.DecodeChain(b, pw)
 		if err != nil {
@@ -230,6 +243,23 @@ func loadPair(src Source) (*tls.Certificate, error) {
 	return &cert, nil
 }
 
+// passwordText decodes a password file saved as ASCII/UTF-8 (with or
+// without a byte-order mark) or UTF-16 (Windows PowerShell 5.1's default for
+// Out-File), and drops trailing line breaks.
+func passwordText(b []byte) string {
+	switch {
+	case len(b) >= 2 && b[0] == 0xFF && b[1] == 0xFE: // UTF-16 LE
+		u := make([]uint16, 0, len(b)/2)
+		for i := 2; i+1 < len(b); i += 2 {
+			u = append(u, uint16(b[i])|uint16(b[i+1])<<8)
+		}
+		return strings.TrimRight(string(utf16.Decode(u)), "\r\n")
+	case len(b) >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF:
+		b = b[3:]
+	}
+	return strings.TrimRight(string(b), "\r\n")
+}
+
 func pemCert(der []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
@@ -242,15 +272,23 @@ func pemKey(k crypto.Signer) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 }
 
+// covers reports whether the certificate names every host.
+func covers(c *x509.Certificate, hosts []string) bool {
+	for _, h := range hosts {
+		if h != "" && c.VerifyHostname(h) != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // ensureSelfSigned creates dir/self-signed.{crt,key} if missing and returns
 // their paths. The certificate lasts one year and covers localhost, the
 // loopback addresses, this machine's host name, and hosts.
 func ensureSelfSigned(dir string, hosts []string) (string, string, error) {
 	cf, kf := filepath.Join(dir, "self-signed.crt"), filepath.Join(dir, "self-signed.key")
-	if _, err := tls.LoadX509KeyPair(cf, kf); err == nil {
-		if c, err := loadPair(Source{CertFile: cf, KeyFile: kf}); err == nil && time.Until(c.Leaf.NotAfter) > 7*24*time.Hour {
-			return cf, kf, nil
-		}
+	if c, err := loadPair(Source{CertFile: cf, KeyFile: kf}); err == nil && time.Until(c.Leaf.NotAfter) > 7*24*time.Hour && covers(c.Leaf, hosts) {
+		return cf, kf, nil
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", err

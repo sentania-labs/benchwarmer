@@ -192,3 +192,57 @@ func TestServesAndReloadsRenewedCertificate(t *testing.T) {
 		t.Fatalf("reload callback %+v", reloaded)
 	}
 }
+
+func TestSelfSignedRegeneratedWhenHostsChange(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(Source{SelfSigned: true, Dir: dir}, nil); err != nil {
+		t.Fatal(err)
+	}
+	m, err := New(Source{SelfSigned: true, Dir: dir, Hosts: []string{"added.example.lan"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(m.Info().DNSNames, "added.example.lan") {
+		t.Fatalf("new host missing: %v", m.Info().DNSNames)
+	}
+}
+
+func TestPasswordFileEncodings(t *testing.T) {
+	utf16le := []byte{0xFF, 0xFE, 's', 0, '3', 0, '\r', 0, '\n', 0}
+	for name, b := range map[string][]byte{
+		"ascii": []byte("s3\r\n"), "utf8-bom": append([]byte{0xEF, 0xBB, 0xBF}, "s3"...), "utf16": utf16le,
+	} {
+		if got := passwordText(b); got != "s3" {
+			t.Errorf("%s: %q", name, got)
+		}
+	}
+}
+
+func TestBadRenewalWarnsOnce(t *testing.T) {
+	dir := t.TempDir()
+	leaf, key, ca := issue(t, "ok.example.lan", time.Now().Add(24*time.Hour))
+	cf, kf := writePEM(t, dir, leaf, key, ca)
+	var calls int
+	m, err := New(Source{CertFile: cf, KeyFile: kf}, func(_ Info, err error) {
+		if err != nil {
+			calls++
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(cf, []byte("not a certificate"), 0o644)
+	later := time.Now().Add(time.Minute)
+	_ = os.Chtimes(cf, later, later)
+	for i := 0; i < 3; i++ {
+		m.mu.Lock()
+		m.lastCheck = time.Time{}
+		m.mu.Unlock()
+		if c := m.current(); c == nil || c.Leaf.Subject.CommonName != "ok.example.lan" {
+			t.Fatal("previous certificate not kept")
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("bad renewal reported %d times, want 1", calls)
+	}
+}

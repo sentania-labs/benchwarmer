@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -236,5 +237,23 @@ func TestRestoreRedactedSurvivesArgEdits(t *testing.T) {
 	got := RestoreRedacted(in, old).Runtime.Args
 	if strings.Join(got, " ") != "--flash-attn --api-key sk-123 --threads 8" {
 		t.Fatalf("got %v", got)
+	}
+}
+
+func TestConfigFromBeforeRunAsAndTLSStillLoads(t *testing.T) {
+	b, _ := Marshal(Default())
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	delete(m["runtime"].(map[string]any), "run_as")
+	delete(m["listen"].(map[string]any), "inference_tls")
+	old, _ := json.Marshal(m)
+	c, err := Parse(old)
+	if err != nil {
+		t.Fatalf("config written by an earlier build rejected: %v", err)
+	}
+	if c.Runtime.RunAs != RunAsLocalService || c.Listen.InferenceTLS.Enabled {
+		t.Fatalf("upgrade defaults: %+v %+v", c.Runtime.RunAs, c.Listen.InferenceTLS)
 	}
 }

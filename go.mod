@@ -7,7 +7,6 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	golang.org/x/sys v0.48.0
 	modernc.org/sqlite v1.59.0
-	software.sslmate.com/src/go-pkcs12 v0.7.3
 )
 
 require (
@@ -24,7 +23,6 @@ require (
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20231108232855-2478ac86f678 // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect

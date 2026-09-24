@@ -98,18 +98,20 @@ type Listen struct {
 }
 
 // TLS configures a listener's certificate. Deployments use a CA-issued
-// certificate (for example from a Microsoft CA, exported as PFX with its
-// private key, or as PEM files); SelfSigned is for testing. Relative paths
-// are resolved against the data directory. Certificate files are re-read
-// when they change, so renewal needs no restart.
+// certificate from the Windows certificate store (a PFX is imported there
+// with Import-PfxCertificate) or PEM files; SelfSigned is for testing.
+// Relative paths are resolved against the data directory. Certificate files
+// are re-read when they change, so renewal needs no restart.
 type TLS struct {
 	Enabled bool `json:"enabled"`
-	// CertFile is a PEM chain (leaf first) or a .pfx/.p12 file.
+	// CertFile is a PEM chain (leaf first).
 	CertFile string `json:"cert_file"`
-	// KeyFile is the PEM private key; leave empty for PFX.
+	// KeyFile is the PEM private key.
 	KeyFile string `json:"key_file"`
-	// PFXPasswordFile holds the PFX password (the file, not the password).
-	PFXPasswordFile string `json:"pfx_password_file"`
+	// LegacyPFXPasswordFile is accepted only so files written by earlier
+	// versions still parse; PFX files are no longer read. Empty values are
+	// dropped on load, and a set value fails validation with directions.
+	LegacyPFXPasswordFile string `json:"pfx_password_file,omitempty"`
 	// StoreThumbprint (hex SHA-1) or StoreSubject selects a certificate from
 	// the Windows LocalMachine\\My store instead of files: the natural home
 	// for an AD CS certificate, including non-exportable keys and

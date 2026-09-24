@@ -35,6 +35,13 @@ func (e *ValidationError) Error() string {
 
 type validator struct{ errs []FieldError }
 
+func (v *validator) err() error {
+	if len(v.errs) > 0 {
+		return &ValidationError{Errors: v.errs}
+	}
+	return nil
+}
+
 func (v *validator) add(field, format string, a ...any) {
 	v.errs = append(v.errs, FieldError{Field: field, Message: fmt.Sprintf(format, a...)})
 }
@@ -270,13 +277,8 @@ func validateListen(v *validator, c Config) {
 			// Store-backed: nothing more to check here.
 		case t.CertFile == "" && !t.SelfSigned:
 			v.add("listen.inference_tls.cert_file", "set a certificate file or store selection, or enable self_signed for testing")
-		case t.CertFile != "" && isPFXPath(t.CertFile) && t.KeyFile != "":
-			v.add("listen.inference_tls.key_file", "must be empty when cert_file is a PFX (the key is inside it)")
-		case t.CertFile != "" && !isPFXPath(t.CertFile) && t.KeyFile == "":
+		case t.CertFile != "" && t.KeyFile == "" && !isPFXPath(t.CertFile):
 			v.add("listen.inference_tls.key_file", "is required with a PEM certificate")
-		}
-		if t.PFXPasswordFile != "" && !isPFXPath(t.CertFile) {
-			v.add("listen.inference_tls.pfx_password_file", "only applies to a .pfx or .p12 cert_file")
 		}
 	}
 	// Non-loopback management needs a way to authenticate.
@@ -296,6 +298,26 @@ func isHex40(s string) bool {
 	}
 	return true
 }
+
+// ValidateChange is Validate plus rules that apply only to a new
+// configuration being saved, not to one loaded from disk. A file written by
+// an older version that no longer passes these still loads: the affected
+// feature reports the problem at run time (a PFX certificate stops only the
+// inference listener), instead of the whole service falling back to
+// defaults.
+func ValidateChange(c Config) error {
+	if err := Validate(c); err != nil {
+		return err
+	}
+	v := &validator{}
+	if t := c.Listen.InferenceTLS; t.Enabled && isPFXPath(t.CertFile) {
+		v.add("listen.inference_tls.cert_file", "%s", PFXHelp)
+	}
+	return v.err()
+}
+
+// PFXHelp explains what to do instead of pointing at a PFX file.
+const PFXHelp = "PFX files are not read: import the PFX into the LocalMachine\\My certificate store (see docs/deploy/tls.md: certutil -importpfx) and set store_thumbprint or store_subject"
 
 func isPFXPath(p string) bool {
 	l := strings.ToLower(p)

@@ -87,11 +87,8 @@ func TestValidationRejectsUnsafeValues(t *testing.T) {
 		{"PEM without key", func(c *Config) {
 			c.Listen.InferenceTLS = TLS{Enabled: true, CertFile: `C:\x\server.crt`}
 		}, "listen.inference_tls.key_file"},
-		{"PFX with key file", func(c *Config) {
-			c.Listen.InferenceTLS = TLS{Enabled: true, CertFile: `tls\server.pfx`, KeyFile: `tls\server.key`}
-		}, "listen.inference_tls.key_file"},
 		{"file and store together", func(c *Config) {
-			c.Listen.InferenceTLS = TLS{Enabled: true, CertFile: `tls\\a.pfx`, StoreSubject: "ss8510"}
+			c.Listen.InferenceTLS = TLS{Enabled: true, CertFile: `tls\\a.crt`, KeyFile: `tls\\a.key`, StoreSubject: "ss8510"}
 		}, "listen.inference_tls"},
 		{"bad thumbprint", func(c *Config) {
 			c.Listen.InferenceTLS = TLS{Enabled: true, StoreThumbprint: "abc"}
@@ -261,5 +258,58 @@ func TestConfigFromBeforeRunAsAndTLSStillLoads(t *testing.T) {
 	}
 	if c.Runtime.RunAs != RunAsLocalService || c.Listen.InferenceTLS.Enabled {
 		t.Fatalf("upgrade defaults: %+v %+v", c.Runtime.RunAs, c.Listen.InferenceTLS)
+	}
+}
+
+// Files written before PFX support was removed carry an empty
+// pfx_password_file; they must still load, and saving drops the key.
+func TestLegacyEmptyPFXPasswordFileParses(t *testing.T) {
+	b, err := Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := strings.Replace(string(b), `"inference_tls": {`, `"inference_tls": {
+      "pfx_password_file": "",`, 1)
+	if old == string(b) {
+		t.Fatal("test setup: inference_tls not found")
+	}
+	c, err := Parse([]byte(old))
+	if err != nil {
+		t.Fatalf("legacy file rejected: %v", err)
+	}
+	if err := Validate(c); err != nil {
+		t.Fatalf("legacy file invalid: %v", err)
+	}
+	out, _ := Marshal(c)
+	if strings.Contains(string(out), "pfx_password_file") {
+		t.Fatal("empty legacy key written back")
+	}
+}
+
+// A PFX left in a file written by an older version must still load (only
+// the inference listener fails, at run time); saving one is rejected.
+func TestPFXLoadsButCannotBeSaved(t *testing.T) {
+	c := Default()
+	c.Listen.InferenceTLS = TLS{Enabled: true, CertFile: `tls\server.pfx`, LegacyPFXPasswordFile: `tls\pfx.pass`, SelfSignedHosts: []string{}}
+	b, _ := Marshal(c)
+	got, err := Parse(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(got); err != nil {
+		t.Fatalf("old PFX config must load: %v", err)
+	}
+	if err := ValidateChange(got); err == nil || !strings.Contains(err.Error(), "listen.inference_tls.cert_file") {
+		t.Fatalf("saving a PFX config: %v", err)
+	}
+	// A password file left behind after switching to the store is dropped.
+	c.Listen.InferenceTLS = TLS{Enabled: false, LegacyPFXPasswordFile: `tls\pfx.pass`, SelfSignedHosts: []string{}}
+	b, _ = Marshal(c)
+	got, err = Parse(b)
+	if err != nil || got.Listen.InferenceTLS.LegacyPFXPasswordFile != "" {
+		t.Fatalf("leftover password file kept: %v %q", err, got.Listen.InferenceTLS.LegacyPFXPasswordFile)
+	}
+	if err := ValidateChange(got); err != nil {
+		t.Fatal(err)
 	}
 }

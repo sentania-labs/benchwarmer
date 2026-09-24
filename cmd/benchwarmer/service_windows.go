@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/sentania-labs/benchwarmer/internal/service"
 	"github.com/sentania-labs/benchwarmer/internal/winsvc"
@@ -19,7 +20,7 @@ func cmdService(args []string) error {
 	switch args[0] {
 	case "install":
 		fs := flag.NewFlagSet("install", flag.ExitOnError)
-		account := fs.String("account", winsvc.AccountVirtual, "service identity: virtual or system")
+		account := fs.String("account", "system", "service identity: system (default, ADR 0006) or virtual")
 		data := fs.String("data", service.DefaultDataDir(), "data directory")
 		_ = fs.Parse(args[1:])
 		exe, err := os.Executable()
@@ -29,10 +30,21 @@ func cmdService(args []string) error {
 		return winsvc.Install(winsvc.InstallConfig{
 			Name: serviceName, DisplayName: "Benchwarmer",
 			Description: "Runs a local LLM on the GPU only while it is otherwise idle; yields to games and interactive use.",
-			ExePath:     exe, Args: service.ServiceArgs(*data), Account: *account,
+			ExePath:     exe, Args: service.ServiceArgs(*data), Account: accountName(*account),
 		})
 	case "remove":
 		return winsvc.Remove(serviceName, winsvc.DefaultStopTimeout)
 	}
 	return fmt.Errorf("unknown service command %q", args[0])
+}
+
+// accountName maps the installer's spelling onto winsvc's account names.
+func accountName(a string) string {
+	switch strings.ToLower(a) {
+	case "system", "localsystem":
+		return winsvc.AccountLocalSystem
+	case "virtual":
+		return winsvc.AccountVirtual
+	}
+	return a
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"github.com/sentania-labs/benchwarmer/internal/controller"
 	"github.com/sentania-labs/benchwarmer/internal/events"
 	"github.com/sentania-labs/benchwarmer/internal/metrics"
+	"github.com/sentania-labs/benchwarmer/internal/policy"
 	"github.com/sentania-labs/benchwarmer/internal/proxy"
 	"github.com/sentania-labs/benchwarmer/internal/runtime/llamacpp"
 	"github.com/sentania-labs/benchwarmer/internal/secrets"
@@ -25,6 +27,7 @@ import (
 	"github.com/sentania-labs/benchwarmer/internal/state"
 	"github.com/sentania-labs/benchwarmer/internal/store"
 	"github.com/sentania-labs/benchwarmer/internal/telemetry"
+	"github.com/sentania-labs/benchwarmer/internal/tlscert"
 	"github.com/sentania-labs/benchwarmer/internal/version"
 	"github.com/sentania-labs/benchwarmer/internal/winsvc"
 )
@@ -53,6 +56,7 @@ type Service struct {
 	gate   *proxy.Gate
 	met    *metrics.Metrics
 	tel    telemetry.Source
+	tlsMgr *tlscert.Manager
 	auth   *api.Authenticator
 	infTok string
 }
@@ -134,6 +138,17 @@ func (s *Service) Run(ctx context.Context, evs <-chan winsvc.Event) error {
 	if err != nil {
 		return fmt.Errorf("inference listener %s: %w", s.cfg.Listen.Inference, err)
 	}
+	scheme := "http"
+	if t := s.cfg.Listen.InferenceTLS; t.Enabled {
+		m, err := s.tlsManager(t)
+		if err != nil {
+			infLn.Close()
+			return err
+		}
+		s.tlsMgr = m
+		infLn = tls.NewListener(infLn, m.TLSConfig())
+		scheme = "https"
+	}
 	mgmtLn, err := net.Listen("tcp", s.cfg.Listen.Management)
 	if err != nil {
 		infLn.Close()
@@ -167,7 +182,7 @@ func (s *Service) Run(ctx context.Context, evs <-chan winsvc.Event) error {
 	wg.Add(2)
 	go serve(inf, infLn, "inference")
 	go serve(mgmt, mgmtLn, "management")
-	s.log.Info("benchwarmer running", "inference", infLn.Addr().String(), "management", mgmtLn.Addr().String(), "version", version.Version)
+	s.log.Info("benchwarmer running", "inference", scheme+"://"+infLn.Addr().String(), "management", mgmtLn.Addr().String(), "version", version.Version)
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	ctlDone := make(chan struct{})
@@ -232,6 +247,9 @@ func (s *Service) housekeeping(ctx context.Context) {
 			st := s.ctl.Status()
 			_ = s.store.AddAvailability(last, now, st.Condition == state.Available)
 			last = now
+			if now.Sub(lastPrune) >= time.Hour && s.tlsMgr != nil {
+				s.checkCertExpiry(now)
+			}
 			if now.Sub(lastPrune) >= time.Hour {
 				c, _ := s.ctl.Config()
 				if err := s.store.Prune(now, c.Retention); err != nil {
@@ -240,6 +258,58 @@ func (s *Service) housekeeping(ctx context.Context) {
 				lastPrune = now
 			}
 		}
+	}
+}
+
+// tlsManager loads the inference certificate and records it.
+func (s *Service) tlsManager(t config.TLS) (*tlscert.Manager, error) {
+	res := func(p string) string {
+		if p == "" {
+			return ""
+		}
+		return secrets.Resolve(s.o.DataDir, p)
+	}
+	src := tlscert.Source{CertFile: res(t.CertFile), KeyFile: res(t.KeyFile), PFXPasswordFile: res(t.PFXPasswordFile),
+		SelfSigned: t.SelfSigned, Hosts: t.SelfSignedHosts, Dir: filepath.Join(s.o.DataDir, "tls")}
+	m, err := tlscert.New(src, func(i tlscert.Info, err error) {
+		if err != nil {
+			s.sink.Emit(events.Event{Time: time.Now(), Type: events.TLSCertificateProblem, Severity: policy.SeverityWarning,
+				Message: "Renewed certificate could not be loaded; still serving the previous one: " + err.Error()})
+			return
+		}
+		s.sink.Emit(events.Event{Time: time.Now(), Type: events.TLSCertificateReloaded, Message: certMessage("Reloaded", i), Data: certData(i)})
+	})
+	if err != nil {
+		return nil, fmt.Errorf("inference TLS: %w", err)
+	}
+	i := m.Info()
+	s.sink.Emit(events.Event{Time: time.Now(), Type: events.TLSCertificateLoaded, Message: certMessage("Serving", i), Data: certData(i)})
+	if i.SelfSigned {
+		s.log.Warn("inference listener uses a self-signed certificate; use a CA-issued certificate in deployment", "subject", i.Subject)
+	}
+	return m, nil
+}
+
+func certMessage(verb string, i tlscert.Info) string {
+	kind := "CA-issued"
+	if i.SelfSigned {
+		kind = "self-signed (testing only)"
+	}
+	return fmt.Sprintf("%s %s certificate %s, issued by %s, valid until %s", verb, kind, i.Subject, i.Issuer, i.NotAfter.Local().Format("Jan 2, 2006"))
+}
+
+func certData(i tlscert.Info) map[string]any {
+	return map[string]any{"subject": i.Subject, "issuer": i.Issuer, "dns_names": i.DNSNames,
+		"not_after": i.NotAfter.Format(time.RFC3339), "self_signed": i.SelfSigned, "file": i.File}
+}
+
+// checkCertExpiry warns when the certificate is within 21 days of expiry.
+func (s *Service) checkCertExpiry(now time.Time) {
+	i := s.tlsMgr.Info()
+	if left := i.NotAfter.Sub(now); left < 21*24*time.Hour {
+		s.sink.Emit(events.Event{Time: now, Type: events.TLSCertificateProblem, Severity: policy.SeverityWarning,
+			Message: fmt.Sprintf("Inference certificate %s expires %s (%d days); renew it and replace the file", i.Subject,
+				i.NotAfter.Local().Format("Jan 2, 2006"), int(left.Hours()/24)), Data: certData(i)})
 	}
 }
 

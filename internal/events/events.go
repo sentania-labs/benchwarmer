@@ -59,6 +59,10 @@ const (
 	AgentDisconnected Type = "agent_disconnected"
 	DeviceLost        Type = "device_lost"
 
+	TLSCertificateLoaded   Type = "tls_certificate_loaded"
+	TLSCertificateReloaded Type = "tls_certificate_reloaded"
+	TLSCertificateProblem  Type = "tls_certificate_problem"
+
 	// RequestsRejected aggregates 503s during one unavailable period rather
 	// than one event per request.
 	RequestsRejected Type = "requests_rejected"

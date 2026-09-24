@@ -32,7 +32,7 @@ func TestOpenAPIMatchesWireTypes(t *testing.T) {
 		"ModeRequest": ModeRequest{}, "ActionRequest": ActionRequest{}, "ActionResponse": ActionResponse{},
 		"AgentReport": AgentReport{}, "ConfigResponse": ConfigResponse{}, "Impact": config.Impact{},
 		"ApplicationsBody": ApplicationsBody{}, "Config": config.Config{}, "RuntimeConfig": config.Runtime{},
-		"ListenConfig": config.Listen{}, "TelemetryConfig": config.Telemetry{}, "SafetyConfig": config.Safety{},
+		"ListenConfig": config.Listen{}, "TLSConfig": config.TLS{}, "TelemetryConfig": config.Telemetry{}, "SafetyConfig": config.Safety{},
 		"ContentionConfig": config.Contention{}, "Profile": config.Profile{}, "Schedule": config.Schedule{},
 		"AppRule": config.AppRule{}, "AntiThrashConfig": config.AntiThrash{}, "RecoveryConfig": config.Recovery{},
 		"ModesConfig": config.Modes{}, "SignalsConfig": config.Signals{}, "SecurityConfig": config.Security{},

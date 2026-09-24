@@ -239,10 +239,32 @@ func validateListen(v *validator, c Config) {
 	ports[strconv.Itoa(c.Runtime.Port)] = "runtime.port"
 	check("listen.inference", c.Listen.Inference)
 	check("listen.management", c.Listen.Management)
+	t := c.Listen.InferenceTLS
+	if host, _, err := net.SplitHostPort(c.Listen.Inference); err == nil && !isLoopbackHost(host) && !t.Enabled {
+		v.add("listen.inference_tls.enabled", "a non-loopback inference listener must use TLS")
+	}
+	if t.Enabled {
+		switch {
+		case t.CertFile == "" && !t.SelfSigned:
+			v.add("listen.inference_tls.cert_file", "set a certificate file, or enable self_signed for testing")
+		case t.CertFile != "" && isPFXPath(t.CertFile) && t.KeyFile != "":
+			v.add("listen.inference_tls.key_file", "must be empty when cert_file is a PFX (the key is inside it)")
+		case t.CertFile != "" && !isPFXPath(t.CertFile) && t.KeyFile == "":
+			v.add("listen.inference_tls.key_file", "is required with a PEM certificate")
+		}
+		if t.PFXPasswordFile != "" && !isPFXPath(t.CertFile) {
+			v.add("listen.inference_tls.pfx_password_file", "only applies to a .pfx or .p12 cert_file")
+		}
+	}
 	// Non-loopback management needs a way to authenticate.
 	if host, _, err := net.SplitHostPort(c.Listen.Management); err == nil && !isLoopbackHost(host) && c.Security.ManagementTokenFile == "" {
 		v.add("listen.management", "a non-loopback management listener requires security.management_token_file")
 	}
+}
+
+func isPFXPath(p string) bool {
+	l := strings.ToLower(p)
+	return strings.HasSuffix(l, ".pfx") || strings.HasSuffix(l, ".p12")
 }
 
 func isLoopbackHost(h string) bool {

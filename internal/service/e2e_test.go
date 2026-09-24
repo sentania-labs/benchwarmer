@@ -3,6 +3,8 @@ package service
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -91,6 +93,8 @@ func TestEndToEndLifecycle(t *testing.T) {
 	inf, mgmt := freePort(t), freePort(t)
 	c.Listen.Inference = "127.0.0.1:" + strconv.Itoa(inf)
 	c.Listen.Management = "127.0.0.1:" + strconv.Itoa(mgmt)
+	// Inference over HTTPS with the generated test certificate.
+	c.Listen.InferenceTLS = config.TLS{Enabled: true, SelfSigned: true}
 	c.Recovery.StartupCooldown = config.Duration(time.Second)
 	for _, n := range []string{"normal", "school_hours"} {
 		p := c.Profiles[n]
@@ -125,9 +129,10 @@ func TestEndToEndLifecycle(t *testing.T) {
 		st := ctl.Status()
 		t.Fatalf("state %s, want %s (%s)", st.State, want, st.Summary)
 	}
-	proxyURL := "http://127.0.0.1:" + strconv.Itoa(inf) + "/v1/chat/completions"
+	proxyURL := "https://127.0.0.1:" + strconv.Itoa(inf) + "/v1/chat/completions"
+	var client *http.Client
 	stream := func() chan [2]int {
-		resp, err := http.Post(proxyURL, "application/json", strings.NewReader(`{"stream":true}`))
+		resp, err := client.Post(proxyURL, "application/json", strings.NewReader(`{"stream":true}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -153,6 +158,25 @@ func TestEndToEndLifecycle(t *testing.T) {
 	}
 
 	waitState(state.Ready, 15*time.Second)
+
+	// Trust exactly the generated certificate (no InsecureSkipVerify).
+	pem, err := os.ReadFile(filepath.Join(data, "tls", "self-signed.crt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		t.Fatal("bad self-signed PEM")
+	}
+	client = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	// Plain HTTP must never reach the proxy: the TLS server answers 400
+	// without any Benchwarmer headers (or the connection fails).
+	if r, err := http.Post(strings.Replace(proxyURL, "https://", "http://", 1), "application/json", strings.NewReader(`{}`)); err == nil {
+		r.Body.Close()
+		if r.StatusCode != http.StatusBadRequest || r.Header.Get("X-Benchwarmer-Condition") != "" {
+			t.Fatalf("plain HTTP reached the proxy: %d %v", r.StatusCode, r.Header)
+		}
+	}
 
 	// Regression: an agent report followed by a status read used to
 	// deadlock the controller (the fact builder called back into it).
@@ -182,7 +206,7 @@ func TestEndToEndLifecycle(t *testing.T) {
 	for time.Now().Before(deadline) && ctl.Status().Condition == state.Available {
 		time.Sleep(25 * time.Millisecond)
 	}
-	resp, err := http.Post(proxyURL, "application/json", strings.NewReader(`{}`))
+	resp, err := client.Post(proxyURL, "application/json", strings.NewReader(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -900,6 +900,18 @@ components:
       properties:
         inference: { type: string, examples: ["127.0.0.1:8480"] }
         management: { type: string, examples: ["127.0.0.1:8481"] }
+        inference_tls: { $ref: "#/components/schemas/TLSConfig" }
+    TLSConfig:
+      type: object
+      additionalProperties: false
+      description: HTTPS for the inference listener. Required when it is not loopback. Deployments use a CA-issued certificate (PFX with key, or PEM files); self_signed is for testing.
+      properties:
+        enabled: { type: boolean }
+        cert_file: { type: string, description: PEM chain (leaf first) or .pfx/.p12. Relative paths are in the data directory. }
+        key_file: { type: string, description: PEM private key; empty for PFX. }
+        pfx_password_file: { type: string, description: File containing the PFX password. }
+        self_signed: { type: boolean }
+        self_signed_hosts: { type: array, items: { type: string } }
     TelemetryConfig:
       type: object
       additionalProperties: false

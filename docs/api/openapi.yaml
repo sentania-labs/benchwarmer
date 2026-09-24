@@ -61,9 +61,11 @@ tags:
   - name: config
     description: Configuration and application classification rules.
   - name: control
-    description: Manual mode, drain, and reload.
+    description: Manual mode, drain, reload, and service restart.
   - name: agent
     description: Reports from the per-session agent.
+  - name: auth
+    description: Single-use dashboard sign-in codes for administrators.
   - name: metrics
     description: Prometheus metrics.
   - name: inference
@@ -311,6 +313,78 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "413": { $ref: "#/components/responses/TooLarge" }
+
+  /api/v1/setup:
+    get:
+      tags: [config]
+      operationId: getSetup
+      summary: What the dashboard offers to pick from.
+      description: Models in the models folder, llama.cpp builds installed with Benchwarmer, and LocalMachine\My certificates usable for HTTPS. Read access.
+      responses:
+        "200":
+          description: Choices.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SetupInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/signin/codes:
+    post:
+      tags: [auth]
+      operationId: postSignInCode
+      summary: Register a single-use dashboard sign-in code (ADR 0012).
+      description: Management token only. Used by `benchwarmer login`, which the tray starts elevated. The code is redeemable once, from this PC, for one minute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignInCode" }
+      responses:
+        "200":
+          description: Registered.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SignInRegistered" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/signin/redeem:
+    post:
+      tags: [auth]
+      operationId: postSignInRedeem
+      summary: Exchange a sign-in code for the management token.
+      description: No token. Accepted only from a loopback peer addressing the service as localhost or a loopback IP. Redemption pauses after repeated failures.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignInCode" }
+      responses:
+        "200":
+          description: The management token, for this browser tab.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SignInToken" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/service/restart:
+    post:
+      tags: [control]
+      operationId: postServiceRestart
+      summary: Restart the Windows service (applies listener, certificate, credential and logging changes).
+      description: Management token only. The runtime is stopped the normal way first. Only when running as the Windows service.
+      responses:
+        "202":
+          description: Restarting in a couple of seconds.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Restarting" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Rejected" }
 
   /metrics:
     get:
@@ -793,6 +867,54 @@ components:
         accepted: { type: boolean }
         action: { type: string, enum: [drain, reload] }
         reason: { type: string }
+    SetupInfo:
+      type: object
+      required: [data_dir, models_dir, models, runtimes, certificates]
+      properties:
+        data_dir: { type: string }
+        models_dir: { type: string }
+        models: { type: array, items: { $ref: "#/components/schemas/ModelFile" } }
+        runtimes: { type: array, items: { $ref: "#/components/schemas/RuntimeInstall" } }
+        certificates: { type: array, items: { $ref: "#/components/schemas/StoreCertificate" } }
+        certificates_error: { type: string, description: Why the certificate list could not be read. }
+    ModelFile:
+      type: object
+      properties:
+        name: { type: string }
+        path: { type: string }
+        size_bytes: { type: integer, format: int64 }
+        modified: { type: string, format: date-time }
+    RuntimeInstall:
+      type: object
+      properties:
+        name: { type: string }
+        path: { type: string }
+    StoreCertificate:
+      type: object
+      properties:
+        thumbprint: { type: string }
+        subject: { type: string }
+        issuer: { type: string }
+        dns_names: { type: array, items: { type: string } }
+        not_after: { type: string, format: date-time }
+        self_signed: { type: boolean }
+    SignInCode:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, minLength: 32, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }
+    SignInRegistered:
+      type: object
+      properties:
+        expires_at: { type: string, format: date-time }
+    SignInToken:
+      type: object
+      properties:
+        token: { type: string }
+    Restarting:
+      type: object
+      properties:
+        restarting: { type: boolean }
     AgentReport:
       type: object
       required: [session_id, fullscreen, idle_seconds, locked]

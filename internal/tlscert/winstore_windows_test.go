@@ -86,12 +86,21 @@ func TestStoreCertificateNotFound(t *testing.T) {
 	}
 }
 
-// A certificate whose key sits in a legacy CSP is reported as such, not as
-// missing.
-func TestStoreCertificateLegacyCSPExplained(t *testing.T) {
+// A key in a legacy software CSP is opened through CNG's compatibility
+// layer and serves HTTPS. Only when CNG cannot open it (for example some
+// hardware CSPs) is it refused, with an error naming the cause.
+func TestStoreCertificateLegacyCSPKey(t *testing.T) {
 	tp := newStoreCert(t, "bw-store-legacy.example.lan", "-KeyAlgorithm RSA -KeyLength 2048 -Provider 'Microsoft Enhanced RSA and AES Cryptographic Provider' -KeySpec KeyExchange")
-	_, err := New(Source{StoreThumbprint: tp}, nil)
-	if err == nil || !strings.Contains(err.Error(), "legacy CryptoAPI provider") {
-		t.Fatalf("got %v", err)
+	m, err := New(Source{StoreThumbprint: tp}, nil)
+	if err != nil {
+		if !strings.Contains(err.Error(), "legacy CryptoAPI provider") {
+			t.Fatalf("refused without naming the cause: %v", err)
+		}
+		return
+	}
+	for _, v := range []uint16{tls.VersionTLS12, tls.VersionTLS13} {
+		if got := handshake(t, m, v); got != tp {
+			t.Fatalf("served %s, want %s", got, tp)
+		}
 	}
 }

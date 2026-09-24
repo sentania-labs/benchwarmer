@@ -14,11 +14,12 @@ PFX files are not read; import one into the store instead (below).
 
 ### 1. Get the certificate into LocalMachine\My
 
-Benchwarmer signs through CNG, so the private key must be held by a Key
-Storage Provider (for example *Microsoft Software Key Storage Provider* or
-the *Microsoft Platform Crypto Provider* for TPM keys). A key in a legacy
-CryptoAPI provider (CSP) is refused with an error saying so. Each route
-below produces a KSP key.
+Benchwarmer signs through CNG. Prefer a Key Storage Provider (for example
+*Microsoft Software Key Storage Provider*, or the *Microsoft Platform Crypto
+Provider* for TPM keys); each route below produces one. A key in a legacy
+software CryptoAPI provider (CSP) usually works too, because CNG can open
+it. A key that CNG cannot open (for example in some hardware CSPs) is
+refused with an error naming the legacy provider.
 
 Any one of these:
 

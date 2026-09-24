@@ -62,6 +62,9 @@ const (
 	// ServiceMisconfigured flags a setup that cannot work (e.g. wrong
 	// service identity for the configured runtime identity).
 	ServiceMisconfigured Type = "service_misconfigured"
+	// ProvisioningProblem records what start-up self-provisioning (folders,
+	// ACLs, service settings; ADR 0012) could not do.
+	ProvisioningProblem Type = "provisioning_problem"
 
 	TLSCertificateLoaded   Type = "tls_certificate_loaded"
 	TLSCertificateReloaded Type = "tls_certificate_reloaded"

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/sentania-labs/benchwarmer/internal/gpureset"
 	"github.com/sentania-labs/benchwarmer/internal/metrics"
 	"github.com/sentania-labs/benchwarmer/internal/policy"
+	"github.com/sentania-labs/benchwarmer/internal/provision"
 	"github.com/sentania-labs/benchwarmer/internal/proxy"
 	"github.com/sentania-labs/benchwarmer/internal/runtime/llamacpp"
 	"github.com/sentania-labs/benchwarmer/internal/secrets"
@@ -44,6 +46,9 @@ type Options struct {
 	Log         *slog.Logger
 	// UI serves the web dashboard at "/" on the management listener.
 	UI http.Handler
+	// ServiceName is the SCM service name when started with --service. The
+	// service then provisions its data folder ACLs and SCM settings.
+	ServiceName string
 }
 
 // Service is the assembled worker.
@@ -90,11 +95,17 @@ func New(o Options) (*Service, error) {
 	s.store = st
 	s.sink = store.NewEventSink(st, 1024)
 
-	files := secrets.FilesFrom(s.cfg.Security)
-	toks, err := secrets.EnsureTokens(o.DataDir, files)
-	if err != nil {
-		return nil, fmt.Errorf("tokens: %w", err)
+	// ACLs and SCM settings only as the real service (ADR 0012); a console
+	// run still gets its folders and tokens.
+	po := provision.Options{Tokens: secrets.FilesFrom(s.cfg.Security)}
+	if o.ServiceName != "" && winsvc.IsService() {
+		po.ApplyACLs, po.ServiceName = true, o.ServiceName
 	}
+	toks, prov, err := provision.Ensure(o.DataDir, po)
+	if err != nil {
+		return nil, err
+	}
+	loadBlocked := s.reportProvisioning(prov)
 	s.auth = api.NewAuthenticator(toks)
 	s.signIn = api.NewSignIn(toks.Management, nil)
 	s.infTok = toks.Inference
@@ -130,9 +141,32 @@ func New(o Options) (*Service, error) {
 		Adapter: llamacpp.New(), Telemetry: s.tel, Processes: procs, Facts: facts, Gate: s.gate,
 		Events: events.SinkFunc(s.sink.Emit), EventReader: eventReader{st}, Persist: persister{st},
 		Metrics: s.met, Log: s.log, Version: version.Version, BootTime: signals.BootTime,
-		GPUResets: gpuWatch.Poll, GPUResetsSince: gpuWatch.SetSince,
+		GPUResets: gpuWatch.Poll, GPUResetsSince: gpuWatch.SetSince, LoadBlocked: loadBlocked,
 	})
 	return s, nil
+}
+
+// reportProvisioning logs repairs, records problems as an event, and
+// returns why loading must be blocked (empty when it need not be).
+func (s *Service) reportProvisioning(r provision.Report) string {
+	for _, c := range r.Created {
+		s.log.Info("provisioning: created", "path", c)
+	}
+	for _, c := range r.Repaired {
+		s.log.Warn("provisioning: repaired drift", "what", c)
+	}
+	if len(r.Problems) == 0 {
+		return ""
+	}
+	s.log.Error("provisioning incomplete", "problems", r.Problems, "secrets_unprotected", r.SecretsUnprotected)
+	sev, msg, blocked := policy.SeverityWarning, "Start-up provisioning incomplete: ", ""
+	if r.SecretsUnprotected {
+		blocked = "Could not secure the data folder permissions, so secrets may be exposed; not loading a model. Fix the problem in the provisioning_problem event and restart the service."
+		sev, msg = policy.SeverityCritical, "Could not secure the data folder permissions; not loading a model until the service restarts with them fixed: "
+	}
+	s.sink.Emit(events.Event{Time: time.Now(), Type: events.ProvisioningProblem, Severity: sev,
+		Message: msg + strings.Join(r.Problems, "; "), Data: map[string]any{"problems": r.Problems, "secrets_unprotected": r.SecretsUnprotected}})
+	return blocked
 }
 
 // Controller exposes the controller (for tests and the service runner).

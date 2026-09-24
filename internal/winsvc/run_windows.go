@@ -24,6 +24,14 @@ func Run(o Options, h Handler) error {
 	return svc.Run(o.Name, &service{opts: o.withDefaults(), h: h})
 }
 
+// IsService reports whether the process runs under the service control
+// manager. An error counts as not a service: callers use it to decide
+// whether to touch the service's own registration and data ACLs.
+func IsService() bool {
+	ok, err := svc.IsWindowsService()
+	return err == nil && ok
+}
+
 type service struct {
 	opts Options
 	h    Handler

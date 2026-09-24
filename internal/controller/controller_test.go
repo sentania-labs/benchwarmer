@@ -914,3 +914,32 @@ func TestSetupRequiredUntilModelAppears(t *testing.T) {
 	r.clk.Advance(6 * time.Second) // next file check
 	r.stepUntil(state.Ready)
 }
+
+// A service that could not secure its secrets never loads, and says why,
+// even once every other rule would allow a load.
+func TestLoadBlockedNeverLoads(t *testing.T) {
+	const why = "Data folder permissions could not be secured"
+	r := newRigWith(t, nil, func(d *Deps) { d.LoadBlocked = why })
+	r.c.Step(true)
+	r.clk.Advance(10 * time.Minute)
+	for range 5 {
+		r.c.Step(true)
+		time.Sleep(2 * time.Millisecond)
+	}
+	st := r.c.Status()
+	if st.Condition != state.Unavailable || st.State != state.Error {
+		t.Fatalf("condition %s state %s", st.Condition, st.State)
+	}
+	if st.Decision.Rule != RuleSecretsUnprotected || st.Decision.Reason != why {
+		t.Fatalf("decision %q: %q", st.Decision.Rule, st.Decision.Reason)
+	}
+	r.ad.mu.Lock()
+	n := len(r.ad.insts)
+	r.ad.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("runtime started %d time(s)", n)
+	}
+	if code := r.post(); code != http.StatusServiceUnavailable {
+		t.Fatalf("inference status %d", code)
+	}
+}

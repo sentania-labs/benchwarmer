@@ -52,3 +52,20 @@ func (h *handler) setup(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, h.o.Setup())
 }
+
+// Restarting answers POST /api/v1/service/restart.
+type Restarting struct {
+	Restarting bool `json:"restarting"`
+}
+
+func (h *handler) restart(w http.ResponseWriter, r *http.Request) {
+	if h.o.Restart == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "restart is not available")
+		return
+	}
+	if err := h.o.Restart(); err != nil {
+		writeError(w, http.StatusConflict, CodeRejected, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, Restarting{Restarting: true})
+}

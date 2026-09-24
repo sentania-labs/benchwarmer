@@ -6,6 +6,7 @@
 //	benchwarmer run [--data DIR] [--service] [--simulate-gpu [--sim-control FILE]]
 //	benchwarmer service install [--account virtual|system] [--data DIR]
 //	benchwarmer service remove
+//	benchwarmer service restart [--delay D]
 //	benchwarmer config default
 //	benchwarmer config validate FILE
 //	benchwarmer login [--code CODE] [--data DIR]

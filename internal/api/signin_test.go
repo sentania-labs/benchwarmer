@@ -81,3 +81,13 @@ func TestSetupEndpoint(t *testing.T) {
 		t.Fatalf("remote without token: %d", rec.Code)
 	}
 }
+
+func TestRestartEndpoint(t *testing.T) {
+	hr := newHarness(t)
+	if rec := hr.do(req{method: "POST", path: "/api/v1/service/restart"}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("restart without token: %d", rec.Code)
+	}
+	if rec := hr.do(req{method: "POST", path: "/api/v1/service/restart", token: mgmtTok}); rec.Code != http.StatusNotFound {
+		t.Fatalf("restart without a restarter: %d", rec.Code)
+	}
+}

@@ -213,7 +213,7 @@ func (s *Service) Run(ctx context.Context, evs <-chan winsvc.Event) error {
 	}), ReadHeaderTimeout: 10 * time.Second}
 	mux := http.NewServeMux()
 	apiH := api.New(api.Options{Backend: s.ctl, Auth: s.auth, Metrics: s.met.Handler(), Version: version.Version, Logger: s.log,
-		SignIn: s.signIn, Setup: s.setupInfo})
+		SignIn: s.signIn, Setup: s.setupInfo, Restart: s.requestRestart})
 	mux.Handle("/api/", apiH)
 	mux.Handle("/metrics", apiH)
 	if s.o.UI != nil {

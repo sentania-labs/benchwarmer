@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/sentania-labs/benchwarmer/internal/service"
 	"github.com/sentania-labs/benchwarmer/internal/winsvc"
@@ -15,7 +16,7 @@ import (
 
 func cmdService(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: benchwarmer service install|remove")
+		return errors.New("usage: benchwarmer service install|remove|restart")
 	}
 	switch args[0] {
 	case "install":
@@ -34,6 +35,12 @@ func cmdService(args []string) error {
 		})
 	case "remove":
 		return winsvc.Remove(serviceName, winsvc.DefaultStopTimeout)
+	case "restart":
+		fs := flag.NewFlagSet("restart", flag.ExitOnError)
+		delay := fs.Duration("delay", 0, "wait this long first (lets the API answer the request that asked for the restart)")
+		_ = fs.Parse(args[1:])
+		time.Sleep(*delay)
+		return winsvc.Restart(serviceName, winsvc.DefaultStopTimeout)
 	}
 	return fmt.Errorf("unknown service command %q", args[0])
 }

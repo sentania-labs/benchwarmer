@@ -276,3 +276,25 @@ func binaryPath(exe string, args []string) string {
 	}
 	return b
 }
+
+// Restart stops the service (waiting for it) and starts it again. Used by
+// the detached helper behind the dashboard's Restart service action.
+func Restart(name string, stopTimeout time.Duration) error {
+	m, err := mgr.Connect()
+	if err != nil {
+		return fmt.Errorf("winsvc: connect to SCM: %w", err)
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService(name)
+	if err != nil {
+		return fmt.Errorf("winsvc: open service %s: %w", name, err)
+	}
+	defer s.Close()
+	if err := stopAndWait(s, stopTimeout); err != nil {
+		return err
+	}
+	if err := s.Start(); err != nil {
+		return fmt.Errorf("winsvc: start service: %w", err)
+	}
+	return nil
+}

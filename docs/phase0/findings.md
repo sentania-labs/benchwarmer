@@ -1,13 +1,13 @@
 # Phase 0 findings
 
-**Status: target-machine measurements in progress.** Remote access to SS8510
-(the target PC) was provisioned on 2026-09-23 over WinRM. Measurements follow
+**Status: target-machine measurements in progress.** Remote access to the target
+PC was provisioned on 2026-09-23 (Windows remote management). Measurements follow
 [runbook.md](runbook.md). This file records what is established and holds the
 slots the target results fill.
 
 ## Target machine
 
-SS8510: Windows 11 Pro 10.0.26200, Ryzen 7 9700X, 31 GB RAM, AMD Radeon RX
+Windows 11 Pro 10.0.26200, Ryzen 7 9700X, 31 GB RAM, AMD Radeon RX
 9060 XT 16 GB (driver 32.0.31044.16) plus the Ryzen iGPU (driver
 32.0.21043.5001). Domain-joined; managed by lab GPOs.
 
@@ -28,9 +28,9 @@ in `C:\ProgramData\Benchwarmer\models\` (data, not executables). Code
 signing alone would not cover the third-party runtime. The installer must
 document this requirement (ADR 0009, installer strategy).
 
-Also enabled on SS8510 and checked: Controlled Folder Access (does not cover
+Also enabled on the target and checked: Controlled Folder Access (does not cover
 ProgramData), ASR rule `d1e49aac-...` for PsExec/WMI-launched processes (did
-not fire for WinRM). Smart App Control is off; AppLocker has no rules.
+not fire for remote management). Smart App Control is off; AppLocker has no rules.
 
 ## Established without the target PC
 

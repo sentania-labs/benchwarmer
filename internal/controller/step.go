@@ -27,6 +27,7 @@ func (c *Controller) step(now time.Time, collect bool) {
 	d := policy.Evaluate(snap, c.cfg)
 	d = c.applyManual(d)
 	d = c.applyZombie(d)
+	d = c.applyLoadBlocked(d)
 	if d.Competing {
 		if c.st == state.Cooldown && c.decision.Rule == policy.RuleCooldown {
 			// A competing workload reappeared while the cooldown was
@@ -701,6 +702,22 @@ func (c *Controller) applyZombie(d policy.Decision) policy.Decision {
 	d.Reason = fmt.Sprintf("Previous runtime (pid %d) not yet confirmed terminated; retrying", c.zombie.PID())
 	d.IdleState = state.Error
 	return d
+}
+
+// RuleSecretsUnprotected holds the worker while Deps.LoadBlocked is set.
+const RuleSecretsUnprotected = "safety.secrets_unprotected"
+
+// applyLoadBlocked replaces the decision while loading is blocked, so the
+// status names the blocking problem rather than whatever the policy would
+// otherwise wait for. The runtime is never started in that case, so there
+// is nothing running to yield.
+func (c *Controller) applyLoadBlocked(d policy.Decision) policy.Decision {
+	if c.d.LoadBlocked == "" || c.st.RuntimeRunning() {
+		return d
+	}
+	return policy.Decision{Action: policy.ActionHold, Rule: RuleSecretsUnprotected, Tier: policy.TierSafety,
+		Severity: policy.SeverityCritical, Reason: c.d.LoadBlocked, Profile: d.Profile, ProfileSource: d.ProfileSource,
+		Mode: d.Mode, IdleState: state.Error}
 }
 
 // backoff schedules a bounded exponential retry after a crash or failed load.

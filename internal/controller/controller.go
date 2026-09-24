@@ -132,8 +132,13 @@ type Deps struct {
 	GPUResetsSince func(time.Time)
 	// BootTime reports the system boot time (optional).
 	BootTime func() (time.Time, error)
-	Log      *slog.Logger
-	Version  string
+	// LoadBlocked, when set, is why no model may be loaded for the life of
+	// this process: the service could not secure its secrets at start (ADR
+	// 0012). The worker stays Unavailable with this reason; everything
+	// else (API, dashboard, events) keeps working.
+	LoadBlocked string
+	Log         *slog.Logger
+	Version     string
 }
 
 type loadResult struct {

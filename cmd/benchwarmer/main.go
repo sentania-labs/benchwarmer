@@ -89,7 +89,11 @@ func cmdRun(args []string) error {
 			log.Warn("no console for graceful runtime stop; runtime stops will hard-kill", "err", err)
 		}
 	}
-	svc, err := service.New(service.Options{DataDir: *data, SimulateGPU: *sim, SimControl: *simCtl, Log: log, UI: webui.Handler()})
+	so := service.Options{DataDir: *data, SimulateGPU: *sim, SimControl: *simCtl, Log: log, UI: webui.Handler()}
+	if *asService {
+		so.ServiceName = serviceName
+	}
+	svc, err := service.New(so)
 	if err != nil {
 		return err
 	}

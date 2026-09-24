@@ -108,24 +108,112 @@ func Install(c InstallConfig) error {
 }
 
 func configure(s *mgr.Service, c InstallConfig) error {
-	if err := s.SetRecoveryActions(MgrRecoveryActions(), uint32(RecoveryResetPeriod/time.Second)); err != nil {
-		return fmt.Errorf("winsvc: recovery actions: %w", err)
+	_, err := applySettings(s, c.PreshutdownTimeout)
+	return err
+}
+
+// EnsureSettings brings an installed service's own SCM settings (delayed
+// automatic start, recovery actions, pre-shutdown timeout) to what Install
+// sets, so an MSI install, a hand install, and an upgrade converge (ADR
+// 0012). The service calls it for itself at every start. It returns the
+// settings it changed; a failure on one setting does not skip the others.
+func EnsureSettings(name string, preshutdown time.Duration) ([]string, error) {
+	m, err := mgr.Connect()
+	if err != nil {
+		return nil, fmt.Errorf("winsvc: connect to SCM: %w", err)
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService(name)
+	if err != nil {
+		return nil, fmt.Errorf("winsvc: open service %s: %w", name, err)
+	}
+	defer s.Close()
+	return applySettings(s, preshutdown)
+}
+
+// applySettings is the one definition of the settings shared by Install and
+// EnsureSettings. Each is read first and written only when it differs.
+func applySettings(s *mgr.Service, preshutdown time.Duration) ([]string, error) {
+	var changed []string
+	var errs []error
+	fail := func(what string, err error) { errs = append(errs, fmt.Errorf("winsvc: %s: %w", what, err)) }
+
+	if cfg, err := s.Config(); err != nil {
+		fail("read service config", err)
+	} else {
+		if cfg.StartType != mgr.StartAutomatic {
+			n := uint32(windows.SERVICE_NO_CHANGE)
+			if err := windows.ChangeServiceConfig(s.Handle, n, mgr.StartAutomatic, n, nil, nil, nil, nil, nil, nil, nil); err != nil {
+				fail("automatic start", err)
+			} else {
+				changed = append(changed, "automatic start")
+			}
+		}
+		if !cfg.DelayedAutoStart {
+			info := windows.SERVICE_DELAYED_AUTO_START_INFO{IsDelayedAutoStartUp: 1}
+			if err := windows.ChangeServiceConfig2(s.Handle, windows.SERVICE_CONFIG_DELAYED_AUTO_START_INFO, (*byte)(unsafe.Pointer(&info))); err != nil {
+				fail("delayed automatic start", err)
+			} else {
+				changed = append(changed, "delayed automatic start")
+			}
+		}
+	}
+
+	want, reset := MgrRecoveryActions(), uint32(RecoveryResetPeriod/time.Second)
+	cur, errA := s.RecoveryActions()
+	curReset, errR := s.ResetPeriod()
+	if errA != nil || errR != nil || curReset != reset || !sameRecovery(cur, want) {
+		if err := s.SetRecoveryActions(want, reset); err != nil {
+			fail("recovery actions", err)
+		} else {
+			changed = append(changed, "recovery actions")
+		}
 	}
 	// Apply recovery when the service stops with an error exit code, not
 	// only when the process crashes.
-	if err := s.SetRecoveryActionsOnNonCrashFailures(true); err != nil {
-		return fmt.Errorf("winsvc: recovery on non-crash failures: %w", err)
+	if on, err := s.RecoveryActionsOnNonCrashFailures(); err != nil || !on {
+		if err := s.SetRecoveryActionsOnNonCrashFailures(true); err != nil {
+			fail("recovery on non-crash failures", err)
+		} else {
+			changed = append(changed, "recovery on non-crash failures")
+		}
 	}
-	pt := c.PreshutdownTimeout
-	if pt <= 0 {
-		pt = DefaultPreshutdownTimeout
+
+	if preshutdown <= 0 {
+		preshutdown = DefaultPreshutdownTimeout
 	}
 	// SERVICE_PRESHUTDOWN_INFO: a single DWORD timeout in milliseconds.
-	info := struct{ Timeout uint32 }{uint32(pt / time.Millisecond)}
-	if err := windows.ChangeServiceConfig2(s.Handle, windows.SERVICE_CONFIG_PRESHUTDOWN_INFO, (*byte)(unsafe.Pointer(&info))); err != nil {
-		return fmt.Errorf("winsvc: preshutdown timeout: %w", err)
+	ms := uint32(preshutdown / time.Millisecond)
+	if cur, err := preshutdownTimeout(s); err != nil || cur != ms {
+		info := struct{ Timeout uint32 }{ms}
+		if err := windows.ChangeServiceConfig2(s.Handle, windows.SERVICE_CONFIG_PRESHUTDOWN_INFO, (*byte)(unsafe.Pointer(&info))); err != nil {
+			fail("preshutdown timeout", err)
+		} else {
+			changed = append(changed, "preshutdown timeout")
+		}
 	}
-	return nil
+	return changed, errors.Join(errs...)
+}
+
+func sameRecovery(a, b []mgr.RecoveryAction) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Type != b[i].Type || a[i].Delay != b[i].Delay {
+			return false
+		}
+	}
+	return true
+}
+
+func preshutdownTimeout(s *mgr.Service) (uint32, error) {
+	var buf [16]byte
+	var need uint32
+	if err := windows.QueryServiceConfig2(s.Handle, windows.SERVICE_CONFIG_PRESHUTDOWN_INFO, &buf[0], uint32(len(buf)), &need); err != nil {
+		return 0, err
+	}
+	return *(*uint32)(unsafe.Pointer(&buf[0])), nil
 }
 
 // Remove stops the service if it is running (waiting up to stopTimeout) and

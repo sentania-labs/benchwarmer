@@ -4,9 +4,9 @@
 //
 // File permissions here are POSIX 0600 and the directory 0700, which is what
 // Go can express portably. On Windows those bits do not restrict access; the
-// installer sets the ACL on %ProgramData%\Benchwarmer\secrets (service account
-// and Administrators full control, interactive users read on the agent token
-// only). This package does not attempt to manage Windows ACLs.
+// service sets the ACLs itself at start (internal/provision, ADR 0012:
+// SYSTEM and Administrators full control, interactive users read on the
+// agent token only). This package does not manage Windows ACLs.
 package secrets
 
 import (

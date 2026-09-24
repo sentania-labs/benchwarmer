@@ -6,11 +6,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
@@ -53,13 +51,12 @@ func cmdSvcTest(args []string) error {
 	if err := os.MkdirAll(*outDir, 0o755); err != nil {
 		return err
 	}
-	self, err := os.Executable()
+	// Run the probe from where it is installed. Copying it elsewhere (for
+	// example into the output folder under ProgramData) puts it outside the
+	// Defender ASR path exclusion, and the service fails to start.
+	probeExe, err := os.Executable()
 	if err != nil {
 		return err
-	}
-	probeExe := filepath.Join(*outDir, "bwprobe.exe")
-	if err := copyFile(self, probeExe); err != nil {
-		return fmt.Errorf("copy probe: %w", err)
 	}
 
 	m, err := mgr.Connect()
@@ -102,6 +99,7 @@ func cmdSvcTest(args []string) error {
 		for _, g := range []struct{ path, perm string }{
 			{*outDir, "(OI)(CI)M"},
 			{filepath.Dir(*exe), "(OI)(CI)RX"},
+			{filepath.Dir(probeExe), "(OI)(CI)RX"},
 			{filepath.Dir(*model), "(OI)(CI)RX"},
 		} {
 			if out, err := exec.Command("icacls", g.path, "/grant", startName+":"+g.perm).CombinedOutput(); err != nil {
@@ -149,26 +147,6 @@ func cmdSvcTest(args []string) error {
 	}
 	fmt.Println(resultFile)
 	return nil
-}
-
-func copyFile(src, dst string) error {
-	if strings.EqualFold(filepath.Clean(src), filepath.Clean(dst)) {
-		return nil
-	}
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
 }
 
 // cmdSvcRun is the service body used by svctest.

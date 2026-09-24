@@ -95,6 +95,8 @@ func scanGroup(pgid int) []int {
 }
 
 func (g *Group) interrupt() error {
+	g.plat.mu.Lock()
+	defer g.plat.mu.Unlock()
 	if err := syscall.Kill(-g.plat.pgid, syscall.SIGINT); err != nil {
 		if errors.Is(err, syscall.ESRCH) {
 			return ErrNotRunning
@@ -130,3 +132,10 @@ func (g *Group) close() error {
 	}
 	return nil
 }
+
+// EnsureConsole is a no-op off Windows: SIGINT to the process group needs
+// no console.
+func EnsureConsole() error { return nil }
+
+// HasConsole is always true off Windows (graceful stop uses SIGINT).
+func HasConsole() bool { return true }

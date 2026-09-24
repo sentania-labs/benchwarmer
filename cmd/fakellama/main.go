@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -27,6 +28,7 @@ func main() {
 	tokens := flag.Int("tokens", 16, "tokens per completion")
 	crashAfter := flag.Duration("crash-after", 0, "exit with status 3 after this long (0 = never)")
 	spawnChild := flag.Bool("spawn-child", false, "spawn a sleeping child process (process-tree tests)")
+	ignoreInterrupt := flag.Bool("ignore-interrupt", false, "ignore Ctrl+C / SIGINT (graceful-stop fallback tests)")
 	// Accept and ignore common llama-server flags so real argument lists work.
 	for _, f := range []string{"c", "ngl", "n-gpu-layers", "ctx-size", "t", "threads", "a", "alias", "np", "parallel", "fa", "flash-attn"} {
 		flag.String(f, "", "ignored")
@@ -37,6 +39,9 @@ func main() {
 		if _, err := os.Stat(*model); err != nil {
 			log.Fatalf("model: %v", err)
 		}
+	}
+	if *ignoreInterrupt {
+		signal.Ignore(os.Interrupt)
 	}
 	if *spawnChild {
 		spawnSleeper()

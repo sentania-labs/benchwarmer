@@ -36,8 +36,9 @@ type Instance interface {
 	// WaitReady blocks until the model is loaded and serving, the process
 	// exits, or ctx ends.
 	WaitReady(ctx context.Context) error
-	// Stop terminates the whole tree and verifies that every process exited
-	// within timeout. It is idempotent.
+	// Stop ends the whole tree (gracefully first when the instance supports
+	// it) and verifies that every process exited within timeout. It is
+	// idempotent.
 	Stop(timeout time.Duration) (StopResult, error)
 	// Exited is closed when the root process exits for any reason.
 	Exited() <-chan struct{}
@@ -52,9 +53,15 @@ type Instance interface {
 // StopResult reports what a stop measured.
 type StopResult struct {
 	// AlreadyExited is true when the runtime had exited before Stop.
-	AlreadyExited bool          `json:"already_exited"`
-	RootExit      time.Duration `json:"root_exit_ns"`
-	TreeEmpty     time.Duration `json:"tree_empty_ns"`
+	AlreadyExited bool `json:"already_exited"`
+	// Graceful is true when the runtime exited on Ctrl+C; KillFallback when
+	// it had to be hard-killed after the graceful timeout.
+	Graceful     bool `json:"graceful"`
+	KillFallback bool `json:"kill_fallback"`
+	// InterruptErr is set when Ctrl+C could not be delivered at all.
+	InterruptErr string        `json:"interrupt_error,omitempty"`
+	RootExit     time.Duration `json:"root_exit_ns"`
+	TreeEmpty    time.Duration `json:"tree_empty_ns"`
 }
 
 // Orphan is a runtime process found and killed during reconciliation.

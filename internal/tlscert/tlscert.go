@@ -44,7 +44,18 @@ type Source struct {
 	Hosts []string
 	// Dir holds the generated self-signed certificate.
 	Dir string
+	// StoreThumbprint or StoreSubject select a certificate from the Windows
+	// LocalMachine\My store instead of files (the newest valid match with a
+	// private key). The store is re-checked every StoreRefresh, so an AD CS
+	// autoenrollment renewal is picked up without a restart.
+	StoreThumbprint string
+	StoreSubject    string
 }
+
+// StoreRefresh is how often a store-backed certificate is looked up again.
+const StoreRefresh = 10 * time.Minute
+
+func (s Source) fromStore() bool { return s.StoreThumbprint != "" || s.StoreSubject != "" }
 
 // Info describes the certificate in use.
 type Info struct {
@@ -71,6 +82,12 @@ type Manager struct {
 // New loads the certificate once; an error means TLS cannot start.
 func New(src Source, onReload func(Info, error)) (*Manager, error) {
 	m := &Manager{src: src, onReload: onReload}
+	if src.fromStore() {
+		if err := m.loadStore(); err != nil {
+			return nil, err
+		}
+		return m, nil
+	}
 	if src.CertFile == "" {
 		if !src.SelfSigned {
 			return nil, errors.New("tls: no certificate file configured and self-signed is off")
@@ -108,6 +125,9 @@ func (m *Manager) TLSConfig() *tls.Config {
 // current returns the certificate, reloading if its files changed (checked
 // at most every 30 seconds). A failed reload keeps the previous certificate.
 func (m *Manager) current() *tls.Certificate {
+	if m.src.fromStore() {
+		return m.currentStore()
+	}
 	m.mu.Lock()
 	check := time.Since(m.lastCheck) >= 30*time.Second
 	if check {
@@ -131,6 +151,50 @@ func (m *Manager) current() *tls.Certificate {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.cert
+}
+
+// currentStore re-reads the store every StoreRefresh and swaps in a newer
+// certificate (for example after autoenrollment renewed it).
+func (m *Manager) currentStore() *tls.Certificate {
+	m.mu.Lock()
+	due := time.Since(m.lastCheck) >= StoreRefresh
+	if due {
+		m.lastCheck = time.Now()
+	}
+	prev := m.info
+	m.mu.Unlock()
+	if due {
+		err := m.loadStore()
+		if err != nil || m.Info().NotAfter != prev.NotAfter || m.Info().Subject != prev.Subject {
+			if m.onReload != nil {
+				m.onReload(m.Info(), err)
+			}
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cert
+}
+
+func (m *Manager) loadStore() error {
+	cert, err := storeCertificate(m.src.StoreThumbprint, m.src.StoreSubject)
+	if err != nil {
+		return err
+	}
+	leaf := cert.Leaf
+	where := "LocalMachine\\My"
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.lastCheck.IsZero() {
+		m.lastCheck = time.Now()
+	}
+	if m.cert != nil && string(m.cert.Certificate[0]) == string(cert.Certificate[0]) {
+		return nil // unchanged: keep the existing signer
+	}
+	m.cert = cert
+	m.info = Info{Subject: leaf.Subject.String(), Issuer: leaf.Issuer.String(), DNSNames: leaf.DNSNames,
+		NotAfter: leaf.NotAfter, SelfSigned: leaf.Subject.String() == leaf.Issuer.String(), File: where}
+	return nil
 }
 
 func (m *Manager) files() []string {

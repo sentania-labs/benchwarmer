@@ -5,6 +5,7 @@ package winsvc
 import (
 	"errors"
 	"fmt"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -63,8 +64,9 @@ func MgrRecoveryActions() []mgr.RecoveryAction {
 	return out
 }
 
-// Install registers the service. It fails if a service with the name
-// already exists; a partially configured service is removed again.
+// Install registers the service, or updates the registration in place when
+// the service already exists (installer re-runs for upgrades). A newly
+// created service that cannot be fully configured is removed again.
 func Install(c InstallConfig) error {
 	if c.Name == "" || c.ExePath == "" {
 		return errors.New("winsvc: Name and ExePath are required")
@@ -79,8 +81,19 @@ func Install(c InstallConfig) error {
 	}
 	defer m.Disconnect()
 	if s, err := m.OpenService(c.Name); err == nil {
-		s.Close()
-		return fmt.Errorf("winsvc: service %s already exists", c.Name)
+		// Upgrade: update the existing registration in place so the
+		// installer can be re-run (ADR 0009).
+		defer s.Close()
+		cur, err := s.Config()
+		if err != nil {
+			return fmt.Errorf("winsvc: read existing service config: %w", err)
+		}
+		mc.BinaryPathName = binaryPath(c.ExePath, c.Args)
+		mc.ServiceType = cur.ServiceType
+		if err := s.UpdateConfig(mc); err != nil {
+			return fmt.Errorf("winsvc: update service: %w", err)
+		}
+		return configure(s, c)
 	}
 	s, err := m.CreateService(c.Name, c.ExePath, mc, c.Args...)
 	if err != nil {
@@ -164,4 +177,14 @@ func stopAndWait(s *mgr.Service, timeout time.Duration) error {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+}
+
+// binaryPath quotes the executable and arguments the way mgr.CreateService
+// does, for UpdateConfig (which takes the full command line).
+func binaryPath(exe string, args []string) string {
+	b := syscall.EscapeArg(exe)
+	for _, a := range args {
+		b += " " + syscall.EscapeArg(a)
+	}
+	return b
 }

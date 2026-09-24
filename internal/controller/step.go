@@ -16,6 +16,7 @@ import (
 
 func (c *Controller) step(now time.Time, collect bool) {
 	c.absorbAsync(now)
+	c.checkGPUResets(now)
 	c.expireMode(now)
 	if collect || c.lastEvaluated.IsZero() {
 		c.observe(now)
@@ -396,7 +397,15 @@ func (c *Controller) onStopped(now time.Time, r stopResult) {
 	}
 	c.emit(events.Event{Time: now, Type: events.RuntimeStopped, RuntimePID: pid, Rule: y.Rule,
 		Message: "Runtime process tree terminated and verified empty",
-		Data:    map[string]any{"root_exit_ms": r.res.RootExit.Milliseconds(), "tree_empty_ms": r.res.TreeEmpty.Milliseconds(), "already_exited": r.res.AlreadyExited}})
+		Data: map[string]any{"root_exit_ms": r.res.RootExit.Milliseconds(), "tree_empty_ms": r.res.TreeEmpty.Milliseconds(),
+			"already_exited": r.res.AlreadyExited, "graceful": r.res.Graceful, "kill_fallback": r.res.KillFallback}})
+	if r.res.KillFallback {
+		msg := "Runtime did not exit on Ctrl+C within the graceful timeout; it was hard-killed (risk of a GPU driver hang on AMD, ADR 0011)"
+		if r.res.InterruptErr != "" {
+			msg = "Ctrl+C could not be delivered (" + r.res.InterruptErr + "); the runtime was hard-killed (risk of a GPU driver hang on AMD, ADR 0011)"
+		}
+		c.emit(events.Event{Time: now, Type: events.KillFailed, Severity: policy.SeverityWarning, RuntimePID: pid, Message: msg})
+	}
 	c.vram.active, c.vram.since = true, now
 	if y.CountsAsPreemption {
 		c.timers.Preemptions = append(pruneTimes(c.timers.Preemptions, now, c.cfg.AntiThrash.Window.D()), now)
@@ -475,7 +484,7 @@ func (c *Controller) checkVRAMRelease(now time.Time) {
 
 func (c *Controller) checkCrashReset(now time.Time) {
 	if c.st.Admitting() && !c.loadedAt.IsZero() && now.Sub(c.loadedAt) >= c.cfg.Recovery.CrashResetAfter.D() {
-		c.crashCount, c.telemetryLosses = 0, 0
+		c.crashCount, c.telemetryLosses, c.gpuResets = 0, 0, 0
 	}
 	// Learn the loaded footprint in the first 30 s after loading. With
 	// attribution, own VRAM is measured directly; without it, the growth of
@@ -582,6 +591,58 @@ func (c *Controller) onCrash(now time.Time) {
 	c.drainStart, c.drainDeadline, c.yield = time.Time{}, time.Time{}, policy.Decision{}
 	c.backoff(now)
 	c.transition(now, state.Error, c.decision, "Runtime crashed", nil)
+}
+
+// checkGPUResets reacts to a GPU driver reset: the runtime is preempted at
+// once (the next hang can be a blue screen) and loading waits for an
+// escalating cooldown. The device-lost flag clears once the runtime is gone;
+// the recovery timer then holds loading.
+func (c *Controller) checkGPUResets(now time.Time) {
+	if c.d.GPUResets != nil {
+		resets := c.d.GPUResets()
+		// Persisted at most every 30 s (the persist step compares JSON).
+		if now.Sub(c.lastGPUCheck) >= 30*time.Second {
+			c.lastGPUCheck = now
+		}
+		// One incident can surface as several dumps (both folders, a full
+		// dump still being written): count resets within 2 minutes once.
+		if len(resets) > 0 {
+			// Move the watermark past every dump just handled so a restart
+			// never reports the same incident again. (The dump may be
+			// stamped slightly after now while it is still being written.)
+			c.lastGPUCheck = now
+			for _, r := range resets {
+				if r.Time.After(c.lastGPUCheck) {
+					c.lastGPUCheck = r.Time
+				}
+			}
+		}
+		if len(resets) > 0 && !c.lastGPUReset.IsZero() && now.Sub(c.lastGPUReset) < 2*time.Minute {
+			c.power.DeviceLost = c.power.DeviceLost || c.st.RuntimeRunning()
+			resets = nil
+		}
+		if len(resets) > 0 {
+			c.lastGPUReset = now
+			c.gpuResets++
+			c.power.DeviceLost = true
+			files := make([]string, 0, len(resets))
+			for _, r := range resets {
+				files = append(files, r.File)
+			}
+			d := c.cfg.Recovery.DeviceLostCooldown.D()
+			for i := 1; i < c.gpuResets && d < 24*time.Hour; i++ {
+				d *= 2
+			}
+			d = min(d, 24*time.Hour)
+			c.emit(events.Event{Time: now, Type: events.DeviceLost, Severity: policy.SeverityCritical,
+				Message: fmt.Sprintf("GPU driver reset detected (%d since the last stable run); stopping the runtime and waiting %s", c.gpuResets, d),
+				Data:    map[string]any{"watchdog_dumps": files, "resets": c.gpuResets, "cooldown": d.String()}})
+			c.setRecovery(now, d, fmt.Sprintf("GPU driver reset (%d)", c.gpuResets))
+		}
+	}
+	if c.power.DeviceLost && !c.st.RuntimeRunning() && c.inst == nil && c.zombie == nil {
+		c.power.DeviceLost = false
+	}
 }
 
 // retryZombie starts (or re-starts, after backoff) terminating an

@@ -1,6 +1,6 @@
 # Phase 0 findings
 
-**Status: target-machine measurements in progress.** Remote access to the target
+**Status: target measurements largely complete (2026-09-24); scenario profiles pending.** Remote access to the target
 PC was provisioned on 2026-09-23 (Windows remote management). Measurements follow
 [runbook.md](runbook.md). This file records what is established and holds the
 slots the target results fill.
@@ -45,17 +45,26 @@ Not yet exercised anywhere: PDH array parsing against real GPU counter
 instances, and D3DKMT perf data (the CI runner has no hardware GPU). Those
 come from the target PC.
 
-## Pending (target PC)
+## Target measurements (2026-09-24)
 
-| # | Question | Result | Decision it drives |
+| # | Question | Result | Decision |
 |---|---|---|---|
-| E1 | HIP vs Vulkan build works on gfx1200 | pending | Default runtime build in docs |
-| E2 | GPU available to llama-server from session 0 (virtual account / LocalSystem) | pending | ADR 0006 service identity |
-| E3 | Kill-to-VRAM-release time | pending | `runtime.vram_release_timeout` |
-| E4 | Per-process counters present and consistent with adapter totals | pending | ADR 0003 attribution confidence |
-| E5 | Engine type used by llama-server | pending | Own/external separation by engine class |
-| E6 | Temperature via D3DKMT | pending | Safety source; fallback if absent |
-| E7 | Service account can read counters and user process paths | pending | ADR 0006; path rules vs name rules |
-| E8 | Scenario profiles | pending | thresholds.md |
-| E9 | Sleep/resume and driver reset behavior | pending | Recovery rules |
-| - | PDH collection cost per sample | pending | Sampling interval default |
+| E1 | Which llama.cpp build works on gfx1200 | **Vulkan** (b11149): all 25 layers on the RX 9060 XT, ~93 tokens/s, first token ~40 ms, load ~5 s (6.7 s cold). **ROCm** build: `--list-devices` shows none; it silently runs on the CPU at ~23 tokens/s | Vulkan is the default build. A loaded runtime with ~0 own VRAM should count as a failed load (CPU inference would load all cores during games) |
+| E2 | GPU from session 0 | Works under LocalSystem, a virtual account, and LocalService (restricted token, Medium integrity) | ADR 0006 |
+| E3 | Stop-to-VRAM-release | Hard kill: tree empty ~1.4-1.5 s, VRAM back ~1.0-1.4 s. Graceful Ctrl+C: exit 0.8 s, VRAM 0.8 s | `vram_release_timeout` 15 s is ample |
+| E4 | Per-process counters | Present and attributable (21 processes, 8 engines at idle); a collection costs ~4 ms. A new engine instance once reported 3.7e14 %: impossible readings are now dropped | ADR 0003: PDH primary |
+| E5 | Engines used by llama-server | Compute and Copy only; games use 3D | Own vs game separation by engine is clean |
+| E6 | Temperature | Available via D3DKMT adapter perf data (31 C idle, ~62 C under sustained inference) | Safety source confirmed |
+| E7 | Service identity visibility | Virtual account: GPU counters denied, user-session processes not visible. LocalSystem: full | ADR 0006: service as LocalSystem, runtime as restricted LocalService |
+| - | Model footprint | gpt-oss-20b MXFP4, 8K context: 11,327 MiB owned (10,949 weights + 216 KV + 96 compute) | `required_free_vram_mib` ~12,500 |
+| - | Stability | Four blue screens `0x116` in `amdkmdag.sys` with the display off, matching a known AMD idle/D3 VRAM eviction defect; hard kills of long-running runtimes triggered it, a graceful stop did not | ADR 0011 |
+| - | Driver rollback | 2026-09-24 the target was rolled back to `32.0.23033.1002` (dated 2026-03-08, the March 2026 Adrenalin branch; not the `32.0.22042.14002` build the discussion recommends). One report says the R9700-specific `23033` build crashes llama-server in `amdvlk64.dll`; on the RX 9060 XT it did not: probe load 7.3 s, ~93 tokens/s, graceful stop 1.5 s | Treat as the working driver pending an idle/display-off soak |
+| - | Service-driven stop and store TLS | Installed service, `d2e9056`: 10-minute HTTPS soak from another host (442 requests, 0 errors, certificate validated against the lab CA, served from `LocalMachine\My` by thumbprint), then Pause: `runtime_stopped` with `graceful=true`, `kill_fallback=false`, tree empty 1.6 s, VRAM back to 6 MiB, no watchdog dump | Graceful stop works from the SYSTEM service to the LocalService runtime |
+
+## Still pending
+
+| # | Question | Needs |
+|---|---|---|
+| E8 | Game, launcher, browser, and streaming scenario profiles | A normal evening of use with passive recording |
+| - | Stability on the rolled-back driver | Several hours idle with the display off (overnight) with the service in Auto, no watchdog dumps |
+| E9 | Sleep/resume | The target is set never to sleep; driver resets are covered by ADR 0011 |

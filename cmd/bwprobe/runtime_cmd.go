@@ -16,8 +16,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/sentania-labs/benchwarmer/internal/gpureset"
 	"github.com/sentania-labs/benchwarmer/internal/procgroup"
 	"github.com/sentania-labs/benchwarmer/internal/signals"
 	"github.com/sentania-labs/benchwarmer/internal/telemetry"
@@ -32,6 +34,7 @@ type runtimeOpts struct {
 	logDir                          string
 	modes                           []string
 	runAs                           string
+	serveFor                        time.Duration
 }
 
 // Kill modes. "graceful" sends Ctrl+C (SIGINT on Unix) and falls back to a
@@ -88,6 +91,8 @@ type cycleResult struct {
 	RuntimeUser       string   `json:"runtime_user,omitempty"`
 	RuntimePrivileges []string `json:"runtime_privileges,omitempty"`
 	RuntimeIntegrity  string   `json:"runtime_integrity,omitempty"`
+	SoakRequests      int      `json:"soak_requests,omitempty"`
+	SoakFailures      int      `json:"soak_failures,omitempty"`
 }
 
 type reqResult struct {
@@ -116,6 +121,7 @@ func cmdRuntime(args []string) error {
 	fs.DurationVar(&o.settle, "settle", 10*time.Second, "pause between cycles")
 	fs.Uint64Var(&o.releaseTolerance, "release-tolerance-mib", 256, "VRAM counts as released within this many MiB of baseline")
 	fs.StringVar(&o.adapter, "adapter", "", "adapter LUID or name substring")
+	fs.DurationVar(&o.serveFor, "serve-for", 0, "before stopping, keep sending completions for this long (long-lived runtime test)")
 	fs.StringVar(&o.runAs, "runtime-as", "", "runtime identity: empty (same as probe) or localservice (probe must run as LocalSystem)")
 	out := fs.String("out", "", "JSONL output (default runtime-<time>.jsonl)")
 	fs.StringVar(&o.logDir, "log-dir", "", "directory for per-cycle runtime stdout/stderr logs (default: next to -out)")
@@ -129,6 +135,11 @@ func cmdRuntime(args []string) error {
 			o.modes = append(o.modes, m)
 		default:
 			return fmt.Errorf("unknown stop mode %q", m)
+		}
+	}
+	for _, m := range o.modes {
+		if m == modeGraceful && runtime.GOOS == "windows" && !hasConsole() {
+			return errors.New("graceful mode needs a console (run from a terminal or a scheduled task), otherwise it would fall back to a hard kill")
 		}
 	}
 	if *out == "" {
@@ -159,17 +170,60 @@ func runCycles(o runtimeOpts, w *jsonl) error {
 	}
 	w.write(eventRecord{Kind: "start", Label: "runtime", Time: time.Now(), Data: map[string]any{
 		"exe": o.exe, "model": filepath.Base(o.model), "args": o.extra, "cycles": o.cycles, "modes": o.modes}})
-	for i := 1; i <= o.cycles; i++ {
+	// Tripwire: on the first GPU driver reset, kill the runtime and stop
+	// the whole run. On the target a second hang a minute after the first
+	// escalated to a blue screen.
+	stopWatch := make(chan struct{})
+	defer close(stopWatch)
+	go func() {
+		watcher := gpureset.New(gpureset.DefaultDirs())
+		t := time.NewTicker(500 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-stopWatch:
+				return
+			case <-t.C:
+			}
+			if resets := watcher.Poll(); len(resets) > 0 {
+				tripped.Store(true)
+				killCurrent()
+				w.write(map[string]any{"kind": "gpu_reset", "time": time.Now(), "resets": resets})
+				fmt.Fprintf(os.Stderr, "GPU driver reset detected (%v); runtime killed, run aborted\n", resets)
+				return
+			}
+		}
+	}()
+	for i := 1; i <= o.cycles && !tripped.Load(); i++ {
 		mode := o.modes[(i-1)%len(o.modes)]
 		r := runCycle(o, g, i, mode, w)
 		w.write(r)
 		fmt.Fprintf(os.Stderr, "cycle %d (%s): ready=%v load=%.1fs stop->exit=%dms stop->tree-empty=%dms stop->vram=%dms graceful=%v crashed=%v leftovers=%v %s\n",
 			i, mode, r.Ready, r.LoadSeconds, r.StopToRootExitMs, r.StopToTreeEmptyMs, r.StopToVRAMReleaseMs, r.GracefulExited, r.ExitedBeforeStop, r.LeftoverProcesses, r.StartErr)
-		if i < o.cycles {
+		if i < o.cycles && !tripped.Load() {
 			time.Sleep(o.settle)
 		}
 	}
+	if tripped.Load() {
+		return errors.New("aborted after a GPU driver reset")
+	}
 	return nil
+}
+
+var (
+	tripped   atomic.Bool
+	currentMu sync.Mutex
+	current   *procgroup.Group
+)
+
+func setCurrent(g *procgroup.Group) { currentMu.Lock(); current = g; currentMu.Unlock() }
+
+func killCurrent() {
+	currentMu.Lock()
+	defer currentMu.Unlock()
+	if current != nil {
+		_ = current.Kill()
+	}
 }
 
 // ring keeps the tail of a stream.
@@ -336,6 +390,11 @@ func runCycle(o runtimeOpts, g gpuSource, n int, mode string, w *jsonl) cycleRes
 		return r
 	}
 	defer pg.Close()
+	setCurrent(pg)
+	defer setCurrent(nil)
+	if tripped.Load() {
+		_ = pg.Kill()
+	}
 	r.PID = pg.PID()
 	baseURL := fmt.Sprintf("http://%s", addr)
 
@@ -376,6 +435,16 @@ func runCycle(o runtimeOpts, g gpuSource, n int, mode string, w *jsonl) cycleRes
 		}
 		r.Completion = doChat(baseURL, o.prompt, o.maxTokens, false, 0, nil)
 		r.Stream = doChat(baseURL, o.prompt, o.maxTokens, true, 0, nil)
+		if o.serveFor > 0 {
+			end := time.Now().Add(o.serveFor)
+			for time.Now().Before(end) && !tripped.Load() {
+				res := doChat(baseURL, o.prompt, o.maxTokens, false, 2*time.Minute, nil)
+				r.SoakRequests++
+				if res.Status != 200 {
+					r.SoakFailures++
+				}
+			}
+		}
 	}
 
 	// Was the runtime still alive when we went to stop it?
@@ -419,8 +488,8 @@ func runCycle(o runtimeOpts, g gpuSource, n int, mode string, w *jsonl) cycleRes
 		select {
 		case <-pg.Done():
 			r.GracefulExited = true
-		case <-time.After(15 * time.Second):
-			r.StopErr = strings.TrimPrefix(r.StopErr+"; no exit 15s after Ctrl+C, job kill", "; ")
+		case <-time.After(60 * time.Second):
+			r.StopErr = strings.TrimPrefix(r.StopErr+"; no exit 60s after Ctrl+C, job kill", "; ")
 			_ = pg.Kill()
 		}
 	default:

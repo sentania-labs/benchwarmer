@@ -17,6 +17,7 @@ import (
 	"github.com/sentania-labs/benchwarmer/internal/config"
 	"github.com/sentania-labs/benchwarmer/internal/controller"
 	"github.com/sentania-labs/benchwarmer/internal/events"
+	"github.com/sentania-labs/benchwarmer/internal/gpureset"
 	"github.com/sentania-labs/benchwarmer/internal/metrics"
 	"github.com/sentania-labs/benchwarmer/internal/policy"
 	"github.com/sentania-labs/benchwarmer/internal/proxy"
@@ -118,11 +119,16 @@ func New(o Options) (*Service, error) {
 	}
 
 	facts := NewFacts()
+	gpuWatch := gpureset.New(gpureset.DefaultDirs())
+	if blind := gpuWatch.Unreadable(); len(blind) > 0 {
+		s.log.Error("cannot read GPU watchdog dump folders: GPU driver resets will not be detected", "dirs", blind)
+	}
 	s.ctl = controller.New(controller.Deps{
 		Config: s.cfg, ConfigSource: lr.Source, ConfigStore: auditingStore{cs: cs, st: st, met: s.met},
 		Adapter: llamacpp.New(), Telemetry: s.tel, Processes: procs, Facts: facts, Gate: s.gate,
 		Events: events.SinkFunc(s.sink.Emit), EventReader: eventReader{st}, Persist: persister{st},
 		Metrics: s.met, Log: s.log, Version: version.Version, BootTime: signals.BootTime,
+		GPUResets: gpuWatch.Poll, GPUResetsSince: gpuWatch.SetSince,
 	})
 	return s, nil
 }
@@ -284,7 +290,8 @@ func (s *Service) tlsManager(t config.TLS) (*tlscert.Manager, error) {
 		return secrets.Resolve(s.o.DataDir, p)
 	}
 	src := tlscert.Source{CertFile: res(t.CertFile), KeyFile: res(t.KeyFile), PFXPasswordFile: res(t.PFXPasswordFile),
-		SelfSigned: t.SelfSigned, Hosts: t.SelfSignedHosts, Dir: filepath.Join(s.o.DataDir, "tls")}
+		SelfSigned: t.SelfSigned, Hosts: t.SelfSignedHosts, Dir: filepath.Join(s.o.DataDir, "tls"),
+		StoreThumbprint: t.StoreThumbprint, StoreSubject: t.StoreSubject}
 	m, err := tlscert.New(src, func(i tlscert.Info, err error) {
 		if err != nil {
 			s.sink.Emit(events.Event{Time: time.Now(), Type: events.TLSCertificateProblem, Severity: policy.SeverityWarning,

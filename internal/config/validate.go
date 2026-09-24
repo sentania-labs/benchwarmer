@@ -200,6 +200,15 @@ func validateRuntime(v *validator, r Runtime) {
 	}
 	v.intRange("runtime.context_size", r.ContextSize, 256, 1<<20)
 	v.intRange("runtime.gpu_layers", r.GPULayers, 0, 9999)
+	if r.StopMode != StopGraceful && r.StopMode != StopKill {
+		v.add("runtime.stop_mode", "must be %q or %q (got %q)", StopGraceful, StopKill, r.StopMode)
+	}
+	v.durRange("runtime.graceful_stop_timeout", r.GracefulStopTimeout, time.Second, 2*time.Minute)
+	// A service stop must finish within Windows' budget (about 20 s here):
+	// graceful wait plus kill verification cannot exceed it.
+	if r.StopMode == StopGraceful && r.GracefulStopTimeout.D()+r.KillVerifyTimeout.D() > 18*time.Second {
+		v.add("runtime.graceful_stop_timeout", "graceful_stop_timeout plus kill_verify_timeout must not exceed 18s (the service stop budget)")
+	}
 	if r.RunAs != RunAsLocalService && r.RunAs != RunAsService {
 		v.add("runtime.run_as", "must be %q or %q (got %q)", RunAsLocalService, RunAsService, r.RunAs)
 	}
@@ -244,9 +253,23 @@ func validateListen(v *validator, c Config) {
 		v.add("listen.inference_tls.enabled", "a non-loopback inference listener must use TLS")
 	}
 	if t.Enabled {
+		sources := 0
+		for _, set := range []bool{t.CertFile != "", t.StoreThumbprint != "" || t.StoreSubject != ""} {
+			if set {
+				sources++
+			}
+		}
 		switch {
+		case sources > 1:
+			v.add("listen.inference_tls", "set either a certificate file or a certificate store selection, not both")
+		case t.StoreThumbprint != "" && t.StoreSubject != "":
+			v.add("listen.inference_tls.store_subject", "set store_thumbprint or store_subject, not both")
+		case t.StoreThumbprint != "" && !isHex40(strings.ReplaceAll(t.StoreThumbprint, " ", "")):
+			v.add("listen.inference_tls.store_thumbprint", "must be the 40-character hex SHA-1 thumbprint")
+		case sources == 1 && t.CertFile == "":
+			// Store-backed: nothing more to check here.
 		case t.CertFile == "" && !t.SelfSigned:
-			v.add("listen.inference_tls.cert_file", "set a certificate file, or enable self_signed for testing")
+			v.add("listen.inference_tls.cert_file", "set a certificate file or store selection, or enable self_signed for testing")
 		case t.CertFile != "" && isPFXPath(t.CertFile) && t.KeyFile != "":
 			v.add("listen.inference_tls.key_file", "must be empty when cert_file is a PFX (the key is inside it)")
 		case t.CertFile != "" && !isPFXPath(t.CertFile) && t.KeyFile == "":
@@ -260,6 +283,18 @@ func validateListen(v *validator, c Config) {
 	if host, _, err := net.SplitHostPort(c.Listen.Management); err == nil && !isLoopbackHost(host) && c.Security.ManagementTokenFile == "" {
 		v.add("listen.management", "a non-loopback management listener requires security.management_token_file")
 	}
+}
+
+func isHex40(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for _, c := range strings.ToLower(s) {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func isPFXPath(p string) bool {

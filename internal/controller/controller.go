@@ -19,6 +19,7 @@ import (
 	"github.com/sentania-labs/benchwarmer/internal/api"
 	"github.com/sentania-labs/benchwarmer/internal/config"
 	"github.com/sentania-labs/benchwarmer/internal/events"
+	"github.com/sentania-labs/benchwarmer/internal/gpureset"
 	"github.com/sentania-labs/benchwarmer/internal/humantime"
 	"github.com/sentania-labs/benchwarmer/internal/policy"
 	"github.com/sentania-labs/benchwarmer/internal/proxy"
@@ -72,8 +73,11 @@ type Persisted struct {
 	UntilReboot bool             `json:"until_reboot,omitempty"`
 	// BootTime is the system boot time when the state was saved; an
 	// "until reboot" mode survives a service restart within the same boot.
-	BootTime        time.Time         `json:"boot_time,omitzero"`
-	TelemetryLosses int               `json:"telemetry_losses,omitempty"`
+	BootTime        time.Time `json:"boot_time,omitzero"`
+	TelemetryLosses int       `json:"telemetry_losses,omitempty"`
+	GPUResets       int       `json:"gpu_resets,omitempty"`
+	// LastGPUCheck is when GPU resets were last polled.
+	LastGPUCheck    time.Time         `json:"last_gpu_check,omitzero"`
 	Timers          policy.TimerFacts `json:"timers"`
 	CrashCount      int               `json:"crash_count"`
 	FootprintMiB    int               `json:"footprint_mib"`
@@ -120,6 +124,12 @@ type Deps struct {
 	Persist      Persist     // optional
 	Metrics      Metrics     // optional
 	Now          func() time.Time
+	// GPUResets reports GPU driver resets detected since the last call
+	// (optional). Any reset stops the runtime at once (ADR 0011).
+	GPUResets func() []gpureset.Reset
+	// GPUResetsSince, when set, is told the time of the last check before
+	// the previous run stopped, so resets from just before a crash count.
+	GPUResetsSince func(time.Time)
 	// BootTime reports the system boot time (optional).
 	BootTime func() (time.Time, error)
 	Log      *slog.Logger
@@ -185,7 +195,10 @@ type Controller struct {
 	decision        policy.Decision
 	lastEvaluated   time.Time
 	telemetryLost   bool
-	telemetryLosses int    // consecutive losses, for escalating recovery
+	telemetryLosses int // consecutive losses, for escalating recovery
+	gpuResets       int // GPU driver resets without a stable run since, for escalating recovery
+	lastGPUCheck    time.Time
+	lastGPUReset    time.Time
 	manualPending   string // "drain" or "reload" requested by the API
 	persisted       []byte
 	recentErrors    []events.Event
@@ -245,7 +258,15 @@ func (c *Controller) Start() {
 			c.d.Log.Warn("could not load controller state", "err", err)
 		} else if ok {
 			c.timers = p.Timers
-			c.timers.RecoveryUntil, c.timers.RecoveryReason = time.Time{}, ""
+			// Recovery waits for faults (GPU reset, kill failure, crash,
+			// telemetry) survive a restart or the blue screen they guard
+			// against; startup and resume waits are recomputed.
+			if !faultRecovery(p.Timers.RecoveryReason) || !p.Timers.RecoveryUntil.After(now) {
+				c.timers.RecoveryUntil, c.timers.RecoveryReason = time.Time{}, ""
+			}
+			if c.d.GPUResetsSince != nil && !p.LastGPUCheck.IsZero() {
+				c.d.GPUResetsSince(p.LastGPUCheck)
+			}
 			c.crashCount, c.footprint, c.lastLoadS = p.CrashCount, p.FootprintMiB, p.LastLoadSeconds
 			// An expired temporary mode reverts to auto; "until reboot"
 			// survives a service restart only within the same boot.
@@ -260,6 +281,7 @@ func (c *Controller) Start() {
 				c.mode, c.modeSetAt, c.untilReboot = p.Mode, p.ModeSetAt, p.UntilReboot
 			}
 			c.telemetryLosses = p.TelemetryLosses
+			c.gpuResets = p.GPUResets
 		}
 	}
 	c.emit(events.Event{Time: now, Type: events.ServiceStarted, State: c.st, Condition: c.st.Condition(),
@@ -384,7 +406,8 @@ func (c *Controller) persist() {
 		return
 	}
 	p := Persisted{Mode: c.mode, ModeSetAt: c.modeSetAt, UntilReboot: c.untilReboot, Timers: c.timers,
-		CrashCount: c.crashCount, FootprintMiB: c.footprint, LastLoadSeconds: c.lastLoadS, TelemetryLosses: c.telemetryLosses}
+		CrashCount: c.crashCount, FootprintMiB: c.footprint, LastLoadSeconds: c.lastLoadS, TelemetryLosses: c.telemetryLosses,
+		GPUResets: c.gpuResets, LastGPUCheck: c.lastGPUCheck}
 	if c.d.BootTime != nil {
 		p.BootTime, _ = c.d.BootTime()
 	}
@@ -419,6 +442,17 @@ func (c *Controller) reconcile(now time.Time) {
 	if killed > 0 && c.d.Metrics != nil {
 		c.d.Metrics.IncOrphansKilled(killed)
 	}
+}
+
+// faultRecovery reports whether a recovery reason is a fault wait that must
+// survive a restart.
+func faultRecovery(reason string) bool {
+	for _, p := range []string{"GPU", "kill", "crash", "telemetry", "device"} {
+		if len(reason) >= len(p) && reason[:len(p)] == p {
+			return true
+		}
+	}
+	return false
 }
 
 // errNotRunning is returned for manual actions that need a runtime.

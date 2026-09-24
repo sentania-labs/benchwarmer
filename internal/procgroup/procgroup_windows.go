@@ -29,8 +29,54 @@ var (
 	procSetConsoleCtrlHandler = modkernel32.NewProc("SetConsoleCtrlHandler")
 )
 
-// interrupt sends Ctrl+C to every process on our console. This process
-// ignores Ctrl+C for a moment so only the child reacts.
+var (
+	procAllocConsole     = modkernel32.NewProc("AllocConsole")
+	procGetConsoleWindow = modkernel32.NewProc("GetConsoleWindow")
+
+	// consoleMu serialises Ctrl+C delivery with process creation: while
+	// this process ignores Ctrl+C, a child created then would inherit the
+	// ignore flag and could never be stopped gracefully.
+	consoleMu sync.Mutex
+	// swallowing is set once this process swallows all console events
+	// itself (EnsureConsole), so no ignore window is needed.
+	swallowing bool
+)
+
+// EnsureConsole gives a process without a console (a Windows service) a
+// console for its runtime children, and makes this process swallow every
+// console control event, so it can send Ctrl+C to a child without stopping
+// itself. Service shutdown still arrives through the service manager.
+// Not for interactive programs: their own Ctrl+C would be swallowed too.
+func EnsureConsole() error {
+	consoleMu.Lock()
+	defer consoleMu.Unlock()
+	if swallowing {
+		return nil
+	}
+	if h, _, _ := procGetConsoleWindow.Call(); h == 0 {
+		if r, _, err := procAllocConsole.Call(); r == 0 {
+			return fmt.Errorf("procgroup: AllocConsole: %w", err)
+		}
+	}
+	// Clear an ignore-Ctrl+C flag this process may have inherited:
+	// children inherit it, and a runtime that ignores Ctrl+C can only be
+	// hard-killed.
+	procSetConsoleCtrlHandler.Call(0, 0)
+	cb := windows.NewCallback(func(uint32) uintptr { return 1 })
+	if r, _, err := procSetConsoleCtrlHandler.Call(cb, 1); r == 0 {
+		return fmt.Errorf("procgroup: SetConsoleCtrlHandler: %w", err)
+	}
+	swallowing = true
+	return nil
+}
+
+// HasConsole reports whether this process has a console to share.
+func HasConsole() bool {
+	h, _, _ := procGetConsoleWindow.Call()
+	return h != 0
+}
+
+// interrupt sends Ctrl+C to every process on our console.
 func (g *Group) interrupt() error {
 	if !g.plat.shareConsole {
 		return errors.New("procgroup: Interrupt requires Spec.ShareConsole")
@@ -40,14 +86,23 @@ func (g *Group) interrupt() error {
 		return ErrNotRunning
 	default:
 	}
+	consoleMu.Lock()
+	defer consoleMu.Unlock()
+	if swallowing {
+		if err := windows.GenerateConsoleCtrlEvent(windows.CTRL_C_EVENT, 0); err != nil {
+			return fmt.Errorf("procgroup: GenerateConsoleCtrlEvent: %w", err)
+		}
+		return nil
+	}
+	// Interactive caller (the probe in a terminal): ignore Ctrl+C for a
+	// moment so only the child reacts. Held under consoleMu so no child is
+	// created while the ignore flag is set.
 	if r, _, err := procSetConsoleCtrlHandler.Call(0, 1); r == 0 {
 		return fmt.Errorf("procgroup: SetConsoleCtrlHandler: %w", err)
 	}
 	err := windows.GenerateConsoleCtrlEvent(windows.CTRL_C_EVENT, 0)
-	go func() {
-		time.Sleep(2 * time.Second)
-		procSetConsoleCtrlHandler.Call(0, 0)
-	}()
+	time.Sleep(time.Second)
+	procSetConsoleCtrlHandler.Call(0, 0)
 	if err != nil {
 		return fmt.Errorf("procgroup: GenerateConsoleCtrlEvent: %w", err)
 	}
@@ -104,7 +159,14 @@ func start(spec Spec) (*Group, error) {
 		_ = windows.CloseHandle(job)
 		return nil, fmt.Errorf("procgroup: unknown RunAs %q", spec.RunAs)
 	}
-	if err := cmd.Start(); err != nil {
+	if spec.ShareConsole {
+		consoleMu.Lock()
+	}
+	err = cmd.Start()
+	if spec.ShareConsole {
+		consoleMu.Unlock()
+	}
+	if err != nil {
 		_ = windows.CloseHandle(job)
 		return nil, fmt.Errorf("procgroup: start: %w", err)
 	}

@@ -3,6 +3,12 @@
 // atomic persistence with a last-known-good copy (ADR 0008).
 package config
 
+// Runtime stop modes.
+const (
+	StopGraceful = "graceful"
+	StopKill     = "kill"
+)
+
 // Runtime identities.
 const (
 	RunAsLocalService = "localservice"
@@ -61,6 +67,13 @@ type Runtime struct {
 	Host string `json:"host"`
 	Port int    `json:"port"`
 
+	// StopMode is StopGraceful (default: Ctrl+C, then a hard kill only if
+	// the runtime has not exited within GracefulStopTimeout) or StopKill.
+	// On the target PC a hard kill of a long-running runtime wedged the AMD
+	// driver (blue screen 0x116); a graceful exit did not (ADR 0002).
+	StopMode            string   `json:"stop_mode"`
+	GracefulStopTimeout Duration `json:"graceful_stop_timeout"`
+
 	LoadTimeout             Duration `json:"load_timeout"`
 	RequiredFreeVRAMMiB     int      `json:"required_free_vram_mib"`
 	KillVerifyTimeout       Duration `json:"kill_verify_timeout"`
@@ -97,6 +110,12 @@ type TLS struct {
 	KeyFile string `json:"key_file"`
 	// PFXPasswordFile holds the PFX password (the file, not the password).
 	PFXPasswordFile string `json:"pfx_password_file"`
+	// StoreThumbprint (hex SHA-1) or StoreSubject selects a certificate from
+	// the Windows LocalMachine\\My store instead of files: the natural home
+	// for an AD CS certificate, including non-exportable keys and
+	// autoenrollment renewal. The newest valid match with a private key wins.
+	StoreThumbprint string `json:"store_thumbprint"`
+	StoreSubject    string `json:"store_subject"`
 	// SelfSigned generates a self-signed certificate in <data>\tls when no
 	// CertFile is set. Testing only: clients must be told to trust it.
 	SelfSigned bool `json:"self_signed"`

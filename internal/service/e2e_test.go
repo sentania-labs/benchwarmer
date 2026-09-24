@@ -93,6 +93,10 @@ func TestEndToEndLifecycle(t *testing.T) {
 	// The test process is not LocalSystem, so it cannot log on LocalService
 	// (the production default); run the fake runtime as the test's account.
 	c.Runtime.RunAs = config.RunAsService
+	// Ctrl+C on a shared CI console would also reach the test runner and
+	// the CI shell; graceful stop is covered by the adapter tests (Unix)
+	// and on the target (Windows).
+	c.Runtime.StopMode = config.StopKill
 	inf, mgmt := freePort(t), freePort(t)
 	c.Listen.Inference = "127.0.0.1:" + strconv.Itoa(inf)
 	c.Listen.Management = "127.0.0.1:" + strconv.Itoa(mgmt)

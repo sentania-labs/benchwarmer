@@ -61,7 +61,7 @@ Each is answered by a `bwprobe` scenario in the runbook
 | [0006](../adr/0006-service-identity.md) | Virtual service account if E2/E7 pass, LocalSystem fallback | Provisional pending E2, E7 |
 | [0007](../adr/0007-authentication.md) | Bearer tokens, separate management and inference credentials | Accepted |
 | [0008](../adr/0008-persistence.md) | SQLite (modernc.org/sqlite), config also kept as last-known-good file | Accepted |
-| 0009 | Installer strategy | Deferred to Phase 2 |
+| [0009](../adr/0009-installer.md) | PowerShell installer + zip release, service self-registration | Accepted |
 
 ## 4. Parallel work after contracts land
 

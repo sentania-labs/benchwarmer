@@ -141,7 +141,7 @@ func TestEmbeddedFilesAreConsistent(t *testing.T) {
 	importRe := regexp.MustCompile(`(?m)^\s*(?:import|export)\s[^;]*?from\s+"([^"]+)"`)
 	external := regexp.MustCompile(`https?://`)
 	for name, body := range files {
-		if strings.ContainsRune(body, '—') {
+		if strings.ContainsRune(body, '\u2014') {
 			t.Errorf("%s contains an em-dash", name)
 		}
 		for _, u := range external.FindAllStringIndex(body, -1) {

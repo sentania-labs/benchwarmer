@@ -146,11 +146,19 @@ settings.
    the tray menu. Windows asks for administrator approval, then the
    dashboard opens already signed in for that browser tab. Standard users
    can view status but cannot change settings.
-4. **Configure.** On the **Configuration** page, pick the model from the
-   list of files in `models\`. The runtime and, for LAN access, the HTTPS
-   certificate are picked from lists the same way, so no paths need typing.
-   Once saved, Setup required clears on its own and the service loads the
-   model when the GPU is free.
+4. **Choose the model.** On **Configuration > Runtime**, the model field
+   suggests the files in `models\` and the runtime field suggests the
+   bundled llama.cpp build, so no paths need typing. Save. Setup required
+   clears within a few seconds and the service loads the model when the GPU
+   is free.
+5. **LAN access (optional).** On **Configuration > Network and security**:
+   set the inference listener to `0.0.0.0:8480`, turn on **Serve inference
+   over HTTPS**, and pick the certificate (the name and thumbprint fields
+   suggest the usable certificates in `LocalMachine\My`). Save, then choose
+   **Restart service now**: listener and certificate changes take effect
+   after a service restart, which the dashboard does for you. Clients call
+   `https://<pc-name>:8480/v1` with the inference token from
+   `C:\ProgramData\Benchwarmer\secrets\inference.token`.
 
 ## Pre-configuring many PCs
 

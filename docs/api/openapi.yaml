@@ -1031,12 +1031,12 @@ components:
     TLSConfig:
       type: object
       additionalProperties: false
-      description: HTTPS for the inference listener. Required when it is not loopback. Deployments use a CA-issued certificate (PFX with key, or PEM files); self_signed is for testing.
+      description: HTTPS for the inference listener. Required when it is not loopback. Deployments use a CA-issued certificate from the Windows store (store_subject or store_thumbprint) or PEM files; self_signed is for testing.
       properties:
         enabled: { type: boolean }
-        cert_file: { type: string, description: PEM chain (leaf first) or .pfx/.p12. Relative paths are in the data directory. }
-        key_file: { type: string, description: PEM private key; empty for PFX. }
-        pfx_password_file: { type: string, description: File containing the PFX password. }
+        cert_file: { type: string, description: PEM chain (leaf first). Relative paths are in the data directory. PFX files are not read; import them into LocalMachine\My. }
+        key_file: { type: string, description: PEM private key. }
+        pfx_password_file: { type: string, deprecated: true, description: Accepted only so older files parse. Must be empty. }
         store_thumbprint: { type: string, description: Hex SHA-1 thumbprint of a certificate in the Windows LocalMachine\My store. }
         store_subject: { type: string, description: Subject or DNS name to match in LocalMachine\My; the newest valid match with a private key is used. }
         self_signed: { type: boolean }

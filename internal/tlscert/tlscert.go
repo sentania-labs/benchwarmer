@@ -1,6 +1,6 @@
 // Package tlscert supplies the inference proxy's TLS certificate. A
 // deployment uses a certificate issued by the organisation's CA (for example
-// an AD CS / Microsoft CA certificate exported as PFX, or PEM files); for
+// an AD CS certificate in the Windows store, or PEM files); for
 // testing, a self-signed certificate is generated and kept in the data
 // directory. Certificate files are re-read when they change, so a renewed
 // certificate takes effect without restarting the service.
@@ -24,19 +24,14 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf16"
-
-	"software.sslmate.com/src/go-pkcs12"
 )
 
 // Source says where the certificate comes from.
 type Source struct {
-	// CertFile is a PEM certificate chain (leaf first) or a .pfx/.p12 file.
+	// CertFile is a PEM certificate chain (leaf first).
 	CertFile string
-	// KeyFile is the PEM private key; empty for PFX.
+	// KeyFile is the PEM private key.
 	KeyFile string
-	// PFXPasswordFile holds the PFX password; empty means no password.
-	PFXPasswordFile string
 	// SelfSigned generates (once) and uses a self-signed certificate when
 	// CertFile is empty. For testing only.
 	SelfSigned bool
@@ -209,7 +204,7 @@ func (m *Manager) loadStore() error {
 
 func (m *Manager) files() []string {
 	var f []string
-	for _, p := range []string{m.src.CertFile, m.src.KeyFile, m.src.PFXPasswordFile} {
+	for _, p := range []string{m.src.CertFile, m.src.KeyFile} {
 		if p != "" {
 			f = append(f, p)
 		}
@@ -255,50 +250,13 @@ func (m *Manager) load() error {
 	return nil
 }
 
-func isPFX(path string) bool {
-	e := strings.ToLower(filepath.Ext(path))
-	return e == ".pfx" || e == ".p12"
-}
-
 func loadPair(src Source) (*tls.Certificate, error) {
-	var cert tls.Certificate
-	if isPFX(src.CertFile) {
-		b, err := os.ReadFile(src.CertFile)
-		if err != nil {
-			return nil, fmt.Errorf("tls: read %s: %w", src.CertFile, err)
-		}
-		pw := ""
-		if src.PFXPasswordFile != "" {
-			p, err := os.ReadFile(src.PFXPasswordFile)
-			if err != nil {
-				return nil, fmt.Errorf("tls: read PFX password file: %w", err)
-			}
-			pw = passwordText(p)
-		}
-		key, leaf, chain, err := pkcs12.DecodeChain(b, pw)
-		if err != nil {
-			return nil, fmt.Errorf("tls: decode PFX %s: %w", src.CertFile, err)
-		}
-		signer, ok := key.(crypto.Signer)
-		if !ok {
-			return nil, errors.New("tls: PFX private key is not a signing key")
-		}
-		cert.PrivateKey = signer
-		cert.Certificate = append(cert.Certificate, leaf.Raw)
-		for _, c := range chain {
-			cert.Certificate = append(cert.Certificate, c.Raw)
-		}
-		cert.Leaf = leaf
-		// Confirm the key matches the certificate.
-		if _, err := tls.X509KeyPair(pemCert(leaf.Raw), pemKey(signer)); err != nil {
-			return nil, fmt.Errorf("tls: PFX key does not match certificate: %w", err)
-		}
-	} else {
-		c, err := tls.LoadX509KeyPair(src.CertFile, src.KeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("tls: load %s / %s: %w", src.CertFile, src.KeyFile, err)
-		}
-		cert = c
+	if e := strings.ToLower(filepath.Ext(src.CertFile)); e == ".pfx" || e == ".p12" {
+		return nil, fmt.Errorf("tls: %s: PFX files are not read; import it into the LocalMachine\\My certificate store (see docs/deploy/tls.md: certutil -importpfx) and set store_thumbprint or store_subject", src.CertFile)
+	}
+	cert, err := tls.LoadX509KeyPair(src.CertFile, src.KeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("tls: load %s / %s: %w", src.CertFile, src.KeyFile, err)
 	}
 	if cert.Leaf == nil {
 		leaf, err := x509.ParseCertificate(cert.Certificate[0])
@@ -315,23 +273,6 @@ func loadPair(src Source) (*tls.Certificate, error) {
 		return nil, fmt.Errorf("tls: certificate %q not valid until %s", cert.Leaf.Subject, cert.Leaf.NotBefore.Format(time.RFC3339))
 	}
 	return &cert, nil
-}
-
-// passwordText decodes a password file saved as ASCII/UTF-8 (with or
-// without a byte-order mark) or UTF-16 (Windows PowerShell 5.1's default for
-// Out-File), and drops trailing line breaks.
-func passwordText(b []byte) string {
-	switch {
-	case len(b) >= 2 && b[0] == 0xFF && b[1] == 0xFE: // UTF-16 LE
-		u := make([]uint16, 0, len(b)/2)
-		for i := 2; i+1 < len(b); i += 2 {
-			u = append(u, uint16(b[i])|uint16(b[i+1])<<8)
-		}
-		return strings.TrimRight(string(utf16.Decode(u)), "\r\n")
-	case len(b) >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF:
-		b = b[3:]
-	}
-	return strings.TrimRight(string(b), "\r\n")
 }
 
 func pemCert(der []byte) []byte {

@@ -44,6 +44,12 @@ func upgrade(c *Config) {
 	if c.Runtime.GracefulStopTimeout == 0 {
 		c.Runtime.GracefulStopTimeout = Duration(5 * time.Second)
 	}
+	// PFX files are no longer read. A leftover password file is dropped
+	// unless it goes with a PFX certificate, which the certificate loader
+	// then reports (only the inference listener stops).
+	if !isPFXPath(c.Listen.InferenceTLS.CertFile) {
+		c.Listen.InferenceTLS.LegacyPFXPasswordFile = ""
+	}
 	if c.Listen.InferenceTLS.SelfSignedHosts == nil { // added with inference_tls
 		c.Listen.InferenceTLS.SelfSignedHosts = []string{}
 	}

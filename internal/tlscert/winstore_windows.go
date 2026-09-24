@@ -54,6 +54,7 @@ func storeCertificate(thumbprint, subject string) (*tls.Certificate, error) {
 	var best *windows.CertContext
 	var bestLeaf *x509.Certificate
 	var prev *windows.CertContext
+	legacy := false // a match whose key is in a legacy CryptoAPI provider
 	for {
 		ctx, err := windows.CertFindCertificateInStore(store, windows.X509_ASN_ENCODING|windows.PKCS_7_ASN_ENCODING, 0,
 			windows.CERT_FIND_ANY, nil, prev)
@@ -80,6 +81,7 @@ func storeCertificate(thumbprint, subject string) (*tls.Certificate, error) {
 			continue
 		}
 		if !hasPrivateKey(ctx) {
+			legacy = legacy || hasLegacyKey(ctx)
 			continue
 		}
 		if bestLeaf == nil || leaf.NotAfter.After(bestLeaf.NotAfter) {
@@ -90,6 +92,9 @@ func storeCertificate(thumbprint, subject string) (*tls.Certificate, error) {
 		}
 	}
 	if best == nil {
+		if legacy {
+			return nil, errors.New(legacyKeyHelp)
+		}
 		if want != "" {
 			return nil, fmt.Errorf("tls: no valid certificate with a private key and thumbprint %s in LocalMachine\\My", thumbprint)
 		}
@@ -168,6 +173,31 @@ func usableForServer(c *x509.Certificate) bool {
 		}
 	}
 	return false
+}
+
+const legacyKeyHelp = "tls: the matching certificate's private key is in a legacy CryptoAPI provider, which Benchwarmer cannot use. " +
+	"Enroll with a template whose cryptography uses a Key Storage Provider, or re-import the PFX with " +
+	"certutil -importpfx -csp \"Microsoft Software Key Storage Provider\" <file> (see docs/deploy/tls.md)"
+
+// hasLegacyKey reports a private key held by a legacy CryptoAPI (CSP)
+// provider rather than CNG. Signing goes through CNG only, so such a
+// certificate is unusable, and saying so beats "not found".
+func hasLegacyKey(ctx *windows.CertContext) bool {
+	var key windows.Handle
+	var spec uint32
+	var mustFree bool
+	if err := windows.CryptAcquireCertificatePrivateKey(ctx,
+		windows.CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG|windows.CRYPT_ACQUIRE_SILENT_FLAG, nil, &key, &spec, &mustFree); err != nil {
+		return false
+	}
+	if mustFree {
+		if spec == windows.CERT_NCRYPT_KEY_SPEC {
+			procNCryptFreeObject.Call(uintptr(key))
+		} else {
+			_ = windows.CryptReleaseContext(key, 0)
+		}
+	}
+	return spec != windows.CERT_NCRYPT_KEY_SPEC
 }
 
 func hasPrivateKey(ctx *windows.CertContext) bool {

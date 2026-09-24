@@ -34,6 +34,16 @@ analysis and decisions.
 | `installer/` | `install.ps1` / `uninstall.ps1` (ADR 0009) |
 | `docs/` | ADRs, API schema (`docs/api/openapi.yaml`), Phase 0, deploy, troubleshooting, release |
 
+## Web UI
+
+The management listener (default `http://127.0.0.1:8481/`) serves a small
+dashboard, an events log, and configuration forms. It is plain HTML, CSS, and
+JavaScript embedded in the binary: no build step, no external requests, and a
+strict Content-Security-Policy. Reading status from the PC itself needs no
+token while `security.loopback_trust` is on; any change (mode, drain, reload,
+config) asks once for the management token, which the page keeps only for that
+browser tab. Use "Forget token" to clear it.
+
 ## Development
 
 Requires Go (version from `go.mod`; the `go` command fetches it automatically).

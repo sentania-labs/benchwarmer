@@ -73,10 +73,19 @@ func New(o Options) (*Service, error) {
 	if o.Log == nil {
 		o.Log = slog.Default()
 	}
-	if err := os.MkdirAll(o.DataDir, 0o755); err != nil {
+	s := &Service{o: o, log: o.Log}
+
+	// Secure the data folder before reading anything in it (ADR 0012): a
+	// standard user may have pre-created it. Owners, ACLs, and SCM settings
+	// only as the real service; a console run gets its folders and tokens.
+	po := provision.Options{}
+	if o.ServiceName != "" && winsvc.IsService() {
+		po.ApplyACLs, po.ServiceName = true, o.ServiceName
+	}
+	prov, err := provision.Start(o.DataDir, po)
+	if err != nil {
 		return nil, err
 	}
-	s := &Service{o: o, log: o.Log}
 
 	cs := config.NewStore(filepath.Join(o.DataDir, "config.json"))
 	lr, err := cs.Load()
@@ -101,17 +110,11 @@ func New(o Options) (*Service, error) {
 			Data:    map[string]any{"source": lr.Source}})
 	}
 
-	// ACLs and SCM settings only as the real service (ADR 0012); a console
-	// run still gets its folders and tokens.
-	po := provision.Options{Tokens: secrets.FilesFrom(s.cfg.Security)}
-	if o.ServiceName != "" && winsvc.IsService() {
-		po.ApplyACLs, po.ServiceName = true, o.ServiceName
-	}
-	toks, prov, err := provision.Ensure(o.DataDir, po)
+	toks, err := prov.Finish(secrets.FilesFrom(s.cfg.Security))
 	if err != nil {
 		return nil, err
 	}
-	loadBlocked := s.reportProvisioning(prov)
+	loadBlocked := s.reportProvisioning(prov.Report())
 	s.auth = api.NewAuthenticator(toks)
 	s.signIn = api.NewSignIn(toks.Management, nil)
 	s.infTok = toks.Inference

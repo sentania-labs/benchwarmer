@@ -160,6 +160,8 @@ func Validate(c Config) error {
 	} {
 		if p == "" {
 			v.add(field, "is required")
+		} else if err := dataRelative(p); err != nil {
+			v.add(field, "%v", err)
 		}
 	}
 
@@ -422,4 +424,29 @@ func isAbs(p string) bool {
 	}
 	return len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/') &&
 		((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z'))
+}
+
+// dataRelative checks that a token file reference stays inside the data
+// folder. The service creates token files as SYSTEM and grants the agent
+// token to interactive users, so a path the API could point anywhere
+// would let a token holder create or re-permission files elsewhere. The
+// check is lexical and platform-independent: both separators count.
+func dataRelative(p string) error {
+	s := strings.ReplaceAll(p, `\`, "/")
+	switch {
+	case strings.HasPrefix(s, "/"):
+		return errors.New("must be relative to the data folder (no leading separator or UNC path)")
+	case strings.Contains(s, ":"):
+		// A drive letter, a drive-relative path, or an alternate stream.
+		return errors.New("must be relative to the data folder (no drive letter or colon)")
+	}
+	for _, seg := range strings.Split(s, "/") {
+		if seg == ".." {
+			return errors.New("must stay inside the data folder (no .. segments)")
+		}
+	}
+	if c := filepath.ToSlash(filepath.Clean(filepath.FromSlash(s))); c == "." {
+		return errors.New("must name a file inside the data folder")
+	}
+	return nil
 }

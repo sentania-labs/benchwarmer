@@ -56,23 +56,15 @@ func TestWaitHint(t *testing.T) {
 }
 
 func TestStartName(t *testing.T) {
-	tests := []struct {
-		account, want string
-		sid, err      bool
-	}{
-		{"", `NT SERVICE\Benchwarmer`, true, false},
-		{AccountVirtual, `NT SERVICE\Benchwarmer`, true, false},
-		{AccountLocalSystem, "LocalSystem", false, false},
-		{"NT AUTHORITY\\NetworkService", "", false, true},
-	}
-	for _, tt := range tests {
-		name, sid, err := startName(tt.account, "Benchwarmer")
-		if name != tt.want || sid != tt.sid || (err != nil) != tt.err {
-			t.Errorf("%q: got %q %v %v", tt.account, name, sid, err)
+	for _, a := range []string{"", AccountLocalSystem, "system"} {
+		if name, err := startName(a); name != "LocalSystem" || err != nil {
+			t.Errorf("%q: got %q %v", a, name, err)
 		}
 	}
-	if _, _, err := startName(AccountVirtual, ""); err == nil {
-		t.Error("virtual account without a service name accepted")
+	for _, a := range []string{"virtual", "NT AUTHORITY\\NetworkService"} {
+		if _, err := startName(a); err == nil {
+			t.Errorf("%q accepted", a)
+		}
 	}
 }
 

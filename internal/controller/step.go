@@ -22,6 +22,7 @@ func (c *Controller) step(now time.Time, collect bool) {
 		c.observe(now)
 	}
 	c.trackTelemetryHealth(now)
+	c.checkSetup(now)
 
 	snap := c.snapshot(now)
 	d := policy.Evaluate(snap, c.cfg)
@@ -47,6 +48,24 @@ func (c *Controller) step(now time.Time, collect bool) {
 	c.checkCrashReset(now)
 	c.publish(now)
 	c.persist()
+}
+
+// checkSetup confirms, while nothing is running, that the runtime could be
+// started: the executable and model files exist. A fresh install has no
+// model, and reporting that is better than failing a load every backoff
+// period. Checked every few seconds, so a model copied in is noticed.
+func (c *Controller) checkSetup(now time.Time) {
+	if c.st.RuntimeRunning() || c.d.Adapter == nil {
+		return
+	}
+	if !c.lastSetupCheck.IsZero() && now.Sub(c.lastSetupCheck) < 5*time.Second {
+		return
+	}
+	c.lastSetupCheck = now
+	c.setupProblem = ""
+	if err := c.d.Adapter.Validate(c.cfg.Runtime); err != nil {
+		c.setupProblem = strings.ReplaceAll(err.Error(), "\n", "; ")
+	}
 }
 
 // absorbAsync handles results from load and stop goroutines and unexpected
@@ -177,7 +196,7 @@ func (c *Controller) snapshot(now time.Time) policy.Snapshot {
 		Now:  now,
 		Mode: c.mode,
 		Runtime: policy.RuntimeFacts{State: c.st, ActiveRequests: n, OldestRequestAge: oldest,
-			DrainingSince: c.drainStart, FootprintMiB: c.footprint},
+			DrainingSince: c.drainStart, FootprintMiB: c.footprint, SetupProblem: c.setupProblem},
 		GPU: c.gpu, Apps: c.apps, Session: c.session, Power: c.power, Timers: c.timers,
 	}
 	if c.inst != nil {

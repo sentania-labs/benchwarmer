@@ -23,6 +23,9 @@ const (
 	// AccessWrite: state-changing endpoints. Always a token, whatever the
 	// source address.
 	AccessWrite
+	// AccessLocal: no token, but only from this PC addressed as localhost
+	// or a loopback IP (sign-in code redemption).
+	AccessLocal
 )
 
 // Principal is who a request authenticated as.
@@ -99,6 +102,12 @@ type authError struct {
 // interactive user, who can read that token but not the management token).
 // loopbackTrust is the live security.loopback_trust setting.
 func (a *Authenticator) Authorize(r *http.Request, need Access, agentOK, loopbackTrust bool) *authError {
+	if need == AccessLocal {
+		if trustedLoopback(r) {
+			return nil
+		}
+		return &authError{http.StatusForbidden, CodeForbidden, "this endpoint is available only on this PC, addressed as localhost or a loopback IP"}
+	}
 	p := a.Identify(r)
 	switch p {
 	case PrincipalManagement:

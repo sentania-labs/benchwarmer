@@ -85,9 +85,14 @@ type fakeAdapter struct {
 	reconciles int
 	startErr   error
 	autoReady  bool
+	invalid    error // returned by Validate
 }
 
-func (a *fakeAdapter) Validate(config.Runtime) error { return nil }
+func (a *fakeAdapter) Validate(config.Runtime) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.invalid
+}
 func (a *fakeAdapter) Start(context.Context, config.Runtime) (runtime.Instance, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -883,4 +888,29 @@ func TestGPUResetNotRecountedAfterRestart(t *testing.T) {
 	if since.Before(dump) {
 		t.Fatalf("watermark %v is before the handled dump %v: it would be counted again", since, dump)
 	}
+}
+
+// A fresh install has no model: the controller reports setup required
+// instead of attempting loads, and loads once the file appears.
+func TestSetupRequiredUntilModelAppears(t *testing.T) {
+	r := newRig(t, nil)
+	r.ad.mu.Lock()
+	r.ad.invalid = errors.New(`model file C:\ProgramData\Benchwarmer\models\model.gguf not found`)
+	r.ad.mu.Unlock()
+	r.clk.Advance(3 * time.Minute) // past the startup wait
+	for i := 0; i < 5; i++ {
+		r.c.Step(true)
+	}
+	st := r.c.Status()
+	if st.Decision.Rule != policy.RuleSetupRequired || r.state() != state.Stopped {
+		t.Fatalf("rule %s state %s, want setup required while stopped", st.Decision.Rule, r.state())
+	}
+	if len(r.ad.insts) != 0 {
+		t.Fatal("a load was attempted without a model")
+	}
+	r.ad.mu.Lock()
+	r.ad.invalid = nil
+	r.ad.mu.Unlock()
+	r.clk.Advance(6 * time.Second) // next file check
+	r.stepUntil(state.Ready)
 }

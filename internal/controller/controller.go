@@ -194,6 +194,8 @@ type Controller struct {
 
 	decision        policy.Decision
 	lastEvaluated   time.Time
+	setupProblem    string // why the runtime cannot start at all; see checkSetup
+	lastSetupCheck  time.Time
 	telemetryLost   bool
 	telemetryLosses int // consecutive losses, for escalating recovery
 	gpuResets       int // GPU driver resets without a stable run since, for escalating recovery

@@ -46,6 +46,10 @@ type Options struct {
 	// Metrics serves GET /metrics; nil answers 404.
 	Metrics http.Handler
 	Version string
+	// SignIn enables sign-in codes (POST /api/v1/signin/*); nil answers 404.
+	SignIn *SignIn
+	// Setup answers GET /api/v1/setup; nil answers 404.
+	Setup func() SetupInfo
 	// Logger receives one line per request (method, path, status, peer,
 	// duration). Headers, query values, and bodies are never logged. Nil
 	// disables request logging.
@@ -80,11 +84,14 @@ func New(o Options) http.Handler {
 			"GET": {AccessRead, false, 0, h.getApplications},
 			"PUT": {AccessWrite, false, maxConfigBody, h.putApplications},
 		},
-		"/api/v1/mode":         {"PUT": {AccessWrite, true, maxSmallBody, h.putMode}},
-		"/api/v1/drain":        {"POST": {AccessWrite, false, maxSmallBody, h.drain}},
-		"/api/v1/reload":       {"POST": {AccessWrite, false, maxSmallBody, h.reload}},
-		"/api/v1/agent/report": {"POST": {AccessWrite, true, maxSmallBody, h.agentReport}},
-		"/metrics":             {"GET": {AccessRead, false, 0, h.metrics}},
+		"/api/v1/mode":          {"PUT": {AccessWrite, true, maxSmallBody, h.putMode}},
+		"/api/v1/drain":         {"POST": {AccessWrite, false, maxSmallBody, h.drain}},
+		"/api/v1/reload":        {"POST": {AccessWrite, false, maxSmallBody, h.reload}},
+		"/api/v1/agent/report":  {"POST": {AccessWrite, true, maxSmallBody, h.agentReport}},
+		"/api/v1/setup":         {"GET": {AccessRead, false, 0, h.setup}},
+		"/api/v1/signin/codes":  {"POST": {AccessWrite, false, maxSmallBody, h.registerSignIn}},
+		"/api/v1/signin/redeem": {"POST": {AccessLocal, false, maxSmallBody, h.redeemSignIn}},
+		"/metrics":              {"GET": {AccessRead, false, 0, h.metrics}},
 	}
 	return h
 }

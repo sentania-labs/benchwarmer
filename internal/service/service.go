@@ -59,6 +59,7 @@ type Service struct {
 	tel    telemetry.Source
 	tlsMgr *tlscert.Manager
 	auth   *api.Authenticator
+	signIn *api.SignIn
 	infTok string
 }
 
@@ -95,6 +96,7 @@ func New(o Options) (*Service, error) {
 		return nil, fmt.Errorf("tokens: %w", err)
 	}
 	s.auth = api.NewAuthenticator(toks)
+	s.signIn = api.NewSignIn(toks.Management, nil)
 	s.infTok = toks.Inference
 
 	s.met = metrics.New()
@@ -176,7 +178,8 @@ func (s *Service) Run(ctx context.Context, evs <-chan winsvc.Event) error {
 		Log:          s.log,
 	}), ReadHeaderTimeout: 10 * time.Second}
 	mux := http.NewServeMux()
-	apiH := api.New(api.Options{Backend: s.ctl, Auth: s.auth, Metrics: s.met.Handler(), Version: version.Version, Logger: s.log})
+	apiH := api.New(api.Options{Backend: s.ctl, Auth: s.auth, Metrics: s.met.Handler(), Version: version.Version, Logger: s.log,
+		SignIn: s.signIn, Setup: s.setupInfo})
 	mux.Handle("/api/", apiH)
 	mux.Handle("/metrics", apiH)
 	if s.o.UI != nil {

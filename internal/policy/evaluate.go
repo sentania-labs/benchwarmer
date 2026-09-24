@@ -34,6 +34,7 @@ const (
 	RuleNoTelemetry      = "eligibility.telemetry_unavailable"
 	RuleNoProcessList    = "eligibility.process_list_unavailable"
 	RuleVRAMInsufficient = "eligibility.vram_insufficient"
+	RuleSetupRequired    = "eligibility.setup_required"
 	RuleRun              = "profile.run"
 	RuleAIPriorityRun    = "mode.ai_priority"
 )
@@ -403,6 +404,13 @@ func (e *eval) eligibility() (match, bool) {
 	s, c := e.s, e.c
 	now := s.Now
 	t := s.Timers
+	// First: nothing else matters until there is something to run.
+	if p := s.Runtime.SetupProblem; p != "" {
+		return match{action: ActionHold, rule: RuleSetupRequired, tier: TierEligibility, severity: SeverityWarning,
+			reason:   "Setup required: " + p,
+			evidence: []Evidence{ev("setup_problem", p, nil, "runtime")},
+			idle:     state.Stopped}, true
+	}
 	if !t.RecoveryUntil.IsZero() && now.Before(t.RecoveryUntil) {
 		idle := state.Cooldown
 		switch {

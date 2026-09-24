@@ -8,6 +8,7 @@
 //	benchwarmer service remove
 //	benchwarmer config default
 //	benchwarmer config validate FILE
+//	benchwarmer login [--code CODE] [--data DIR]
 //	benchwarmer version
 package main
 
@@ -41,7 +42,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: benchwarmer run|service|config|version (see package documentation)")
+		return errors.New("usage: benchwarmer run|service|config|login|version (see package documentation)")
 	}
 	switch args[0] {
 	case "run":
@@ -50,6 +51,8 @@ func run(args []string) error {
 		return cmdService(args[1:])
 	case "config":
 		return cmdConfig(args[1:])
+	case "login":
+		return cmdLogin(args[1:])
 	case "version":
 		fmt.Println(version.Version)
 		return nil

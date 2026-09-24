@@ -85,3 +85,20 @@ func TestStoreCertificateNotFound(t *testing.T) {
 		t.Fatal("expected not found")
 	}
 }
+
+func TestListStoreIncludesUsableCertificate(t *testing.T) {
+	tp := newStoreCert(t, "bw-store-list.example.lan", "-KeyAlgorithm ECDSA_nistP256 -Provider 'Microsoft Software Key Storage Provider'")
+	certs, err := ListStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range certs {
+		if c.Thumbprint == tp {
+			if len(c.DNSNames) == 0 || c.DNSNames[0] != "bw-store-list.example.lan" {
+				t.Fatalf("names %v", c.DNSNames)
+			}
+			return
+		}
+	}
+	t.Fatalf("certificate %s not listed among %d", tp, len(certs))
+}

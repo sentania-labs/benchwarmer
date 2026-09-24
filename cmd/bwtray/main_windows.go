@@ -75,6 +75,7 @@ func onReady(c *client, base string) {
 	}
 	systray.AddSeparator()
 	dash := systray.AddMenuItem("Open dashboard", "")
+	signin := systray.AddMenuItem("Sign in to change settings...", "Opens the dashboard signed in as administrator (asks for permission)")
 	quit := systray.AddMenuItem("Close tray", "The service keeps running")
 
 	refresh := func() {
@@ -122,6 +123,11 @@ func onReady(c *client, base string) {
 	go func() {
 		for range dash.ClickedCh {
 			_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", base+"/").Start()
+		}
+	}()
+	go func() {
+		for range signin.ClickedCh {
+			logErr(signIn(base))
 		}
 	}()
 	go func() {

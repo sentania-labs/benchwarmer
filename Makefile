@@ -38,6 +38,7 @@ windows:
 	mkdir -p $(DIST)
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/bwprobe.exe ./cmd/bwprobe
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/fakellama.exe ./cmd/fakellama
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS) -H windowsgui" -o $(DIST)/bwtray.exe ./cmd/bwtray
 
 check: lint test-race vuln windows
 

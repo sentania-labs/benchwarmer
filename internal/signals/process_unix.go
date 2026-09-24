@@ -54,3 +54,6 @@ func ReadSessionSignals() (SessionSignals, error) { return SessionSignals{}, Err
 
 // Sessions is Windows-only.
 func Sessions() ([]Session, error) { return nil, ErrUnsupported }
+
+// WorkstationLocked is Windows-only; it reports false elsewhere.
+func WorkstationLocked() bool { return false }

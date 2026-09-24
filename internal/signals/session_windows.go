@@ -125,3 +125,18 @@ func notificationState(v uint32) string {
 	}
 	return "unknown"
 }
+
+var procOpenInputDesktop = moduser32.NewProc("OpenInputDesktop")
+var procCloseDesktop = moduser32.NewProc("CloseDesktop")
+
+// WorkstationLocked reports whether the interactive desktop is locked: the
+// input desktop cannot be opened while the secure (lock) desktop is active.
+func WorkstationLocked() bool {
+	const desktopSwitchDesktop = 0x0100
+	h, _, _ := procOpenInputDesktop.Call(0, 0, desktopSwitchDesktop)
+	if h == 0 {
+		return true
+	}
+	procCloseDesktop.Call(h)
+	return false
+}

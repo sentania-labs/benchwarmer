@@ -134,7 +134,7 @@ func (f *fakeFacts) Build(_ time.Time, in FactInput) (policy.GPUFacts, policy.Ap
 	}
 	return g, f.apps, policy.SessionFacts{}
 }
-func (f *fakeFacts) AgentReport(time.Time, api.AgentReport) {}
+func (f *fakeFacts) AgentReport(time.Time, api.AgentReport)               {}
 func (f *fakeFacts) AgentStatus(time.Time, time.Duration) api.AgentStatus { return api.AgentStatus{} }
 func (f *fakeFacts) set(fn func(g *policy.GPUFacts, a *policy.AppFacts)) {
 	f.mu.Lock()

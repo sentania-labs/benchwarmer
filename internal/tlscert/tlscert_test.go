@@ -14,8 +14,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"software.sslmate.com/src/go-pkcs12"
 )
 
 // issue makes a CA and a leaf signed by it, like an internal CA would.
@@ -101,28 +99,6 @@ func TestPEMChainFromCA(t *testing.T) {
 	}
 }
 
-func TestModernPFXWithPassword(t *testing.T) {
-	dir := t.TempDir()
-	leaf, key, ca := issue(t, "ss8510.example.lan", time.Now().Add(24*time.Hour))
-	pfx, err := pkcs12.Modern.Encode(key, leaf, []*x509.Certificate{ca}, "s3cret")
-	if err != nil {
-		t.Fatal(err)
-	}
-	pf, pwf := filepath.Join(dir, "server.pfx"), filepath.Join(dir, "pfx.pass")
-	_ = os.WriteFile(pf, pfx, 0o600)
-	_ = os.WriteFile(pwf, []byte("s3cret\r\n"), 0o600)
-	m, err := New(Source{CertFile: pf, PFXPasswordFile: pwf}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := len(m.current().Certificate); n != 2 || m.Info().Subject != "CN=ss8510.example.lan" {
-		t.Fatalf("chain %d info %+v", n, m.Info())
-	}
-	if _, err := New(Source{CertFile: pf}, nil); err == nil {
-		t.Fatal("PFX opened without its password")
-	}
-}
-
 func TestRejectsExpiredAndMismatched(t *testing.T) {
 	dir := t.TempDir()
 	leaf, key, ca := issue(t, "old.example.lan", time.Now().Add(-time.Minute))
@@ -204,17 +180,6 @@ func TestSelfSignedRegeneratedWhenHostsChange(t *testing.T) {
 	}
 	if !contains(m.Info().DNSNames, "added.example.lan") {
 		t.Fatalf("new host missing: %v", m.Info().DNSNames)
-	}
-}
-
-func TestPasswordFileEncodings(t *testing.T) {
-	utf16le := []byte{0xFF, 0xFE, 's', 0, '3', 0, '\r', 0, '\n', 0}
-	for name, b := range map[string][]byte{
-		"ascii": []byte("s3\r\n"), "utf8-bom": append([]byte{0xEF, 0xBB, 0xBF}, "s3"...), "utf16": utf16le,
-	} {
-		if got := passwordText(b); got != "s3" {
-			t.Errorf("%s: %q", name, got)
-		}
 	}
 }
 

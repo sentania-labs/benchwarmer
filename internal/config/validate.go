@@ -270,14 +270,14 @@ func validateListen(v *validator, c Config) {
 			// Store-backed: nothing more to check here.
 		case t.CertFile == "" && !t.SelfSigned:
 			v.add("listen.inference_tls.cert_file", "set a certificate file or store selection, or enable self_signed for testing")
-		case t.CertFile != "" && isPFXPath(t.CertFile) && t.KeyFile != "":
-			v.add("listen.inference_tls.key_file", "must be empty when cert_file is a PFX (the key is inside it)")
-		case t.CertFile != "" && !isPFXPath(t.CertFile) && t.KeyFile == "":
+		case isPFXPath(t.CertFile):
+			v.add("listen.inference_tls.cert_file", pfxHelp)
+		case t.CertFile != "" && t.KeyFile == "":
 			v.add("listen.inference_tls.key_file", "is required with a PEM certificate")
 		}
-		if t.PFXPasswordFile != "" && !isPFXPath(t.CertFile) {
-			v.add("listen.inference_tls.pfx_password_file", "only applies to a .pfx or .p12 cert_file")
-		}
+	}
+	if t.LegacyPFXPasswordFile != "" {
+		v.add("listen.inference_tls.pfx_password_file", pfxHelp)
 	}
 	// Non-loopback management needs a way to authenticate.
 	if host, _, err := net.SplitHostPort(c.Listen.Management); err == nil && !isLoopbackHost(host) && c.Security.ManagementTokenFile == "" {
@@ -296,6 +296,8 @@ func isHex40(s string) bool {
 	}
 	return true
 }
+
+const pfxHelp = "PFX files are not read: import the PFX into the LocalMachine\\My certificate store (Import-PfxCertificate) and set store_thumbprint or store_subject"
 
 func isPFXPath(p string) bool {
 	l := strings.ToLower(p)

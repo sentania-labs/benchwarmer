@@ -66,13 +66,14 @@ function network() {
       { path: "listen.inference", label: "Inference (OpenAI-compatible /v1)", help: "The only listener meant for LAN exposure." },
       { path: "listen.management", label: "Management (this UI, /api/v1, /metrics)", help: "Keep on 127.0.0.1 unless you need remote management; remote access always needs the token." },
     ] },
-    { title: "Inference HTTPS", note: "Required when the inference listener is not on loopback. Use a certificate from your CA: a .pfx exported with its private key, or PEM certificate and key files. Relative paths are inside the data folder. A replaced certificate file is picked up automatically.", fields: [
+    { title: "Inference HTTPS", note: "Required when the inference listener is not on loopback. Use a certificate from your CA in the computer's certificate store (LocalMachine\\My, where AD CS enrollment and Import-PfxCertificate put it), or PEM files. Set a store selection or files, not both. Renewals are picked up automatically. Changes here need a service restart.", fields: [
       { path: "listen.inference_tls.enabled", label: "Serve inference over HTTPS", type: "bool" },
-      { path: "listen.inference_tls.cert_file", label: "Certificate file", help: "PEM chain (server certificate first) or .pfx / .p12." },
-      { path: "listen.inference_tls.key_file", label: "Private key file (PEM only)", help: "Leave empty for a .pfx." },
-      { path: "listen.inference_tls.pfx_password_file", label: "PFX password file", help: "A file containing the password, not the password itself." },
+      { path: "listen.inference_tls.store_subject", label: "Certificate store: DNS name or subject", help: "For example ss8510.example.lan. The newest valid certificate for that name with a private key and server authentication is used, so autoenrollment renewals need no change." },
+      { path: "listen.inference_tls.store_thumbprint", label: "Certificate store: thumbprint", help: "Pins one certificate (40 hex characters). Use instead of the name; a renewal then needs the new thumbprint." },
+      { path: "listen.inference_tls.cert_file", label: "Certificate file (PEM)", help: "Chain with the server certificate first. Relative paths are inside the data folder." },
+      { path: "listen.inference_tls.key_file", label: "Private key file (PEM)" },
       { path: "listen.inference_tls.self_signed", label: "Use a generated self-signed certificate (testing only)", type: "bool",
-        help: "Used only when no certificate file is set. Clients will not trust it unless told to." },
+        help: "Used only when no store selection or file is set. Clients will not trust it unless told to." },
       { path: "listen.inference_tls.self_signed_hosts", label: "Extra names for the self-signed certificate", type: "lines", help: "One DNS name or IP per line." },
     ] },
     { title: "Authentication", note: "Token values are never shown or edited here. These are file locations on the PC; rotate a token by replacing its file.", fields: [

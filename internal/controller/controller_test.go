@@ -253,6 +253,12 @@ func quietGPU() policy.GPUFacts {
 
 func newRig(t *testing.T, persist *memPersist) *rig {
 	t.Helper()
+	return newRigWith(t, persist, nil)
+}
+
+// newRigWith lets a test adjust the controller's dependencies before start.
+func newRigWith(t *testing.T, persist *memPersist, mod func(*Deps)) *rig {
+	t.Helper()
 	cfg := config.Default()
 	cfg.Recovery.StartupCooldown = config.Duration(2 * time.Minute)
 	r := &rig{t: t, cfg: cfg, clk: &clock{t: time.Date(2026, 9, 23, 19, 0, 0, 0, chicago)}, ev: &sink{}, persist: persist}
@@ -267,6 +273,9 @@ func newRig(t *testing.T, persist *memPersist) *rig {
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	if persist != nil {
 		d.Persist = persist
+	}
+	if mod != nil {
+		mod(&d)
 	}
 	r.c = New(d)
 	r.c.Start()
@@ -849,5 +858,29 @@ func TestGPUResetCooldownSurvivesRestart(t *testing.T) {
 	}
 	if got := r2.c.Status().Timers.RecoveryUntil; got == nil || !got.Equal(*until) {
 		t.Fatalf("cooldown not preserved: %v want %v", got, until)
+	}
+}
+
+// A reset handled soon after the periodic watermark update must not be
+// reported again after a restart (it would double the cooldown).
+func TestGPUResetNotRecountedAfterRestart(t *testing.T) {
+	p := &memPersist{}
+	r := newRig(t, p)
+	var pending []gpureset.Reset
+	var mu sync.Mutex
+	r.c.d.GPUResets = func() []gpureset.Reset { mu.Lock(); defer mu.Unlock(); x := pending; pending = nil; return x }
+	r.toReady()
+	r.clk.Advance(10 * time.Second) // inside the 30 s watermark interval
+	dump := r.clk.Now().Add(time.Second)
+	mu.Lock()
+	pending = []gpureset.Reset{{File: "WATCHDOG-y.dmp", Time: dump}}
+	mu.Unlock()
+	r.stepUntil(state.Error)
+	// Blue screen and reboot: the new controller tells the watcher where to
+	// resume.
+	var since time.Time
+	newRigWith(t, p, func(d *Deps) { d.GPUResetsSince = func(t time.Time) { since = t } })
+	if since.Before(dump) {
+		t.Fatalf("watermark %v is before the handled dump %v: it would be counted again", since, dump)
 	}
 }

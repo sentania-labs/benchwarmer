@@ -58,10 +58,13 @@ come from the target PC.
 | E7 | Service identity visibility | Virtual account: GPU counters denied, user-session processes not visible. LocalSystem: full | ADR 0006: service as LocalSystem, runtime as restricted LocalService |
 | - | Model footprint | gpt-oss-20b MXFP4, 8K context: 11,327 MiB owned (10,949 weights + 216 KV + 96 compute) | `required_free_vram_mib` ~12,500 |
 | - | Stability | Four blue screens `0x116` in `amdkmdag.sys` with the display off, matching a known AMD idle/D3 VRAM eviction defect; hard kills of long-running runtimes triggered it, a graceful stop did not | ADR 0011 |
+| - | Driver rollback | 2026-09-24 the target was rolled back to `32.0.23033.1002` (dated 2026-03-08, the March 2026 Adrenalin branch; not the `32.0.22042.14002` build the discussion recommends). One report says the R9700-specific `23033` build crashes llama-server in `amdvlk64.dll`; on the RX 9060 XT it did not: probe load 7.3 s, ~93 tokens/s, graceful stop 1.5 s | Treat as the working driver pending an idle/display-off soak |
+| - | Service-driven stop and store TLS | Installed service, `d2e9056`: 10-minute HTTPS soak from another host (442 requests, 0 errors, certificate validated against the lab CA, served from `LocalMachine\My` by thumbprint), then Pause: `runtime_stopped` with `graceful=true`, `kill_fallback=false`, tree empty 1.6 s, VRAM back to 6 MiB, no watchdog dump | Graceful stop works from the SYSTEM service to the LocalService runtime |
 
 ## Still pending
 
 | # | Question | Needs |
 |---|---|---|
 | E8 | Game, launcher, browser, and streaming scenario profiles | A normal evening of use with passive recording |
+| - | Stability on the rolled-back driver | Several hours idle with the display off (overnight) with the service in Auto, no watchdog dumps |
 | E9 | Sleep/resume | The target is set never to sleep; driver resets are covered by ADR 0011 |

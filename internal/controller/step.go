@@ -606,6 +606,17 @@ func (c *Controller) checkGPUResets(now time.Time) {
 		}
 		// One incident can surface as several dumps (both folders, a full
 		// dump still being written): count resets within 2 minutes once.
+		if len(resets) > 0 {
+			// Move the watermark past every dump just handled so a restart
+			// never reports the same incident again. (The dump may be
+			// stamped slightly after now while it is still being written.)
+			c.lastGPUCheck = now
+			for _, r := range resets {
+				if r.Time.After(c.lastGPUCheck) {
+					c.lastGPUCheck = r.Time
+				}
+			}
+		}
 		if len(resets) > 0 && !c.lastGPUReset.IsZero() && now.Sub(c.lastGPUReset) < 2*time.Minute {
 			c.power.DeviceLost = c.power.DeviceLost || c.st.RuntimeRunning()
 			resets = nil

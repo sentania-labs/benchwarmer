@@ -31,6 +31,7 @@ type runtimeOpts struct {
 	adapter                         string
 	logDir                          string
 	modes                           []string
+	runAs                           string
 }
 
 // Kill modes. "graceful" sends Ctrl+C (SIGINT on Unix) and falls back to a
@@ -82,6 +83,11 @@ type cycleResult struct {
 	StopErr             string   `json:"stop_error,omitempty"`
 	LeftoverProcesses   []string `json:"leftover_processes,omitempty"`
 	StderrTail          string   `json:"stderr_tail,omitempty"`
+	// RuntimeUser and RuntimePrivileges are read from the running process's
+	// token: evidence of the identity it actually ran under.
+	RuntimeUser       string   `json:"runtime_user,omitempty"`
+	RuntimePrivileges []string `json:"runtime_privileges,omitempty"`
+	RuntimeIntegrity  string   `json:"runtime_integrity,omitempty"`
 }
 
 type reqResult struct {
@@ -110,6 +116,7 @@ func cmdRuntime(args []string) error {
 	fs.DurationVar(&o.settle, "settle", 10*time.Second, "pause between cycles")
 	fs.Uint64Var(&o.releaseTolerance, "release-tolerance-mib", 256, "VRAM counts as released within this many MiB of baseline")
 	fs.StringVar(&o.adapter, "adapter", "", "adapter LUID or name substring")
+	fs.StringVar(&o.runAs, "runtime-as", "", "runtime identity: empty (same as probe) or localservice (probe must run as LocalSystem)")
 	out := fs.String("out", "", "JSONL output (default runtime-<time>.jsonl)")
 	fs.StringVar(&o.logDir, "log-dir", "", "directory for per-cycle runtime stdout/stderr logs (default: next to -out)")
 	_ = fs.Parse(args)
@@ -323,7 +330,7 @@ func runCycle(o runtimeOpts, g gpuSource, n int, mode string, w *jsonl) cycleRes
 	args := append([]string{"-m", o.model, "--host", o.host, "--port", strconv.Itoa(o.port)}, strings.Fields(o.extra)...)
 	// Graceful mode on Windows needs the child on our console for Ctrl+C.
 	share := mode == modeGraceful && runtime.GOOS == "windows"
-	pg, err := procgroup.Start(procgroup.Spec{Path: o.exe, Args: args, Stdout: sink, Stderr: sink, ShareConsole: share})
+	pg, err := procgroup.Start(procgroup.Spec{Path: o.exe, Args: args, Stdout: sink, Stderr: sink, ShareConsole: share, RunAs: o.runAs})
 	if err != nil {
 		r.StartErr = err.Error()
 		return r
@@ -344,6 +351,12 @@ func runCycle(o runtimeOpts, g gpuSource, n int, mode string, w *jsonl) cycleRes
 		}
 	}
 
+	if u, privs, err := signals.ProcessIdentity(uint32(pg.PID())); err == nil {
+		r.RuntimeUser, r.RuntimePrivileges = u, privs
+	} else {
+		r.RuntimeUser = "unknown: " + err.Error()
+	}
+	r.RuntimeIntegrity, _ = signals.ProcessIntegrity(uint32(pg.PID()))
 	t0 := time.Now()
 	r.Ready = waitReady(baseURL, o.loadTimeout, pg)
 	r.LoadSeconds = time.Since(t0).Seconds()

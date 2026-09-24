@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -21,6 +22,9 @@ type platform struct {
 }
 
 var (
+	modadvapi32               = windows.NewLazySystemDLL("advapi32.dll")
+	procLogonUserW            = modadvapi32.NewProc("LogonUserW")
+	procCreateRestrictedToken = modadvapi32.NewProc("CreateRestrictedToken")
 	modkernel32               = windows.NewLazySystemDLL("kernel32.dll")
 	procSetConsoleCtrlHandler = modkernel32.NewProc("SetConsoleCtrlHandler")
 )
@@ -84,6 +88,22 @@ func start(spec Spec) (*Group, error) {
 		flags |= windows.CREATE_NO_WINDOW | windows.CREATE_NEW_PROCESS_GROUP
 	}
 	cmd.SysProcAttr = &windows.SysProcAttr{CreationFlags: flags, HideWindow: !spec.ShareConsole}
+	switch spec.RunAs {
+	case "":
+	case RunAsLocalService:
+		tok, err := localServiceToken()
+		if err != nil {
+			_ = windows.CloseHandle(job)
+			// Never fall back to launching with this process's own rights.
+			return nil, fmt.Errorf("procgroup: cannot start the runtime as LocalService (the service must run as LocalSystem; set runtime.run_as to \"service\" only for development): %w", err)
+		}
+		// The token is only needed for process creation.
+		defer tok.Close()
+		cmd.SysProcAttr.Token = syscall.Token(tok)
+	default:
+		_ = windows.CloseHandle(job)
+		return nil, fmt.Errorf("procgroup: unknown RunAs %q", spec.RunAs)
+	}
 	if err := cmd.Start(); err != nil {
 		_ = windows.CloseHandle(job)
 		return nil, fmt.Errorf("procgroup: start: %w", err)
@@ -115,6 +135,43 @@ func start(spec Spec) (*Group, error) {
 	g.plat.shareConsole = spec.ShareConsole
 	go func() { g.setExit(cmd.Wait()) }()
 	return g, nil
+}
+
+// localServiceToken logs on NT AUTHORITY\LocalService (only LocalSystem may
+// do this without a password) and removes every privilege from the token
+// except SeChangeNotify, so the runtime holds no special rights even if an
+// input it parses is hostile.
+func localServiceToken() (windows.Token, error) {
+	const logon32LogonService, logon32ProviderDefault = 5, 0
+	user, _ := windows.UTF16PtrFromString("LocalService")
+	domain, _ := windows.UTF16PtrFromString("NT AUTHORITY")
+	var tok windows.Token
+	r, _, err := procLogonUserW.Call(uintptr(unsafe.Pointer(user)), uintptr(unsafe.Pointer(domain)), 0,
+		logon32LogonService, logon32ProviderDefault, uintptr(unsafe.Pointer(&tok)))
+	if r == 0 {
+		return 0, fmt.Errorf("LogonUser: %w", err)
+	}
+	defer tok.Close()
+	const disableMaxPrivilege = 0x1
+	var restricted windows.Token
+	r, _, err = procCreateRestrictedToken.Call(uintptr(tok), disableMaxPrivilege, 0, 0, 0, 0, 0, 0, uintptr(unsafe.Pointer(&restricted)))
+	if r == 0 {
+		return 0, fmt.Errorf("CreateRestrictedToken: %w", err)
+	}
+	// Service logons run at System integrity; drop to Medium so the runtime
+	// cannot write to or open objects that other services protect with
+	// integrity labels.
+	medium, err := windows.CreateWellKnownSid(windows.WinMediumLabelSid)
+	if err != nil {
+		restricted.Close()
+		return 0, fmt.Errorf("medium integrity SID: %w", err)
+	}
+	tml := windows.Tokenmandatorylabel{Label: windows.SIDAndAttributes{Sid: medium, Attributes: windows.SE_GROUP_INTEGRITY}}
+	if err := windows.SetTokenInformation(restricted, windows.TokenIntegrityLevel, (*byte)(unsafe.Pointer(&tml)), tml.Size()); err != nil {
+		restricted.Close()
+		return 0, fmt.Errorf("set integrity level: %w", err)
+	}
+	return restricted, nil
 }
 
 // resumeProcess resumes the threads of a process created suspended. A freshly

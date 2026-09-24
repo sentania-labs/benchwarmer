@@ -23,6 +23,11 @@ type platform struct {
 }
 
 func start(spec Spec) (*Group, error) {
+	if spec.RunAs != "" {
+		// Identity switching is a Windows service feature; development
+		// builds run the child as the current user.
+		spec.RunAs = ""
+	}
 	cmd := exec.Command(spec.Path, spec.Args...)
 	cmd.Dir = spec.Dir
 	cmd.Env = spec.Env

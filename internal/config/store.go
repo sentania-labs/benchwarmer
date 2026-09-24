@@ -22,10 +22,24 @@ func Parse(b []byte) (Config, error) {
 	if dec.More() {
 		return Config{}, errors.New("parse config: trailing data after JSON document")
 	}
+	upgrade(&c)
 	if err := Validate(c); err != nil {
 		return Config{}, err
 	}
 	return c, nil
+}
+
+// upgrade fills fields added to schema version 1 after a config file may
+// have been written, with the value that preserves earlier behavior or the
+// shipped default. Without this, an upgrade would make an existing file fail
+// validation and the service would run on factory defaults.
+func upgrade(c *Config) {
+	if c.Runtime.RunAs == "" {
+		c.Runtime.RunAs = RunAsLocalService
+	}
+	if c.Listen.InferenceTLS.SelfSignedHosts == nil {
+		c.Listen.InferenceTLS.SelfSignedHosts = []string{}
+	}
 }
 
 // Marshal renders a config document.

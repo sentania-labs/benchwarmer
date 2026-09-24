@@ -466,6 +466,11 @@ func (w *WindowsCollector) Collect() Sample {
 	if !primed {
 		s.Errors = append(s.Errors, "priming sample: utilization not yet available")
 	}
+	if s.InvalidReadings > 0 && len(s.Engines) == 0 {
+		// Every utilization reading was impossible: unknown, not idle.
+		s.Complete = false
+		s.Errors = append(s.Errors, "all engine utilization readings were invalid")
+	}
 	if !s.HasAdapterInstances {
 		// No counter instance for the adapter's LUID: the adapter vanished or
 		// changed identity (driver reset). Zero here means unknown, not idle.

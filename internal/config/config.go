@@ -3,6 +3,12 @@
 // atomic persistence with a last-known-good copy (ADR 0008).
 package config
 
+// Runtime identities.
+const (
+	RunAsLocalService = "localservice"
+	RunAsService      = "service"
+)
+
 // SchemaVersion is the current configuration schema version.
 const SchemaVersion = 1
 
@@ -46,6 +52,11 @@ type Runtime struct {
 	Args        []string `json:"args"`
 	ContextSize int      `json:"context_size"`
 	GPULayers   int      `json:"gpu_layers"`
+	// RunAs is the runtime's identity: RunAsLocalService (default) starts
+	// llama-server as NT AUTHORITY\LocalService with no privileges, so a
+	// flaw in the runtime cannot act with the service's LocalSystem rights;
+	// RunAsService runs it under the service's own account (ADR 0006).
+	RunAs string `json:"run_as"`
 	// Host and Port are the private loopback listener for the runtime.
 	Host string `json:"host"`
 	Port int    `json:"port"`
@@ -68,6 +79,30 @@ type Listen struct {
 	Inference string `json:"inference"`
 	// Management serves /api/v1/*, /metrics and the web UI.
 	Management string `json:"management"`
+	// InferenceTLS configures HTTPS on the inference listener. Required
+	// when the inference listener is not loopback.
+	InferenceTLS TLS `json:"inference_tls"`
+}
+
+// TLS configures a listener's certificate. Deployments use a CA-issued
+// certificate (for example from a Microsoft CA, exported as PFX with its
+// private key, or as PEM files); SelfSigned is for testing. Relative paths
+// are resolved against the data directory. Certificate files are re-read
+// when they change, so renewal needs no restart.
+type TLS struct {
+	Enabled bool `json:"enabled"`
+	// CertFile is a PEM chain (leaf first) or a .pfx/.p12 file.
+	CertFile string `json:"cert_file"`
+	// KeyFile is the PEM private key; leave empty for PFX.
+	KeyFile string `json:"key_file"`
+	// PFXPasswordFile holds the PFX password (the file, not the password).
+	PFXPasswordFile string `json:"pfx_password_file"`
+	// SelfSigned generates a self-signed certificate in <data>\tls when no
+	// CertFile is set. Testing only: clients must be told to trust it.
+	SelfSigned bool `json:"self_signed"`
+	// SelfSignedHosts are extra DNS names or IPs for the self-signed
+	// certificate (localhost, loopback, and the host name are included).
+	SelfSignedHosts []string `json:"self_signed_hosts"`
 }
 
 // Telemetry configures GPU sampling.

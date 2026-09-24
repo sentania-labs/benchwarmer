@@ -24,6 +24,11 @@ type Spec struct {
 	Env    []string // nil means inherit
 	Stdout io.Writer
 	Stderr io.Writer
+	// RunAs selects the child's identity: "" inherits this process's
+	// account; RunAsLocalService starts it as NT AUTHORITY\LocalService with
+	// every privilege removed (Windows only; requires the caller to be
+	// LocalSystem). ADR 0006.
+	RunAs string
 	// ShareConsole attaches the child to the caller's console and process
 	// group so Interrupt can deliver Ctrl+C. Only meaningful when the caller
 	// has a console (the probe run from a terminal); a service has none.
@@ -31,6 +36,9 @@ type Spec struct {
 }
 
 const pipeDrainDelay = 2 * time.Second
+
+// RunAsLocalService is the Spec.RunAs value for a LocalService child.
+const RunAsLocalService = "localservice"
 
 // ErrNotRunning is returned when an operation needs a live group.
 var ErrNotRunning = errors.New("procgroup: process not running")

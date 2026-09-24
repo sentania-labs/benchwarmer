@@ -3,6 +3,7 @@
 package signals
 
 import (
+	"errors"
 	"time"
 	"unsafe"
 
@@ -107,4 +108,85 @@ func wtsState(s uint32) string {
 func BootTime() (time.Time, error) {
 	ms, _, _ := procGetTickCount64.Call()
 	return time.Now().Add(-time.Duration(ms) * time.Millisecond).Truncate(time.Second), nil
+}
+
+var procLookupPrivilegeNameW = windows.NewLazySystemDLL("advapi32.dll").NewProc("LookupPrivilegeNameW")
+
+// ProcessIdentity reports the account a process runs as and every privilege
+// present in its token (enabled or not), for verifying the runtime's reduced identity (ADR 0006).
+func ProcessIdentity(pid uint32) (user string, privileges []string, err error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return "", nil, err
+	}
+	defer windows.CloseHandle(h)
+	var tok windows.Token
+	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok); err != nil {
+		return "", nil, err
+	}
+	defer tok.Close()
+	tu, err := tok.GetTokenUser()
+	if err != nil {
+		return "", nil, err
+	}
+	acct, dom, _, err := tu.User.Sid.LookupAccount("")
+	if err != nil {
+		user = tu.User.Sid.String()
+	} else {
+		user = dom + `\` + acct
+	}
+	var n uint32
+	_ = windows.GetTokenInformation(tok, windows.TokenPrivileges, nil, 0, &n)
+	if n == 0 {
+		return user, nil, nil
+	}
+	buf := make([]byte, n)
+	if err := windows.GetTokenInformation(tok, windows.TokenPrivileges, &buf[0], n, &n); err != nil {
+		return user, nil, nil
+	}
+	tp := (*windows.Tokenprivileges)(unsafe.Pointer(&buf[0]))
+	for _, p := range tp.AllPrivileges() {
+		name := make([]uint16, 64)
+		l := uint32(len(name))
+		if r, _, _ := procLookupPrivilegeNameW.Call(0, uintptr(unsafe.Pointer(&p.Luid)), uintptr(unsafe.Pointer(&name[0])), uintptr(unsafe.Pointer(&l))); r != 0 {
+			privileges = append(privileges, windows.UTF16ToString(name[:l]))
+		}
+	}
+	return user, privileges, nil
+}
+
+// ProcessIntegrity returns the process's integrity level: "Low", "Medium",
+// "High", "System", or the raw SID.
+func ProcessIntegrity(pid uint32) (string, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(h)
+	var tok windows.Token
+	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok); err != nil {
+		return "", err
+	}
+	defer tok.Close()
+	var n uint32
+	_ = windows.GetTokenInformation(tok, windows.TokenIntegrityLevel, nil, 0, &n)
+	if n == 0 {
+		return "", errors.New("no integrity level")
+	}
+	buf := make([]byte, n)
+	if err := windows.GetTokenInformation(tok, windows.TokenIntegrityLevel, &buf[0], n, &n); err != nil {
+		return "", err
+	}
+	sid := (*windows.Tokenmandatorylabel)(unsafe.Pointer(&buf[0])).Label.Sid.String()
+	switch sid {
+	case "S-1-16-4096":
+		return "Low", nil
+	case "S-1-16-8192":
+		return "Medium", nil
+	case "S-1-16-12288":
+		return "High", nil
+	case "S-1-16-16384":
+		return "System", nil
+	}
+	return sid, nil
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -81,6 +82,14 @@ func TestValidationRejectsUnsafeValues(t *testing.T) {
 		{"rule with two matchers", func(c *Config) { c.Applications[0].Path = `C:\x.exe` }, "applications[0]"},
 		{"rule bad class", func(c *Config) { c.Applications[0].Class = "boss" }, "applications[0].class"},
 		{"exe rule with path", func(c *Config) { c.Applications[0].Exe = `C:\Games\x.exe` }, "applications[0].exe"},
+		{"LAN inference without TLS", func(c *Config) { c.Listen.Inference = "0.0.0.0:8480" }, "listen.inference_tls.enabled"},
+		{"TLS without certificate", func(c *Config) { c.Listen.InferenceTLS.Enabled = true }, "listen.inference_tls.cert_file"},
+		{"PEM without key", func(c *Config) {
+			c.Listen.InferenceTLS = TLS{Enabled: true, CertFile: `C:\x\server.crt`}
+		}, "listen.inference_tls.key_file"},
+		{"PFX with key file", func(c *Config) {
+			c.Listen.InferenceTLS = TLS{Enabled: true, CertFile: `tls\server.pfx`, KeyFile: `tls\server.key`}
+		}, "listen.inference_tls.key_file"},
 		{"wrong schema version", func(c *Config) { c.SchemaVersion = 2 }, "schema_version"},
 		{"backoff max below initial", func(c *Config) { c.Recovery.CrashBackoffMax = Duration(time.Second) }, "recovery.crash_backoff_max"},
 	}
@@ -209,6 +218,7 @@ func TestClassifyImpact(t *testing.T) {
 	}
 	c := Clone(a)
 	c.Listen.Inference = "0.0.0.0:8480"
+	c.Listen.InferenceTLS = TLS{Enabled: true, SelfSigned: true}
 	if im := Classify(a, c); !im.ServiceRestart {
 		t.Fatalf("listener needs restart: %+v", im)
 	}
@@ -227,5 +237,23 @@ func TestRestoreRedactedSurvivesArgEdits(t *testing.T) {
 	got := RestoreRedacted(in, old).Runtime.Args
 	if strings.Join(got, " ") != "--flash-attn --api-key sk-123 --threads 8" {
 		t.Fatalf("got %v", got)
+	}
+}
+
+func TestConfigFromBeforeRunAsAndTLSStillLoads(t *testing.T) {
+	b, _ := Marshal(Default())
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	delete(m["runtime"].(map[string]any), "run_as")
+	delete(m["listen"].(map[string]any), "inference_tls")
+	old, _ := json.Marshal(m)
+	c, err := Parse(old)
+	if err != nil {
+		t.Fatalf("config written by an earlier build rejected: %v", err)
+	}
+	if c.Runtime.RunAs != RunAsLocalService || c.Listen.InferenceTLS.Enabled {
+		t.Fatalf("upgrade defaults: %+v %+v", c.Runtime.RunAs, c.Listen.InferenceTLS)
 	}
 }

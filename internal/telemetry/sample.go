@@ -32,6 +32,9 @@ type Sample struct {
 	Engines   []Engine  `json:"engines,omitempty"`
 	Processes []ProcGPU `json:"processes,omitempty"`
 
+	// InvalidReadings counts engine readings discarded as impossible.
+	InvalidReadings int `json:"invalid_readings,omitempty"`
+
 	// CollectDuration is how long the collection itself took; GPU Engine
 	// counters are known to be expensive on some systems.
 	CollectDuration time.Duration `json:"collect_duration_ns"`

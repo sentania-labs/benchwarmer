@@ -251,9 +251,10 @@ func TestStopKillsTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if processAlive(uint32(child)) || processAlive(uint32(i.PID())) {
-		t.Fatalf("leftover process after stop (%+v)", res)
-	}
+	// The job can report empty a moment before Windows signals the killed
+	// process objects; allow that, but not a survivor.
+	waitFor(t, func() bool { return !processAlive(uint32(child)) && !processAlive(uint32(i.PID())) }, "tree gone after stop")
+	_ = res
 }
 
 func TestPortInUse(t *testing.T) {

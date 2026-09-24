@@ -77,8 +77,25 @@ function Assert-Installed([string] $ExpectVersion) {
   if (-not $h) { Fail "no answer from $Health within 60 s" }
   Write-Host "health: $($h | ConvertTo-Json -Compress -Depth 5)"
   if ((Get-Service $Name).Status -ne 'Running') { Fail "service is $((Get-Service $Name).Status), want Running" }
-  # Informational until the setup_required reason lands (ADR 0012).
-  try { Write-Host "status: $(Invoke-RestMethod -TimeoutSec 5 'http://127.0.0.1:8481/api/v1/status' | ConvertTo-Json -Compress -Depth 6)" } catch { Write-Host "status: unavailable ($_)" }
+  # A fresh install has no model: the service must say so (ADR 0012). The
+  # file check runs every 5 s, so allow a few status polls.
+  $rule = $null
+  for ($i = 0; $i -lt 15 -and $rule -ne 'eligibility.setup_required'; $i++) {
+    try { $st = Invoke-RestMethod -TimeoutSec 5 'http://127.0.0.1:8481/api/v1/status'; $rule = $st.decision.rule } catch { }
+    if ($rule -ne 'eligibility.setup_required') { Start-Sleep -Seconds 2 }
+  }
+  Write-Host "status: $($st | ConvertTo-Json -Compress -Depth 6)"
+  if ($rule -ne 'eligibility.setup_required') { Fail "decision rule is '$rule', want eligibility.setup_required on a fresh install" }
+
+  # The service provisions its data folder when it starts (ADR 0012):
+  # inheritance off, and ordinary users get no access to the folder itself.
+  $acl = Get-Acl $Data
+  if (-not $acl.AreAccessRulesProtected) { Fail "$Data still inherits ProgramData permissions" }
+  $users = $acl.Access | Where-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-32-545' }
+  if ($users) { Fail "$Data grants BUILTIN\Users access: $($users | Out-String)" }
+  $tokAcl = Get-Acl (Join-Path $Data 'secrets\management.token')
+  $extra = $tokAcl.Access | Where-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -notin 'S-1-5-18', 'S-1-5-32-544' }
+  if ($extra) { Fail "management token is readable beyond SYSTEM and Administrators: $($extra | Out-String)" }
 
   Step 'Checking files'
   foreach ($f in 'benchwarmer.exe', 'bwtray.exe', 'bwprobe.exe', 'VERSION', 'runtime\vulkan\llama-server.exe', 'runtime\vulkan\ggml-vulkan.dll', 'licenses\LICENSE-llama.cpp') {

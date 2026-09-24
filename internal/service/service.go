@@ -94,6 +94,12 @@ func New(o Options) (*Service, error) {
 	}
 	s.store = st
 	s.sink = store.NewEventSink(st, 1024)
+	if lr.PrimaryErr != nil {
+		// The dashboard points here for the reason, not only the log.
+		s.sink.Emit(events.Event{Time: time.Now(), Type: events.ConfigRecovered, Severity: policy.SeverityCritical,
+			Message: fmt.Sprintf("config.json could not be used, running on the %s configuration: %v", strings.ReplaceAll(lr.Source, "_", " "), lr.PrimaryErr),
+			Data:    map[string]any{"source": lr.Source}})
+	}
 
 	// ACLs and SCM settings only as the real service (ADR 0012); a console
 	// run still gets its folders and tokens.

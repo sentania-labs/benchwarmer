@@ -132,6 +132,13 @@ export async function signIn(reason) {
   return !!t;
 }
 
+// redeemSignIn exchanges a one-time code from the tray's "Sign in to change
+// settings" for the management token, kept for this tab only.
+export async function redeemSignIn(code) {
+  const res = await once("POST", "api/v1/signin/redeem", { code });
+  setToken(res.token);
+}
+
 export const get = (p, o) => request("GET", p, undefined, o);
 export const put = (p, b, o) => request("PUT", p, b, o);
 export const post = (p, b, o) => request("POST", p, b, o);

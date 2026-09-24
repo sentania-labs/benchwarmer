@@ -153,6 +153,11 @@ function renderHead(st) {
 
 function renderNotices(st) {
   const out = [];
+  if (st.decision && st.decision.rule === "eligibility.setup_required") {
+    out.push(h("div", { class: "notice warn", role: "status" }, warnIcon(),
+      h("span", null, (st.decision.reason || "Setup required") + ". Copy a .gguf model into the models folder, then choose it under ",
+        h("a", { href: "#/config/runtime" }, "Configuration > Runtime"), ".")));
+  }
   if (st.config_source && st.config_source !== "primary") {
     const what = st.config_source === "last_good"
       ? "the last known good configuration, because the primary config file could not be used"

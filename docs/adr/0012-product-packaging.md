@@ -119,9 +119,14 @@ status and events, and does not load a model while secrets could be exposed.
   browser tab only. The token never appears in a URL, a log, or the page's
   address history. Only an administrator can complete this, because only an
   administrator can read the token.
-- **Listener changes** (address, HTTPS certificate) apply without a service
-  restart. The service rebinds the affected listener and reports failures
-  the same way as at start.
+- **Restart from the dashboard.** Changes that need a service restart
+  (listeners, the HTTPS certificate selection, token files, logging) show a
+  **Restart service now** button. It calls `POST /api/v1/service/restart`,
+  which starts a detached `benchwarmer service restart`. That helper stops
+  the service through the SCM, so the GPU is released the normal way, and
+  starts it again. The page waits for the service to go down and come back.
+  An in-process listener rebind was considered, but it would cover only the
+  listeners, and the restart covers every such change with one path.
 
 ### Installing by hand
 

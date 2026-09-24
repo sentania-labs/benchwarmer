@@ -63,6 +63,7 @@ async function load() {
     st.source = res.source || "";
     st.errors.clear();
     st.clientErrors.clear();
+    loadChoices();
   } catch (e) {
     st.loading = false;
     if (!els) return;
@@ -77,6 +78,33 @@ async function load() {
   }
   st.loading = false;
   renderAll();
+}
+
+// loadChoices fills the suggestion lists behind the model, runtime, and
+// certificate fields from GET /api/v1/setup. Failure only loses the
+// suggestions; the fields still take typed values.
+async function loadChoices() {
+  let info;
+  try {
+    info = await get("api/v1/setup", { interactive: false });
+  } catch {
+    return;
+  }
+  const mib = (b) => Math.round(b / 1048576).toLocaleString() + " MiB";
+  const lists = {
+    "dl-models": (info.models || []).map((m) => [m.path, m.name + " (" + mib(m.size_bytes) + ")"]),
+    "dl-runtimes": (info.runtimes || []).map((r) => [r.path, r.name]),
+    "dl-certs": (info.certificates || []).map((c) => [c.thumbprint, c.subject + ", expires " + new Date(c.not_after).toLocaleDateString()]),
+    "dl-cert-names": [...new Set((info.certificates || []).flatMap((c) => c.dns_names || []))].map((n) => [n, n]),
+  };
+  for (const [id, opts] of Object.entries(lists)) {
+    let dl = document.getElementById(id);
+    if (!dl) {
+      dl = h("datalist", { id });
+      document.body.append(dl);
+    }
+    replace(dl, opts.map(([value, label]) => h("option", { value }, label)));
+  }
 }
 
 function renderAll() {
@@ -119,8 +147,8 @@ function renderImpact(im) {
   }
   if (im.service_restart) {
     items.push(h("li", null, h("strong", null, "Service restart needed"),
-      " for " + (im.restart_sections || []).join(", ") +
-      ". Restart the Benchwarmer service on the PC for these to take effect."));
+      " for " + (im.restart_sections || []).join(", ") + ". ",
+      h("button", { type: "button", onclick: restartService }, "Restart service now")));
   }
   if (changed.length && !im.runtime_reload && !im.service_restart) items.push(h("li", null, "Applied live, nothing to restart."));
   return h("div", { class: "notice ok", role: "status" },
@@ -138,6 +166,45 @@ async function reloadRuntime() {
     st.message = "Reload failed: " + e.message;
     renderTop();
   }
+}
+
+// restartService asks the service to restart itself, then waits for the
+// API to answer again (with the new listener settings) and reloads.
+async function restartService() {
+  if (!window.confirm("Restart the Benchwarmer service now? The model is unloaded first, and inference is unavailable for a minute or so.")) return;
+  try {
+    await post("api/v1/service/restart");
+  } catch (e) {
+    st.message = "Restart failed: " + e.message;
+    renderTop();
+    return;
+  }
+  st.impact = null;
+  st.message = "Restarting the service...";
+  renderTop();
+  // Wait for the old process to stop answering, then for the new one.
+  const up = async () => {
+    try {
+      await get("api/v1/health", { interactive: false });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const started = Date.now();
+  let wentDown = false;
+  while (Date.now() - started < 120000) {
+    const ok = await up();
+    if (!ok) wentDown = true;
+    else if (wentDown) {
+      location.reload();
+      return;
+    }
+    await sleep(1000);
+  }
+  st.message = "The service has not come back after two minutes. If the management address changed, open the dashboard at the new address; otherwise check the Windows event log.";
+  renderTop();
 }
 
 function renderNav() {

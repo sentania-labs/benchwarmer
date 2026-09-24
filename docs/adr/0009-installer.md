@@ -1,6 +1,6 @@
 # ADR 0009: Installer and packaging
 
-Status: Accepted (2026-09-23)
+Status: Accepted (2026-09-23); packaging superseded by [ADR 0012](0012-product-packaging.md) (2026-09-24)
 
 ## Context
 

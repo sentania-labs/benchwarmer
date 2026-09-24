@@ -188,6 +188,9 @@ func (m *Manager) loadStore() error {
 	if m.lastCheck.IsZero() {
 		m.lastCheck = time.Now()
 	}
+	if m.cert != nil && string(m.cert.Certificate[0]) == string(cert.Certificate[0]) {
+		return nil // unchanged: keep the existing signer
+	}
 	m.cert = cert
 	m.info = Info{Subject: leaf.Subject.String(), Issuer: leaf.Issuer.String(), DNSNames: leaf.DNSNames,
 		NotAfter: leaf.NotAfter, SelfSigned: leaf.Subject.String() == leaf.Issuer.String(), File: where}

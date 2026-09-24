@@ -318,7 +318,9 @@ func (i *Instance) Stop(timeout time.Duration) (runtime.StopResult, error) {
 		// Ctrl+C first: llama-server then releases its GPU device itself.
 		// A hard kill of a long-running runtime wedged the AMD driver on
 		// the target (ADR 0002).
-		if err := i.g.Interrupt(); err == nil {
+		if err := i.g.Interrupt(); err != nil {
+			res.InterruptErr = err.Error()
+		} else {
 			select {
 			case <-i.g.Done():
 				res.Graceful = true

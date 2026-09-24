@@ -34,6 +34,22 @@ func TestReportsOnlyNewWatchdogDumps(t *testing.T) {
 	}
 }
 
+func TestSetSinceReportsDumpsFromBeforeACrashReboot(t *testing.T) {
+	dir := t.TempDir()
+	old, crash := filepath.Join(dir, "WATCHDOG-old.dmp"), filepath.Join(dir, "WATCHDOG-crash.dmp")
+	_ = os.WriteFile(old, []byte("x"), 0o644)
+	_ = os.WriteFile(crash, []byte("x"), 0o644)
+	lastCheck := time.Now().Add(-5 * time.Minute)
+	_ = os.Chtimes(old, lastCheck.Add(-time.Hour), lastCheck.Add(-time.Hour))
+	_ = os.Chtimes(crash, lastCheck.Add(time.Minute), lastCheck.Add(time.Minute))
+	w := New([]string{dir})
+	w.SetSince(lastCheck)
+	got := w.Poll()
+	if len(got) != 1 || got[0].File != crash {
+		t.Fatalf("want only the dump written after the last check, got %v", got)
+	}
+}
+
 func TestMissingDirsAreHarmless(t *testing.T) {
 	w := New([]string{filepath.Join(t.TempDir(), "nope")})
 	if got := w.Poll(); len(got) != 0 {

@@ -21,7 +21,7 @@ func Default() Config {
 			GPULayers:               999,
 			RunAs:                   RunAsLocalService,
 			StopMode:                StopGraceful,
-			GracefulStopTimeout:     d(10 * time.Second),
+			GracefulStopTimeout:     d(5 * time.Second), // measured exit 0.8 s on the target
 			Host:                    "127.0.0.1",
 			Port:                    18481,
 			LoadTimeout:             d(180 * time.Second),

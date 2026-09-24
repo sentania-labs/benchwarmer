@@ -61,7 +61,9 @@ func storeCertificate(thumbprint, subject string) (*tls.Certificate, error) {
 			break // CRYPT_E_NOT_FOUND ends the enumeration and frees prev
 		}
 		prev = ctx
-		der := unsafe.Slice(ctx.EncodedCert, ctx.Length)
+		// Copy: x509.ParseCertificate keeps slices of its input, and this
+		// memory belongs to Windows and is freed with the context.
+		der := append([]byte(nil), unsafe.Slice(ctx.EncodedCert, ctx.Length)...)
 		leaf, err := x509.ParseCertificate(der)
 		if err != nil || now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
 			continue
@@ -72,6 +74,9 @@ func storeCertificate(thumbprint, subject string) (*tls.Certificate, error) {
 				continue
 			}
 		} else if !matchesSubject(leaf, subject) {
+			continue
+		}
+		if !usableForServer(leaf) {
 			continue
 		}
 		if !hasPrivateKey(ctx) {
@@ -90,10 +95,11 @@ func storeCertificate(thumbprint, subject string) (*tls.Certificate, error) {
 		}
 		return nil, fmt.Errorf("tls: no valid certificate with a private key matching %q in LocalMachine\\My", subject)
 	}
-	defer windows.CertFreeCertificateContext(best)
-
+	// The signer owns best from here: a cached CNG key handle is only valid
+	// while its certificate context lives.
 	signer, err := newNCryptSigner(best, bestLeaf.PublicKey)
 	if err != nil {
+		windows.CertFreeCertificateContext(best)
 		return nil, err
 	}
 	chain := [][]byte{bestLeaf.Raw}
@@ -101,16 +107,29 @@ func storeCertificate(thumbprint, subject string) (*tls.Certificate, error) {
 	return &tls.Certificate{Certificate: chain, PrivateKey: signer, Leaf: bestLeaf}, nil
 }
 
+// matchesSubject accepts a DNS name the certificate is valid for (including
+// through a wildcard) or, failing that, a substring of the subject DN.
 func matchesSubject(c *x509.Certificate, s string) bool {
-	s = strings.ToLower(s)
 	if s == "" {
 		return false
 	}
-	if strings.Contains(strings.ToLower(c.Subject.String()), s) {
+	if c.VerifyHostname(s) == nil {
 		return true
 	}
-	for _, n := range c.DNSNames {
-		if strings.EqualFold(n, s) || strings.Contains(strings.ToLower(n), s) {
+	return strings.Contains(strings.ToLower(c.Subject.String()), strings.ToLower(s))
+}
+
+// usableForServer rejects certificates that clients would refuse for a
+// TLS server, such as an autoenrolled workstation (client-auth) certificate.
+func usableForServer(c *x509.Certificate) bool {
+	if c.KeyUsage != 0 && c.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+		return false
+	}
+	if len(c.ExtKeyUsage) == 0 && len(c.UnknownExtKeyUsage) == 0 {
+		return true
+	}
+	for _, u := range c.ExtKeyUsage {
+		if u == x509.ExtKeyUsageServerAuth || u == x509.ExtKeyUsageAny {
 			return true
 		}
 	}
@@ -137,7 +156,10 @@ func hasPrivateKey(ctx *windows.CertContext) bool {
 func intermediates(ctx *windows.CertContext) [][]byte {
 	var chainCtx *windows.CertChainContext
 	para := windows.CertChainPara{Size: uint32(unsafe.Sizeof(windows.CertChainPara{}))}
-	if err := windows.CertGetCertificateChain(0, ctx, nil, 0, &para, 0, 0, &chainCtx); err != nil {
+	// Cache-only URL retrieval: never block a TLS handshake on the network
+	// fetching missing issuers.
+	const certChainCacheOnlyURLRetrieval = 0x00000004
+	if err := windows.CertGetCertificateChain(0, ctx, nil, 0, &para, certChainCacheOnlyURLRetrieval, 0, &chainCtx); err != nil {
 		return nil
 	}
 	defer windows.CertFreeCertificateChain(chainCtx)
@@ -147,20 +169,29 @@ func intermediates(ctx *windows.CertContext) [][]byte {
 	simple := unsafe.Slice(chainCtx.Chains, chainCtx.ChainCount)[0]
 	elems := unsafe.Slice(simple.Elements, simple.NumElements)
 	var out [][]byte
-	// Element 0 is the leaf; the last is the root, which clients must
-	// already trust and is not sent.
-	for i := 1; i < len(elems)-1; i++ {
+	// Element 0 is the leaf. The last element is sent too unless it is a
+	// self-signed root (clients must already trust roots); on an incomplete
+	// chain the last element is an intermediate the client needs.
+	for i := 1; i < len(elems); i++ {
 		c := elems[i].CertContext
-		out = append(out, append([]byte(nil), unsafe.Slice(c.EncodedCert, c.Length)...))
+		der := append([]byte(nil), unsafe.Slice(c.EncodedCert, c.Length)...)
+		if i == len(elems)-1 {
+			if p, err := x509.ParseCertificate(der); err == nil && p.CheckSignatureFrom(p) == nil {
+				break
+			}
+		}
+		out = append(out, der)
 	}
 	return out
 }
 
 // ncryptSigner signs with a CNG key held by Windows.
 type ncryptSigner struct {
-	mu  sync.Mutex
-	key windows.Handle
-	pub crypto.PublicKey
+	mu      sync.Mutex
+	key     windows.Handle
+	freeKey bool
+	ctx     *windows.CertContext // kept alive for the key handle
+	pub     crypto.PublicKey
 }
 
 func newNCryptSigner(ctx *windows.CertContext, pub crypto.PublicKey) (*ncryptSigner, error) {
@@ -177,10 +208,13 @@ func newNCryptSigner(ctx *windows.CertContext, pub crypto.PublicKey) (*ncryptSig
 		}
 		return nil, errors.New("tls: private key is not a CNG key")
 	}
-	s := &ncryptSigner{key: key, pub: pub}
-	if mustFree {
-		runtime.SetFinalizer(s, func(s *ncryptSigner) { procNCryptFreeObject.Call(uintptr(s.key)) })
-	}
+	s := &ncryptSigner{key: key, freeKey: mustFree, ctx: ctx, pub: pub}
+	runtime.SetFinalizer(s, func(s *ncryptSigner) {
+		if s.freeKey {
+			procNCryptFreeObject.Call(uintptr(s.key))
+		}
+		windows.CertFreeCertificateContext(s.ctx)
+	})
 	return s, nil
 }
 
@@ -224,6 +258,9 @@ func (s *ncryptSigner) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) 
 	default:
 		return nil, fmt.Errorf("tls: unsupported key type %T", s.pub)
 	}
+	// Never prompt: a key that wants UI would block every handshake.
+	const ncryptSilentFlag = 0x40
+	flags |= ncryptSilentFlag
 	var size uint32
 	r, _, _ := procNCryptSignHash.Call(uintptr(s.key), uintptr(padding), uintptr(unsafe.Pointer(&digest[0])), uintptr(len(digest)),
 		0, 0, uintptr(unsafe.Pointer(&size)), uintptr(flags))

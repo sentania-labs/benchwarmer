@@ -58,6 +58,10 @@ func EnsureConsole() error {
 			return fmt.Errorf("procgroup: AllocConsole: %w", err)
 		}
 	}
+	// Clear an ignore-Ctrl+C flag this process may have inherited:
+	// children inherit it, and a runtime that ignores Ctrl+C can only be
+	// hard-killed.
+	procSetConsoleCtrlHandler.Call(0, 0)
 	cb := windows.NewCallback(func(uint32) uintptr { return 1 })
 	if r, _, err := procSetConsoleCtrlHandler.Call(cb, 1); r == 0 {
 		return fmt.Errorf("procgroup: SetConsoleCtrlHandler: %w", err)

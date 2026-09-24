@@ -400,8 +400,11 @@ func (c *Controller) onStopped(now time.Time, r stopResult) {
 		Data: map[string]any{"root_exit_ms": r.res.RootExit.Milliseconds(), "tree_empty_ms": r.res.TreeEmpty.Milliseconds(),
 			"already_exited": r.res.AlreadyExited, "graceful": r.res.Graceful, "kill_fallback": r.res.KillFallback}})
 	if r.res.KillFallback {
-		c.emit(events.Event{Time: now, Type: events.KillFailed, Severity: policy.SeverityWarning, RuntimePID: pid,
-			Message: "Runtime did not exit on Ctrl+C within the graceful timeout; it was hard-killed (risk of a GPU driver hang on this PC)"})
+		msg := "Runtime did not exit on Ctrl+C within the graceful timeout; it was hard-killed (risk of a GPU driver hang on AMD, ADR 0011)"
+		if r.res.InterruptErr != "" {
+			msg = "Ctrl+C could not be delivered (" + r.res.InterruptErr + "); the runtime was hard-killed (risk of a GPU driver hang on AMD, ADR 0011)"
+		}
+		c.emit(events.Event{Time: now, Type: events.KillFailed, Severity: policy.SeverityWarning, RuntimePID: pid, Message: msg})
 	}
 	c.vram.active, c.vram.since = true, now
 	if y.CountsAsPreemption {
@@ -596,7 +599,19 @@ func (c *Controller) onCrash(now time.Time) {
 // the recovery timer then holds loading.
 func (c *Controller) checkGPUResets(now time.Time) {
 	if c.d.GPUResets != nil {
-		if resets := c.d.GPUResets(); len(resets) > 0 {
+		resets := c.d.GPUResets()
+		// Persisted at most every 30 s (the persist step compares JSON).
+		if now.Sub(c.lastGPUCheck) >= 30*time.Second {
+			c.lastGPUCheck = now
+		}
+		// One incident can surface as several dumps (both folders, a full
+		// dump still being written): count resets within 2 minutes once.
+		if len(resets) > 0 && !c.lastGPUReset.IsZero() && now.Sub(c.lastGPUReset) < 2*time.Minute {
+			c.power.DeviceLost = c.power.DeviceLost || c.st.RuntimeRunning()
+			resets = nil
+		}
+		if len(resets) > 0 {
+			c.lastGPUReset = now
 			c.gpuResets++
 			c.power.DeviceLost = true
 			files := make([]string, 0, len(resets))

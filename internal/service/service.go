@@ -119,12 +119,16 @@ func New(o Options) (*Service, error) {
 	}
 
 	facts := NewFacts()
+	gpuWatch := gpureset.New(gpureset.DefaultDirs())
+	if blind := gpuWatch.Unreadable(); len(blind) > 0 {
+		s.log.Error("cannot read GPU watchdog dump folders: GPU driver resets will not be detected", "dirs", blind)
+	}
 	s.ctl = controller.New(controller.Deps{
 		Config: s.cfg, ConfigSource: lr.Source, ConfigStore: auditingStore{cs: cs, st: st, met: s.met},
 		Adapter: llamacpp.New(), Telemetry: s.tel, Processes: procs, Facts: facts, Gate: s.gate,
 		Events: events.SinkFunc(s.sink.Emit), EventReader: eventReader{st}, Persist: persister{st},
 		Metrics: s.met, Log: s.log, Version: version.Version, BootTime: signals.BootTime,
-		GPUResets: gpureset.New(gpureset.DefaultDirs()).Poll,
+		GPUResets: gpuWatch.Poll, GPUResetsSince: gpuWatch.SetSince,
 	})
 	return s, nil
 }

@@ -824,3 +824,30 @@ func TestGPUResetPreemptsAndEscalates(t *testing.T) {
 		t.Fatalf("second reset cooldown %s, want 1h", d)
 	}
 }
+
+func TestGPUResetCooldownSurvivesRestart(t *testing.T) {
+	p := &memPersist{}
+	r := newRig(t, p)
+	var pending []gpureset.Reset
+	var mu sync.Mutex
+	r.c.d.GPUResets = func() []gpureset.Reset { mu.Lock(); defer mu.Unlock(); x := pending; pending = nil; return x }
+	r.toReady()
+	mu.Lock()
+	pending = []gpureset.Reset{{File: "WATCHDOG-x.dmp"}}
+	mu.Unlock()
+	r.stepUntil(state.Error)
+	until := r.c.Status().Timers.RecoveryUntil
+	if until == nil {
+		t.Fatal("no recovery after reset")
+	}
+	// Blue screen and reboot: a new controller on the same persisted state.
+	r2 := newRig(t, p)
+	r2.clk.t = r.clk.Now().Add(3 * time.Minute) // past the 2-minute startup wait
+	r2.c.Step(true)
+	if r2.state() == state.Loading || r2.state() == state.Ready {
+		t.Fatalf("reloaded during the GPU reset cooldown: %s", r2.state())
+	}
+	if got := r2.c.Status().Timers.RecoveryUntil; got == nil || !got.Equal(*until) {
+		t.Fatalf("cooldown not preserved: %v want %v", got, until)
+	}
+}

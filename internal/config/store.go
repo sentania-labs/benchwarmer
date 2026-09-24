@@ -42,7 +42,7 @@ func upgrade(c *Config) {
 		c.Runtime.StopMode = StopGraceful
 	}
 	if c.Runtime.GracefulStopTimeout == 0 {
-		c.Runtime.GracefulStopTimeout = Duration(10 * time.Second)
+		c.Runtime.GracefulStopTimeout = Duration(5 * time.Second)
 	}
 	if c.Listen.InferenceTLS.SelfSignedHosts == nil { // added with inference_tls
 		c.Listen.InferenceTLS.SelfSignedHosts = []string{}

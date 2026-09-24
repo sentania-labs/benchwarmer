@@ -21,9 +21,10 @@ type Reset struct {
 
 // Watcher polls directories for new watchdog dumps.
 type Watcher struct {
-	mu   sync.Mutex
-	dirs []string
-	seen map[string]time.Time
+	mu    sync.Mutex
+	dirs  []string
+	seen  map[string]time.Time
+	since time.Time
 }
 
 // DefaultDirs are where Windows writes GPU watchdog live dumps.
@@ -66,6 +67,33 @@ func (w *Watcher) scan() []Reset {
 				continue
 			}
 			out = append(out, Reset{File: filepath.Join(d, e.Name()), Time: info.ModTime()})
+		}
+	}
+	return out
+}
+
+// SetSince makes dumps written after t count as new even if they were
+// present at startup. The service passes the time of its last check before
+// it stopped, so the dumps written in the minute before a blue screen still
+// trigger a cooldown after the reboot.
+func (w *Watcher) SetSince(t time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.since = t
+	for f, mt := range w.seen {
+		if mt.After(t) {
+			delete(w.seen, f)
+		}
+	}
+}
+
+// Unreadable lists watched directories that cannot be read (detection is
+// blind there); callers should log it once.
+func (w *Watcher) Unreadable() []string {
+	var out []string
+	for _, d := range w.dirs {
+		if _, err := os.ReadDir(d); err != nil && !os.IsNotExist(err) {
+			out = append(out, d)
 		}
 	}
 	return out

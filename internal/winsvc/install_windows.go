@@ -64,8 +64,9 @@ func MgrRecoveryActions() []mgr.RecoveryAction {
 	return out
 }
 
-// Install registers the service. It fails if a service with the name
-// already exists; a partially configured service is removed again.
+// Install registers the service, or updates the registration in place when
+// the service already exists (installer re-runs for upgrades). A newly
+// created service that cannot be fully configured is removed again.
 func Install(c InstallConfig) error {
 	if c.Name == "" || c.ExePath == "" {
 		return errors.New("winsvc: Name and ExePath are required")

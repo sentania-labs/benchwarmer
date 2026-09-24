@@ -45,7 +45,7 @@ function runtime() {
       { path: "runtime.host", label: "Host", help: "Must be a loopback address such as 127.0.0.1." },
       { path: "runtime.port", label: "Port", type: "int", min: 1, max: 65535 },
     ] },
-    { title: "Process handling", note: "These apply live without a reload.", fields: [
+    { title: "Process handling", note: "These apply live without a reload, except the stop settings, which take effect at the next model load.", fields: [
       { path: "runtime.stop_mode", label: "How to stop the runtime", type: "select", options: [["graceful", "Graceful (Ctrl+C, kill only if it hangs)"], ["kill", "Hard kill"]],
         help: "Graceful is strongly recommended: on AMD hardware a hard kill of a long-running runtime can hang the GPU driver." },
       { path: "runtime.graceful_stop_timeout", label: "Graceful stop timeout", type: D, help: "How long to wait after Ctrl+C before a hard kill." },

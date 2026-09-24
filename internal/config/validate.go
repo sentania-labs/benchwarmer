@@ -204,6 +204,11 @@ func validateRuntime(v *validator, r Runtime) {
 		v.add("runtime.stop_mode", "must be %q or %q (got %q)", StopGraceful, StopKill, r.StopMode)
 	}
 	v.durRange("runtime.graceful_stop_timeout", r.GracefulStopTimeout, time.Second, 2*time.Minute)
+	// A service stop must finish within Windows' budget (about 20 s here):
+	// graceful wait plus kill verification cannot exceed it.
+	if r.StopMode == StopGraceful && r.GracefulStopTimeout.D()+r.KillVerifyTimeout.D() > 18*time.Second {
+		v.add("runtime.graceful_stop_timeout", "graceful_stop_timeout plus kill_verify_timeout must not exceed 18s (the service stop budget)")
+	}
 	if r.RunAs != RunAsLocalService && r.RunAs != RunAsService {
 		v.add("runtime.run_as", "must be %q or %q (got %q)", RunAsLocalService, RunAsService, r.RunAs)
 	}

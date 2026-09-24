@@ -56,8 +56,10 @@ type StopResult struct {
 	AlreadyExited bool `json:"already_exited"`
 	// Graceful is true when the runtime exited on Ctrl+C; KillFallback when
 	// it had to be hard-killed after the graceful timeout.
-	Graceful     bool          `json:"graceful"`
-	KillFallback bool          `json:"kill_fallback"`
+	Graceful     bool `json:"graceful"`
+	KillFallback bool `json:"kill_fallback"`
+	// InterruptErr is set when Ctrl+C could not be delivered at all.
+	InterruptErr string        `json:"interrupt_error,omitempty"`
 	RootExit     time.Duration `json:"root_exit_ns"`
 	TreeEmpty    time.Duration `json:"tree_empty_ns"`
 }

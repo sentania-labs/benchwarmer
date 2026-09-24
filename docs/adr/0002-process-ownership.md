@@ -1,6 +1,6 @@
 # ADR 0002: Runtime process ownership
 
-Status: Accepted (2026-09-23), except decision 4 which is provisional pending Phase 0 E3.
+Status: Accepted (2026-09-23). Decision 4 superseded by ADR 0011 (2026-09-24).
 
 ## Context
 
@@ -21,7 +21,9 @@ cannot deliver reliably.
    empty, runtime counter instances gone, adapter dedicated memory back
    within tolerance of the pre-load baseline. Each verification has a timeout
    and emits an event with the measured duration.
-4. *(Provisional.)* No graceful-shutdown attempt. The worker only stops the
+4. *(Superseded by ADR 0011: the runtime is now stopped with Ctrl+C first; a
+   hard kill of a long-running runtime wedged the AMD driver on the target.)*
+   Original text: No graceful-shutdown attempt. The worker only stops the
    runtime when no request is active or when grace has expired; in both
    cases a graceful stop gives the caller nothing, and a service has no
    console through which to deliver llama-server's Ctrl+C. `bwprobe runtime`

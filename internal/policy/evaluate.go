@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sentania-labs/benchwarmer/internal/config"
+	"github.com/sentania-labs/benchwarmer/internal/humantime"
 	"github.com/sentania-labs/benchwarmer/internal/schedule"
 	"github.com/sentania-labs/benchwarmer/internal/state"
 )
@@ -78,7 +79,7 @@ func Evaluate(s Snapshot, c config.Config) Decision {
 		Mode:          e.mode,
 		Competing:     win.competing,
 		IdleState:     win.idle,
-		NextLoadAt:    e.nextLoadAt(),
+		NextLoadAt:    e.nextLoadAt(win.competing),
 	}
 	for _, m := range matches {
 		if m.rule != win.rule {
@@ -150,6 +151,9 @@ func newEval(s Snapshot, c config.Config) *eval {
 	return e
 }
 
+// clock renders an instant for people in the configured zone.
+func (e *eval) clock(t time.Time) string { return humantime.Clock(t, e.s.Now, e.c.Timezone) }
+
 func ev(name string, value any, threshold any, source string) Evidence {
 	x := Evidence{Name: name, Value: fmt.Sprint(value), Source: source}
 	if threshold != nil {
@@ -203,7 +207,7 @@ func (e *eval) yieldRules() []match {
 	if e.mode == ModePause {
 		until := "indefinitely"
 		if s.Mode.Until != nil {
-			until = "until " + s.Mode.Until.Format(time.RFC3339)
+			until = "until " + e.clock(*s.Mode.Until)
 		}
 		add(match{action: ActionDrain, rule: RulePause, tier: TierPause, severity: SeverityNotice,
 			reason: "Paused manually " + until, evidence: []Evidence{ev("mode", e.mode, nil, s.Mode.SetBy)}, idle: state.Disabled})
@@ -407,22 +411,22 @@ func (e *eval) eligibility() (match, bool) {
 			idle = state.Error
 		}
 		return match{action: ActionHold, rule: RuleRecovery, tier: TierEligibility, severity: SeverityInfo,
-			reason:   fmt.Sprintf("Recovery wait (%s) until %s", t.RecoveryReason, t.RecoveryUntil.Format(time.RFC3339)),
-			evidence: []Evidence{ev("recovery_reason", t.RecoveryReason, nil, "timer"), ev("recovery_until", t.RecoveryUntil.Format(time.RFC3339), nil, "timer")},
+			reason:   fmt.Sprintf("Recovery wait (%s) until %s", t.RecoveryReason, e.clock(t.RecoveryUntil)),
+			evidence: []Evidence{ev("recovery_reason", t.RecoveryReason, nil, "timer"), ev("recovery_until", e.clock(t.RecoveryUntil), nil, "timer")},
 			idle:     idle}, true
 	}
 	if end := e.suppressEnd(); !end.IsZero() && now.Before(end) {
 		return match{action: ActionHold, rule: RuleSuppressed, tier: TierEligibility, severity: SeverityNotice,
 			reason: fmt.Sprintf("Reload suppressed after %d preemptions within %s, until %s",
-				c.AntiThrash.MaxPreemptions, c.AntiThrash.Window.D(), end.Format(time.RFC3339)),
-			evidence: []Evidence{ev("suppressed_at", t.SuppressedAt.Format(time.RFC3339), nil, "timer"), ev("suppressed_until", end.Format(time.RFC3339), nil, "timer")},
+				c.AntiThrash.MaxPreemptions, c.AntiThrash.Window.D(), e.clock(end)),
+			evidence: []Evidence{ev("suppressed_at", e.clock(t.SuppressedAt), nil, "timer"), ev("suppressed_until", e.clock(end), nil, "timer")},
 			idle:     state.Suppressed}, true
 	}
 	if end := e.cooldownEnd(); !end.IsZero() && now.Before(end) {
 		return match{action: ActionHold, rule: RuleCooldown, tier: TierEligibility, severity: SeverityInfo,
 			reason: fmt.Sprintf("Cooling down after %s; %s cooldown (%s profile) ends %s",
-				t.LastCompetingRule, e.p.Cooldown.D(), e.profileName, end.Format(time.RFC3339)),
-			evidence: []Evidence{ev("last_competing_at", t.LastCompetingAt.Format(time.RFC3339), nil, "timer"),
+				t.LastCompetingRule, e.p.Cooldown.D(), e.profileName, e.clock(end)),
+			evidence: []Evidence{ev("last_competing_at", e.clock(t.LastCompetingAt), nil, "timer"),
 				ev("last_competing_rule", t.LastCompetingRule, nil, "timer"), ev("cooldown", e.p.Cooldown.D(), nil, "profile:"+e.profileName)},
 			idle: state.Cooldown}, true
 	}
@@ -450,7 +454,7 @@ func (e *eval) runMatch() match {
 		m.rule = RuleAIPriorityRun
 		m.reason = "AI Priority: GPU available under the permissive profile"
 		if e.s.Mode.Until != nil {
-			m.reason += " until " + e.s.Mode.Until.Format(time.RFC3339)
+			m.reason += " until " + e.clock(*e.s.Mode.Until)
 		}
 	}
 	return m
@@ -471,9 +475,15 @@ func (e *eval) suppressEnd() time.Time {
 }
 
 // nextLoadAt is the latest active timer; zero when no timer blocks loading.
-func (e *eval) nextLoadAt() time.Time {
+// While a competing workload is still present the cooldown has not started
+// counting, so it gives no bound: only recovery and suppression deadlines do.
+func (e *eval) nextLoadAt(competing bool) time.Time {
 	var next time.Time
-	for _, t := range []time.Time{e.s.Timers.RecoveryUntil, e.suppressEnd(), e.cooldownEnd()} {
+	timers := []time.Time{e.s.Timers.RecoveryUntil, e.suppressEnd()}
+	if !competing {
+		timers = append(timers, e.cooldownEnd())
+	}
+	for _, t := range timers {
 		if t.After(e.s.Now) && t.After(next) {
 			next = t
 		}

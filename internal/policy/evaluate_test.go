@@ -2,6 +2,7 @@ package policy
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,16 +58,17 @@ func game(name string) AppMatch {
 }
 
 type want struct {
-	action     Action
-	rule       string
-	idle       state.State
-	grace      time.Duration
-	competing  *bool
-	suppress   *bool
-	counts     *bool
-	profile    string
-	alsoHas    string
-	nextLoadAt time.Time
+	action       Action
+	rule         string
+	idle         state.State
+	grace        time.Duration
+	competing    *bool
+	suppress     *bool
+	counts       *bool
+	profile      string
+	alsoHas      string
+	nextLoadAt   time.Time
+	nextLoadZero bool
 }
 
 func yes() *bool { b := true; return &b }
@@ -100,6 +102,12 @@ func check(t *testing.T, d Decision, w want) {
 	}
 	if !w.nextLoadAt.IsZero() && !d.NextLoadAt.Equal(w.nextLoadAt) {
 		t.Errorf("next load %s, want %s", d.NextLoadAt, w.nextLoadAt)
+	}
+	if w.nextLoadZero && !d.NextLoadAt.IsZero() {
+		t.Errorf("next load %s, want none", d.NextLoadAt)
+	}
+	if strings.Contains(d.Reason, "T19:") || strings.Contains(d.Reason, "-05:00") {
+		t.Errorf("reason contains a raw timestamp: %q", d.Reason)
 	}
 	if d.Reason == "" {
 		t.Error("empty reason")
@@ -440,6 +448,12 @@ func TestPolicyTable(t *testing.T) {
 			s.Apps.Games = []AppMatch{game("eldenring.exe")}
 			return s
 		}, want{action: ActionHold, rule: RuleGameProcess, idle: state.Suppressed}},
+		{"no fixed next-load time while the game keeps running", func() Snapshot {
+			s := idle(evening)
+			s.Timers.LastCompetingAt = evening
+			s.Apps.Games = []AppMatch{game("eldenring.exe")}
+			return s
+		}, want{action: ActionHold, rule: RuleGameProcess, nextLoadZero: true}},
 		{"suppression expired loads", func() Snapshot {
 			s := idle(evening)
 			s.Timers.SuppressedAt = evening.Add(-31 * time.Minute)

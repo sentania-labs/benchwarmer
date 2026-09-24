@@ -18,6 +18,7 @@ import (
 	"github.com/sentania-labs/benchwarmer/internal/api"
 	"github.com/sentania-labs/benchwarmer/internal/config"
 	"github.com/sentania-labs/benchwarmer/internal/events"
+	"github.com/sentania-labs/benchwarmer/internal/humantime"
 	"github.com/sentania-labs/benchwarmer/internal/policy"
 	"github.com/sentania-labs/benchwarmer/internal/proxy"
 	"github.com/sentania-labs/benchwarmer/internal/runtime"
@@ -332,7 +333,7 @@ func (c *Controller) setRecovery(now time.Time, d time.Duration, reason string) 
 	if until.After(c.timers.RecoveryUntil) {
 		c.timers.RecoveryUntil, c.timers.RecoveryReason = until, reason
 		if d > 0 {
-			c.emit(events.Event{Time: now, Type: events.RecoveryScheduled, Message: fmt.Sprintf("Next load not before %s (%s)", until.Format(time.RFC3339), reason),
+			c.emit(events.Event{Time: now, Type: events.RecoveryScheduled, Message: fmt.Sprintf("Next load not before %s (%s)", humantime.Clock(until, now, c.cfg.Timezone), reason),
 				Data: map[string]any{"until": until.Format(time.RFC3339), "reason": reason}})
 		}
 	}

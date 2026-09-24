@@ -11,6 +11,7 @@ import (
 	"github.com/sentania-labs/benchwarmer/internal/api"
 	"github.com/sentania-labs/benchwarmer/internal/config"
 	"github.com/sentania-labs/benchwarmer/internal/events"
+	"github.com/sentania-labs/benchwarmer/internal/humantime"
 	"github.com/sentania-labs/benchwarmer/internal/policy"
 	"github.com/sentania-labs/benchwarmer/internal/schedule"
 	"github.com/sentania-labs/benchwarmer/internal/state"
@@ -69,7 +70,7 @@ func (c *Controller) SetMode(req api.ModeRequest) (api.ModeStatus, error) {
 	c.mode, c.modeSetAt, c.untilReboot = m, now, untilReboot
 	msg := fmt.Sprintf("Mode changed from %s to %s", modeName(prev), modeName(m.Mode))
 	if m.Until != nil {
-		msg += " until " + m.Until.Format(time.RFC3339)
+		msg += " until " + humantime.Clock(*m.Until, now, c.cfg.Timezone)
 	} else if untilReboot {
 		msg += " until reboot"
 	}
@@ -264,11 +265,7 @@ func trigger(d policy.Decision) string {
 }
 
 func (c *Controller) summary(now time.Time, s api.Status) string {
-	loc, err := time.LoadLocation(c.cfg.Timezone)
-	if err != nil {
-		loc = time.Local
-	}
-	clock := func(t *time.Time) string { return t.In(loc).Format("3:04 PM") }
+	clock := func(t *time.Time) string { return humantime.Clock(*t, now, c.cfg.Timezone) }
 	switch c.st {
 	case state.Ready:
 		return "Available: model ready"
@@ -286,8 +283,12 @@ func (c *Controller) summary(now time.Time, s api.Status) string {
 		return "Yielding: stopping the model"
 	}
 	msg := "Unavailable: " + s.Decision.Reason
-	if s.Timers.NextLoadAt != nil {
+	switch {
+	case s.Timers.NextLoadAt != nil:
 		msg += "; next load " + clock(s.Timers.NextLoadAt)
+	case s.Decision.Competing:
+		// No fixed time exists while the workload persists.
+		msg += fmt.Sprintf("; reloads %s after it stops", c.cfg.Profiles[s.Decision.Profile].Cooldown.D())
 	}
 	return msg
 }

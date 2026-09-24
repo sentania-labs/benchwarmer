@@ -30,6 +30,15 @@ jobs:
           name: bwprobe-windows-amd64
           path: dist/*.exe
           if-no-files-found: error
+      # Release file set and by-hand zip (ADR 0012), built the same way the
+      # release workflow builds them. The msi job builds the MSI from it.
+      - run: make package
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-zip
+          path: dist/benchwarmer-*-windows-amd64.zip
+          if-no-files-found: error
+          retention-days: 7
 
   windows:
     # Real Windows: Job Objects, process-tree kill, service APIs, and the
@@ -67,3 +76,64 @@ jobs:
       - name: Probe telemetry sample
         run: .\bwprobe.exe telemetry -label ci -duration 5s -quiet -out tel.jsonl ; .\bwprobe.exe summarize tel.jsonl
         continue-on-error: true
+
+  msi:
+    # Builds the MSI from the Linux job's zip (so both artifacts carry the
+    # same files), then proves every install route on a clean Windows
+    # machine: MSI fresh install and uninstall, MSI major upgrade, and the
+    # zip's install.ps1/uninstall.ps1. The runner has no GPU and no model, so
+    # the service comes up without loading one; it must still answer health.
+    needs: linux
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: package-zip
+          path: dist
+      - name: Unpack zip
+        shell: pwsh
+        run: |
+          $zip = Get-Item dist\benchwarmer-*-windows-amd64.zip
+          Expand-Archive $zip.FullName -DestinationPath dist\zip
+          $dir = Get-ChildItem dist\zip -Directory | Select-Object -First 1
+          "PKG_DIR=$($dir.FullName)" >> $env:GITHUB_ENV
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          # Untagged build: ProductVersion 0.0.0. A second package at 0.0.1
+          # from the same files tests the major upgrade.
+          .\packaging\build-msi.ps1 -StageDir $env:PKG_DIR -OutDir dist
+          .\packaging\build-msi.ps1 -StageDir $env:PKG_DIR -OutDir dist\upgrade -Version 0.0.1
+      - name: Smoke test MSI (install, verify, uninstall)
+        shell: pwsh
+        run: .\packaging\smoke.ps1 -Mode msi -Path dist\benchwarmer-0.0.0-x64.msi -LogDir logs\msi
+      - name: Smoke test MSI major upgrade
+        shell: pwsh
+        run: .\packaging\smoke.ps1 -Mode msi -Path dist\upgrade\benchwarmer-0.0.1-x64.msi -UpgradeFrom dist\benchwarmer-0.0.0-x64.msi -LogDir logs\upgrade
+      - name: Smoke test zip (install.ps1, uninstall.ps1)
+        shell: pwsh
+        run: .\packaging\smoke.ps1 -Mode zip -Path $env:PKG_DIR -LogDir logs\zip
+      - name: Collect service logs
+        if: failure()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force logs\service | Out-Null
+          Copy-Item -Recurse -ErrorAction SilentlyContinue C:\ProgramData\Benchwarmer\logs\* logs\service\
+          Get-WinEvent -LogName Application -MaxEvents 200 -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProviderName -match 'Benchwarmer|MsiInstaller|Service Control Manager' } |
+            Format-List TimeCreated, ProviderName, Id, Message | Out-File logs\service\events.txt
+          Get-WinEvent -LogName System -MaxEvents 200 -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProviderName -eq 'Service Control Manager' } |
+            Format-List TimeCreated, Id, Message | Out-File logs\service\scm.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: msi-logs
+          path: logs/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchwarmer-msi
+          path: dist/benchwarmer-0.0.0-x64.msi
+          if-no-files-found: error
+          retention-days: 7

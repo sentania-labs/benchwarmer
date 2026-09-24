@@ -31,8 +31,15 @@ analysis and decisions.
 | `internal/observe`, `internal/classify`, `internal/telemetry`, `internal/signals` | Facts from GPU counters, processes, and the session agent |
 | `internal/runtime/llamacpp`, `internal/procgroup` | Runtime adapter and Job Object ownership |
 | `internal/store`, `internal/metrics`, `internal/webui` | SQLite, Prometheus, dashboard |
-| `installer/` | `install.ps1` / `uninstall.ps1` (ADR 0009) |
+| `installer/` | `install.ps1` / `uninstall.ps1` for the by-hand zip route (ADR 0012) |
+| `packaging/` | Release packaging: pinned llama.cpp runtime, WiX MSI source, build and smoke-test scripts |
 | `docs/` | ADRs, API schema (`docs/api/openapi.yaml`), Phase 0, deploy, troubleshooting, release |
+
+## Install
+
+Each release publishes an MSI (for Group Policy or `msiexec /i ... /qn`) and
+a zip for installing by hand. See [docs/deploy/install.md](docs/deploy/install.md)
+for prerequisites, both routes, and first-run setup.
 
 ## Web UI
 
@@ -53,9 +60,11 @@ exercised by the Windows CI job.
 ```sh
 make check     # format, vet (linux+windows), staticcheck, race tests, govulncheck, Windows build
 make windows   # dist/bwprobe.exe, dist/fakellama.exe
+make package   # dist/stage/ release file set and the by-hand zip
 ```
 
-CI runs the same `make check`, plus Windows-native tests and a probe smoke run.
+CI runs the same `make check`, plus Windows-native tests, a probe smoke run, and
+an install/upgrade/uninstall smoke test of the MSI and the zip.
 `internal/service` has an end-to-end test that drives the real service with a
 fake runtime process and the GPU simulator through load, drain, cooldown,
 reload, hard-contention preemption, suppression, and shutdown.
@@ -68,5 +77,5 @@ go run ./cmd/benchwarmer config default > data/config.json   # then point runtim
 go run ./cmd/benchwarmer run --data ./data --simulate-gpu --sim-control sim.json
 ```
 
-See also [troubleshooting](docs/troubleshooting.md), [release process](docs/release.md),
+See also [installation](docs/deploy/install.md), [troubleshooting](docs/troubleshooting.md), [release process](docs/release.md),
 and [policy requirements](docs/deploy/policy-requirements.md).

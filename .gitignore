@@ -3,4 +3,5 @@
 *.exe
 /runtime-cycle*.log
 /.bin/
+/.cache/
 /.claude/

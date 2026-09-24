@@ -21,8 +21,8 @@ Never exclude a folder under `C:\` that inherits the root's permissions
 (Authenticated Users can create files there).
 
 Check: `(Get-MpPreference).AttackSurfaceReductionOnlyExclusions`; blocks show
-as event 1121 in *Microsoft-Windows-Windows Defender/Operational*. The
-installer warns when the exclusion is missing.
+as event 1121 in *Microsoft-Windows-Windows Defender/Operational*.
+`install.ps1` warns when the exclusion is missing; the MSI cannot check.
 
 ## Required only for LAN access to the inference endpoint
 
@@ -30,7 +30,8 @@ By default both listeners are on loopback and no firewall rule is needed. To
 serve other machines, set `listen.inference` to a LAN address and allow
 inbound TCP on that port for `%ProgramFiles%\Benchwarmer\benchwarmer.exe`,
 scoped to the calling hosts. If Group Policy disables local firewall rule
-merging, the rule must come from Group Policy; the installer creates none.
+merging, the rule must come from Group Policy; neither the MSI nor
+`install.ps1` creates one.
 Set `security.require_inference_token` to `true` when exposing it.
 
 The management listener (`listen.management`) should stay on loopback.

@@ -434,6 +434,12 @@ func TestPolicyTable(t *testing.T) {
 			s.Timers.LastCompetingAt = evening.Add(-time.Minute)
 			return s
 		}, want{action: ActionHold, rule: RuleSuppressed, idle: state.Suppressed, nextLoadAt: evening.Add(20 * time.Minute)}},
+		{"suppression stays visible while the game keeps running", func() Snapshot {
+			s := idle(evening)
+			s.Timers.SuppressedAt = evening.Add(-5 * time.Minute)
+			s.Apps.Games = []AppMatch{game("eldenring.exe")}
+			return s
+		}, want{action: ActionHold, rule: RuleGameProcess, idle: state.Suppressed}},
 		{"suppression expired loads", func() Snapshot {
 			s := idle(evening)
 			s.Timers.SuppressedAt = evening.Add(-31 * time.Minute)

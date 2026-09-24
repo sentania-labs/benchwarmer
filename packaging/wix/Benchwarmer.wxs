@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Benchwarmer per-machine Windows Installer package (ADR 0012).
+
+  Built by packaging/build-msi.ps1 with WiX Toolset (version pinned there):
+    wix build -arch x64 -d ProductVersion=X.Y.Z -d StageDir=<dist\stage> ...
+
+  StageDir is the release file set produced by `make stage`. The package:
+  - installs it to C:\Program Files\Benchwarmer;
+  - registers the Benchwarmer service natively (no custom actions), with the
+    same name, description, account and command line as
+    `benchwarmer.exe service install`;
+  - adds bwtray.exe to HKLM Run;
+  - never touches C:\ProgramData\Benchwarmer: the service provisions that
+    folder itself, and uninstall leaves it in place.
+  No firewall rules, no Defender changes, no required properties.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Benchwarmer"
+      Manufacturer="sentania labs"
+      Version="$(var.ProductVersion)"
+      UpgradeCode="6CCC282B-8AEA-4DE6-B499-408746E4187D"
+      Scope="perMachine"
+      Language="1033"
+      Compressed="yes">
+
+    <SummaryInformation Description="Benchwarmer $(var.ProductVersion)" />
+
+    <!-- One install per machine. A rebuilt package with the same version
+         replaces the installed one instead of installing beside it. -->
+    <MajorUpgrade
+        AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A newer version of Benchwarmer is already installed." />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/sentania-labs/benchwarmer" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Benchwarmer" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Benchwarmer" Level="1">
+      <ComponentGroupRef Id="Core" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="Core" Directory="INSTALLFOLDER">
+      <Component Id="Service">
+        <File Id="BenchwarmerExe" Source="$(var.StageDir)\benchwarmer.exe" KeyPath="yes" />
+        <!-- Must match cmd/benchwarmer `service install`: name, display name,
+             description, LocalSystem (ADR 0006), automatic start, and
+             service.ServiceArgs(C:\ProgramData\Benchwarmer). The service sets
+             its own delayed start and recovery actions when it starts. -->
+        <ServiceInstall
+            Id="BenchwarmerService"
+            Name="Benchwarmer"
+            DisplayName="Benchwarmer"
+            Description="Runs a local LLM on the GPU only while it is otherwise idle; yields to games and interactive use."
+            Type="ownProcess"
+            Start="auto"
+            ErrorControl="normal"
+            Account="LocalSystem"
+            Arguments="run --service --data &quot;[CommonAppDataFolder]Benchwarmer&quot;"
+            Vital="yes" />
+        <ServiceControl
+            Id="BenchwarmerServiceControl"
+            Name="Benchwarmer"
+            Start="install"
+            Stop="both"
+            Remove="uninstall"
+            Wait="yes" />
+      </Component>
+
+      <Component Id="Tray">
+        <File Id="BwtrayExe" Source="$(var.StageDir)\bwtray.exe" KeyPath="yes" />
+        <!-- Starts the tray in every user session. -->
+        <RegistryValue
+            Root="HKLM"
+            Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+            Name="Benchwarmer Tray"
+            Type="string"
+            Value="&quot;[#BwtrayExe]&quot;" />
+      </Component>
+
+      <File Id="BwprobeExe" Source="$(var.StageDir)\bwprobe.exe" />
+      <File Id="VersionFile" Source="$(var.StageDir)\VERSION" />
+      <File Id="ConfigExample" Source="$(var.StageDir)\config.example.json" />
+
+      <!-- llama.cpp runtime (packaging/llama-cpp.json) and licenses. -->
+      <Files Include="$(var.StageDir)\runtime\**" Directory="INSTALLFOLDER" Subdirectory="runtime" />
+      <Files Include="$(var.StageDir)\licenses\**" Directory="INSTALLFOLDER" Subdirectory="licenses" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>

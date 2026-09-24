@@ -47,8 +47,8 @@ management listener (dashboard and API) stays on loopback over plain HTTP.
    $pw = Read-Host -AsSecureString 'PFX password'
    New-Item -ItemType Directory -Force C:\ProgramData\Benchwarmer\tls | Out-Null
    Export-PfxCertificate -Cert $c -FilePath C:\ProgramData\Benchwarmer\tls\inference.pfx -Password $pw -ChainOption BuildChain
-   # The service reads the password from a file. The installer already limits
-   # C:\ProgramData\Benchwarmer to SYSTEM and Administrators.
+   # The service reads the password from a file. The service keeps
+   # C:\ProgramData\Benchwarmer limited to SYSTEM and Administrators.
    [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($pw)) |
      Set-Content -NoNewline -Encoding ascii C:\ProgramData\Benchwarmer\tls\inference.pfx.pass
    ```

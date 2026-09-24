@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Benchwarmer</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar">
+  <div class="brand"><img src="favicon.svg" alt="" width="24" height="24"> Benchwarmer</div>
+  <nav aria-label="Main">
+    <a href="#/" data-route="dashboard">Dashboard</a>
+    <a href="#/events" data-route="events">Events</a>
+    <a href="#/config" data-route="config">Configuration</a>
+  </nav>
+  <button type="button" id="forget-token" class="link-button" hidden>Forget token</button>
+</header>
+<div id="banners" aria-live="polite"></div>
+<main id="main" tabindex="-1"></main>
+
+<dialog id="token-dialog" aria-labelledby="token-title">
+  <form method="dialog" id="token-form">
+    <h2 id="token-title">Management token required</h2>
+    <p id="token-reason">This action needs the Benchwarmer management token.</p>
+    <p class="help">The token is in the file named by <code>security.management_token_file</code>
+      on the Benchwarmer PC. It is kept only for this browser tab and is never put in a URL.</p>
+    <label for="token-input">Token</label>
+    <input id="token-input" type="password" autocomplete="off" spellcheck="false" required>
+    <div class="actions">
+      <button type="submit" value="ok" class="primary">Use token</button>
+      <button type="button" id="token-cancel">Cancel</button>
+    </div>
+  </form>
+</dialog>
+</body>
+</html>

@@ -59,13 +59,31 @@ func (c *Controller) checkSetup(now time.Time) {
 	if c.st.RuntimeRunning() || c.d.Adapter == nil {
 		return
 	}
-	if !c.lastSetupCheck.IsZero() && now.Sub(c.lastSetupCheck) < 5*time.Second {
-		return
+	if c.setupResult == nil {
+		if !c.lastSetupCheck.IsZero() && now.Sub(c.lastSetupCheck) < 5*time.Second {
+			return
+		}
+		c.lastSetupCheck = now
+		// The check stats files, which can hang on an unreachable network
+		// path; it runs outside the controller so it cannot stall it.
+		ch := make(chan string, 1)
+		c.setupResult = ch
+		adapter, rt := c.d.Adapter, c.cfg.Runtime
+		go func() {
+			p := ""
+			if err := adapter.Validate(rt); err != nil {
+				p = strings.ReplaceAll(err.Error(), "\n", "; ")
+			}
+			ch <- p
+			c.signalWake()
+		}()
 	}
-	c.lastSetupCheck = now
-	c.setupProblem = ""
-	if err := c.d.Adapter.Validate(c.cfg.Runtime); err != nil {
-		c.setupProblem = strings.ReplaceAll(err.Error(), "\n", "; ")
+	// Usually a local stat answers at once; otherwise keep the last answer
+	// and pick this one up on a later step.
+	select {
+	case p := <-c.setupResult:
+		c.setupProblem, c.setupResult = p, nil
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 

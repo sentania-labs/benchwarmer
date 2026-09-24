@@ -13,9 +13,14 @@
   - adds bwtray.exe to HKLM Run;
   - never touches C:\ProgramData\Benchwarmer: the service provisions that
     folder itself, and uninstall leaves it in place.
-  No firewall rules, no Defender changes, no required properties.
+  No firewall rules, no Defender changes, no required properties. The only
+  custom action is WiX's standard CloseApplication for the tray. The service
+  start is not waited on, so a start blocked by policy (for example an ASR
+  exclusion that has not arrived yet) does not roll the install back; the
+  service's recovery actions retry it.
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package
       Name="Benchwarmer"
       Manufacturer="sentania labs"
@@ -34,6 +39,19 @@
         DowngradeErrorMessage="A newer version of Benchwarmer is already installed." />
 
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- A signed-in user's tray keeps bwtray.exe open, which would make an
+         upgrade or uninstall wait for a restart. WiX's standard
+         CloseApplication asks it to close and ends it after 5 s. The tray
+         comes back at the user's next sign-in. -->
+    <util:CloseApplication
+        Id="CloseTray"
+        Target="bwtray.exe"
+        CloseMessage="yes"
+        EndSessionMessage="yes"
+        TerminateProcess="0"
+        Timeout="5"
+        RebootPrompt="no" />
 
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/sentania-labs/benchwarmer" />
     <Property Id="ARPNOMODIFY" Value="1" />
@@ -72,7 +90,7 @@
             Start="install"
             Stop="both"
             Remove="uninstall"
-            Wait="yes" />
+            Wait="no" />
       </Component>
 
       <Component Id="Tray">

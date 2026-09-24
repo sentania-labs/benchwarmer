@@ -61,6 +61,9 @@ if ($have -ne $WixVersion) {
 
 $msi = Join-Path $OutDir "benchwarmer-$ver-x64.msi"
 $wxs = Join-Path $PSScriptRoot 'wix\Benchwarmer.wxs'
-& wix build -arch x64 -d "ProductVersion=$ver" -d "StageDir=$StageDir" -o $msi $wxs | Out-Host
+# The Util extension provides CloseApplication (closes the tray on upgrade).
+& wix extension add --global "WixToolset.Util.wixext/$WixVersion" | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "wix extension add failed ($LASTEXITCODE)" }
+& wix build -arch x64 -ext WixToolset.Util.wixext -d "ProductVersion=$ver" -d "StageDir=$StageDir" -o $msi $wxs | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "wix build failed ($LASTEXITCODE)" }
 Write-Output $msi

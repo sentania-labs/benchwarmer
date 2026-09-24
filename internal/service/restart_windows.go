@@ -21,7 +21,7 @@ func (s *Service) requestRestart() error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(exe, "service", "restart", "--delay", "2s")
+	cmd := exec.Command(exe, "service", "restart", "--delay", "2s", "--data", s.o.DataDir)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP, HideWindow: true}
 	if err := cmd.Start(); err != nil {
 		return err

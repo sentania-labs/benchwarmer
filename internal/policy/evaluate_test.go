@@ -410,6 +410,18 @@ func TestPolicyTable(t *testing.T) {
 			s.Timers.RecoveryUntil, s.Timers.RecoveryReason = evening.Add(time.Minute), "startup"
 			return s
 		}, want{action: ActionHold, rule: RuleSetupRequired}},
+		{"setup required is shown instead of telemetry lost while idle", func() Snapshot {
+			s := idle(evening)
+			s.Runtime.SetupProblem = "no model file is chosen"
+			s.GPU.Confidence, s.GPU.NoneFor = ConfidenceNone, time.Hour
+			return s
+		}, want{action: ActionHold, rule: RuleSetupRequired}},
+		{"telemetry lost still releases a running runtime", func() Snapshot {
+			s := ready(evening)
+			s.Runtime.SetupProblem = "model file deleted while loaded"
+			s.GPU.Confidence, s.GPU.NoneFor = ConfidenceNone, time.Hour
+			return s
+		}, want{action: ActionPreempt, rule: RuleTelemetryLost}},
 		{"a game still wins over setup required", func() Snapshot {
 			s := idle(evening)
 			s.Runtime.SetupProblem = "no model file is chosen"

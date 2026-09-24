@@ -78,18 +78,19 @@ the software from users and computers**. It uninstalls at the next startup.
 From an elevated Command Prompt or PowerShell:
 
 ```
-msiexec /i benchwarmer-1.4.0-x64.msi /qn /l*v "%TEMP%\benchwarmer-install.log"
+msiexec /i benchwarmer-1.4.0-x64.msi /qn /norestart /l*v "%TEMP%\benchwarmer-install.log"
 ```
 
-Exit code 0 is success, 3010 is success with a restart needed, anything
-else is a failure explained in the log. Upgrade with the same command and
-the newer MSI. If someone is signed in during an upgrade, `bwtray.exe` is
-in use: Windows may finish replacing it at the next restart (exit code
-3010), and their tray runs the old version until then. The service is
-upgraded immediately either way. Uninstall from *Settings > Apps*, or:
+Keep `/norestart`: without it, a silent install that needs a restart can
+restart the PC by itself, possibly in the middle of a game. Exit code 0 is
+success, 3010 is success with a restart needed, anything else is a failure
+explained in the log. Upgrade with the same command and the newer MSI. A
+signed-in user's tray is closed during an upgrade or uninstall so no restart
+is needed, and it starts again at their next sign-in. Uninstall from
+*Settings > Apps*, or:
 
 ```
-msiexec /x benchwarmer-1.4.0-x64.msi /qn
+msiexec /x benchwarmer-1.4.0-x64.msi /qn /norestart
 ```
 
 The MSI takes no properties; there is nothing to configure at install time.
@@ -142,10 +143,12 @@ settings.
    opens the dashboard. You can also browse to <http://127.0.0.1:8481/> on
    the PC itself. Until a model is chosen, the status shows
    **Setup required**. That is expected, not a fault.
-3. **Sign in to change settings.** Choose **Sign in to change settings** in
-   the tray menu. Windows asks for administrator approval, then the
-   dashboard opens already signed in for that browser tab. Standard users
-   can view status but cannot change settings.
+3. **Sign in to change settings.** Signed in to Windows with an
+   administrator account, choose **Sign in to change settings** in the tray
+   menu. Windows asks for approval, then the dashboard opens signed in for
+   that browser tab (for 8 hours, on this PC only). Standard users can view
+   status but cannot change settings; typing an administrator's password
+   into a standard user's prompt is refused.
 4. **Choose the model.** On **Configuration > Runtime**, the model field
    suggests the files in `models\` and the runtime field suggests the
    bundled llama.cpp build, so no paths need typing. Save. Setup required

@@ -198,7 +198,9 @@ func (e *eval) yieldRules() []match {
 				evidence: []Evidence{ev("gpu_temperature_c", fmt.Sprintf("%.1f", *t), c.Safety.GPUTempResumeC, "d3dkmt")}, idle: state.Cooldown})
 		}
 	}
-	if g.Confidence == ConfidenceNone && g.NoneFor >= c.Telemetry.LossGrace.D() {
+	// With nothing running and nothing runnable, there is no GPU to release:
+	// "setup required" is the more useful answer (eligibility, below).
+	if g.Confidence == ConfidenceNone && g.NoneFor >= c.Telemetry.LossGrace.D() && (e.running || s.Runtime.SetupProblem == "") {
 		add(match{action: ActionPreempt, rule: RuleTelemetryLost, tier: TierSafety, severity: SeverityWarning,
 			reason:   "GPU telemetry unavailable; releasing the GPU until it recovers",
 			evidence: []Evidence{ev("telemetry_unavailable_for", dur(g.NoneFor), dur(c.Telemetry.LossGrace.D()), "telemetry")}, idle: state.Error})

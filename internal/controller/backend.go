@@ -137,7 +137,7 @@ func (c *Controller) UpdateConfig(_ context.Context, nc config.Config, actor str
 	im := config.Classify(c.cfg, nc)
 	c.cfg, c.cfgSource = nc, "primary"
 	c.schedCacheValid = false
-	c.lastSetupCheck = time.Time{} // re-check the runtime and model files now
+	c.lastSetupCheck, c.setupResult = time.Time{}, nil // re-check the runtime and model files now, ignoring a check of the old paths
 	if im.ServiceRestart {
 		c.restartNeeded = true
 	}

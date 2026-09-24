@@ -113,7 +113,8 @@ func New(o Options) (*Service, error) {
 	}
 	loadBlocked := s.reportProvisioning(prov)
 	s.auth = api.NewAuthenticator(toks)
-	s.signIn = api.NewSignIn(toks.Management, nil)
+	s.signIn = api.NewSignIn(nil)
+	s.auth.UseSessions(s.signIn)
 	s.infTok = toks.Inference
 
 	s.met = metrics.New()

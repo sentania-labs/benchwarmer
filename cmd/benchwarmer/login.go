@@ -26,12 +26,21 @@ import (
 // needs to read the management token, so it runs as an administrator: the
 // tray starts it elevated with --code and opens the dashboard itself, so the
 // browser never runs elevated. Run by hand, it prints the address to open.
+// The code is redeemed for a session token that works only on this PC and
+// expires; the management token never leaves this process.
 func cmdLogin(args []string) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	data := fs.String("data", service.DefaultDataDir(), "data directory")
 	code := fs.String("code", "", "sign-in code to register (default: generate one and print the address)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *code != "" {
+		// Started by the tray: the session must end up with the person who
+		// approved it.
+		if err := checkSameUser(); err != nil {
+			return err
+		}
 	}
 	base, tokenFile := managementEndpoint(*data)
 	tok, err := os.ReadFile(tokenFile)

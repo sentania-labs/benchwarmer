@@ -333,7 +333,7 @@ paths:
       tags: [auth]
       operationId: postSignInCode
       summary: Register a single-use dashboard sign-in code (ADR 0012).
-      description: Management token only. Used by `benchwarmer login`, which the tray starts elevated. The code is redeemable once, from this PC, for one minute.
+      description: The management token itself only (not a session token). Used by `benchwarmer login`, which the tray starts elevated. The code is redeemable once, from this PC, for one minute.
       requestBody:
         required: true
         content:
@@ -353,8 +353,8 @@ paths:
     post:
       tags: [auth]
       operationId: postSignInRedeem
-      summary: Exchange a sign-in code for the management token.
-      description: No token. Accepted only from a loopback peer addressing the service as localhost or a loopback IP. Redemption pauses after repeated failures.
+      summary: Exchange a sign-in code for a dashboard session token.
+      description: No token. Content-Type must be application/json. Accepted only from a loopback peer addressing the service as localhost or a loopback IP. The session token works only from this PC and expires after 8 hours. Redemption pauses after repeated failures.
       requestBody:
         required: true
         content:
@@ -362,7 +362,7 @@ paths:
             schema: { $ref: "#/components/schemas/SignInCode" }
       responses:
         "200":
-          description: The management token, for this browser tab.
+          description: A session token, for this browser tab.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SignInToken" }
@@ -909,7 +909,9 @@ components:
         expires_at: { type: string, format: date-time }
     SignInToken:
       type: object
+      description: A dashboard session token. It acts as the management token, but only from this PC, and expires.
       properties:
+        expires_at: { type: string, format: date-time }
         token: { type: string }
     Restarting:
       type: object

@@ -38,6 +38,9 @@ const (
 	PrincipalManagement
 	PrincipalAgent
 	PrincipalInference
+	// PrincipalSession: a dashboard session from a sign-in code. It acts as
+	// the management token, but only from this PC.
+	PrincipalSession
 )
 
 // Authenticator checks management API credentials. It holds only SHA-256
@@ -45,7 +48,11 @@ const (
 // token contents nor token length leak through timing.
 type Authenticator struct {
 	management, agent, inference [sha256.Size]byte
+	sessions                     *SignIn
 }
+
+// UseSessions lets session tokens from s authenticate (loopback only).
+func (a *Authenticator) UseSessions(s *SignIn) { a.sessions = s }
 
 // NewAuthenticator builds an Authenticator from loaded tokens. The
 // inference token is recognised only so it can be refused explicitly.
@@ -86,6 +93,8 @@ func (a *Authenticator) Identify(r *http.Request) Principal {
 		return PrincipalAgent
 	case i == 1:
 		return PrincipalInference
+	case a.sessions.ValidSession(tok):
+		return PrincipalSession
 	}
 	return PrincipalInvalid
 }
@@ -112,6 +121,11 @@ func (a *Authenticator) Authorize(r *http.Request, need Access, agentOK, loopbac
 	switch p {
 	case PrincipalManagement:
 		return nil
+	case PrincipalSession:
+		if trustedLoopback(r) {
+			return nil
+		}
+		return &authError{http.StatusUnauthorized, CodeInvalidToken, "a dashboard session works only on this PC; use the management token remotely"}
 	case PrincipalAgent:
 		if agentOK {
 			return nil

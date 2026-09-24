@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -64,7 +65,10 @@ func signIn(base string) error {
 	info := shellExecuteInfo{mask: seeMaskNoCloseProcess, verb: verb, file: file, parameters: params, show: swHide}
 	info.size = uint32(unsafe.Sizeof(info))
 	if r, _, e := procShellExecuteEx.Call(uintptr(unsafe.Pointer(&info))); r == 0 {
-		return fmt.Errorf("start elevated sign-in: %w", e) // includes "cancelled by the user"
+		if errors.Is(e, windows.ERROR_CANCELLED) {
+			return nil // the user declined the UAC prompt
+		}
+		return fmt.Errorf("start elevated sign-in: %w", e)
 	}
 	defer windows.CloseHandle(info.process)
 	if _, err := windows.WaitForSingleObject(info.process, 60*1000); err != nil {
@@ -75,7 +79,12 @@ func signIn(base string) error {
 		return err
 	}
 	if code32 != 0 {
-		return fmt.Errorf("sign-in helper failed (exit %d); see the service log", code32)
+		// The helper's own message is not visible from here; say what
+		// usually causes it.
+		title, _ := windows.UTF16PtrFromString("Benchwarmer")
+		msg, _ := windows.UTF16PtrFromString("Sign-in did not complete.\n\nSettings can be changed by an administrator signed in to Windows with their own account, while the Benchwarmer service is running.")
+		_, _ = windows.MessageBox(0, msg, title, windows.MB_OK|windows.MB_ICONWARNING)
+		return fmt.Errorf("sign-in helper failed (exit %d)", code32)
 	}
 	return exec.Command("rundll32", "url.dll,FileProtocolHandler", base+"/#signin="+code).Start()
 }

@@ -203,7 +203,7 @@ async function restartService() {
     }
     await sleep(1000);
   }
-  st.message = "The service has not come back after two minutes. If the management address changed, open the dashboard at the new address; otherwise check the Windows event log.";
+  st.message = "The service has not come back after two minutes. If the management address changed, open the dashboard at the new address; otherwise see C:\\ProgramData\\Benchwarmer\\logs\\restart.log and the Windows event log.";
   renderTop();
 }
 

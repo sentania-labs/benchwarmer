@@ -41,7 +41,8 @@ $LogDir = (Resolve-Path $LogDir).Path
 
 function Invoke-Msiexec([string] $Action, [string] $Msi, [string] $Log) {
   Step "msiexec $Action $(Split-Path $Msi -Leaf) (log $Log)"
-  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @($Action, "`"$Msi`"", '/qn', '/l*v', "`"$Log`"")
+  $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @($Action, "`"$Msi`"", '/qn', '/norestart', '/l*v', "`"$Log`"")
+  # 3010 would mean a file was in use (the tray) and a restart is needed.
   if ($p.ExitCode -ne 0) { Fail "msiexec $Action exited $($p.ExitCode); see $Log" }
 }
 
@@ -142,8 +143,15 @@ if ($Mode -eq 'msi') {
     $old = (Resolve-Path $UpgradeFrom).Path
     Invoke-Msiexec '/i' $old (Join-Path $LogDir 'msi-upgrade-from.log')
     Assert-Installed (Get-MsiVersion $old)
+    # A signed-in user's tray holds bwtray.exe open; the package must close
+    # it rather than need a restart. The runner has no desktop, so the tray
+    # may not stay up; then this part is skipped.
+    $tray = Start-Process (Join-Path $Prog 'bwtray.exe') -PassThru
+    Start-Sleep -Seconds 3
+    if ($tray.HasExited) { Write-Host "tray exited on its own here (exit $($tray.ExitCode)); in-use upgrade not exercised" } else { Step 'Tray running during upgrade' }
   }
   Invoke-Msiexec '/i' $Path (Join-Path $LogDir 'msi-install.log')
+  if ($UpgradeFrom -and -not $tray.HasExited) { Fail 'the tray from the old version is still running after the upgrade' }
   Assert-Installed (Get-MsiVersion $Path)
   Invoke-Msiexec '/x' $Path (Join-Path $LogDir 'msi-uninstall.log')
   Assert-Removed

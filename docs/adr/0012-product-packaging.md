@@ -69,8 +69,12 @@ what lets them run.
 - Creates **no firewall rules** and changes no Defender settings: on managed
   PCs those are GPO settings (local rule merge is off), documented in
   `docs/deploy/`.
-- Has no custom actions and no required properties. Everything else is done
-  by the service.
+- Has no custom actions of its own and no required properties. It uses
+  WiX's standard CloseApplication to close a signed-in user's tray during an
+  upgrade or uninstall, so no restart is needed. The service start is not
+  waited on, so a start that policy blocks (an ASR exclusion not yet
+  applied) does not roll the install back; the service's recovery actions
+  retry. Everything else is done by the service.
 
 ### What the service does for itself (every start)
 
@@ -109,16 +113,28 @@ status and events, and does not load a model while secrets could be exposed.
     authentication, with subject, names, thumbprint and expiry.
 - **Admin sign-in.** Changing settings needs the management token (ADR 0007).
   Reading a SYSTEM-only file by hand is poor UX. The tray gets **Sign in to
-  change settings**. It runs `benchwarmer.exe login`, elevated through UAC,
-  which:
-  1. reads the management token;
-  2. asks the service for a single-use sign-in code valid for 60 seconds;
-  3. opens the dashboard with that code in the URL fragment.
+  change settings**:
+  1. The tray makes a random single-use code and runs `benchwarmer.exe login
+     --code <code>`, elevated through UAC.
+  2. The elevated helper refuses unless it runs as the same account that is
+     signed in to the session. An administrator typing credentials into a
+     standard user's prompt would otherwise hand that user the session.
+  3. The helper reads the management token and registers the code with the
+     service (valid for 60 seconds, redeemable once, only from this PC).
+  4. The unelevated tray opens the dashboard with the code in the URL
+     fragment, so the browser never runs elevated.
+  5. The dashboard removes the code from the address bar and redeems it for a
+     **session token**. The session token acts as the management token but
+     only from this PC, and it expires after 8 hours. The management token
+     never leaves the elevated helper.
 
-  The dashboard exchanges the code for the token and keeps it for that
-  browser tab only. The token never appears in a URL, a log, or the page's
-  address history. Only an administrator can complete this, because only an
-  administrator can read the token.
+  Limits, accepted:
+  - Another process running as the same user could read the code from the
+    browser's command line and redeem it first. Same-user processes are
+    inside the user's trust boundary anyway: they can read the tab's storage.
+  - The single-use code can remain in the browser's history.
+  - Redemption requires a JSON body, so a web page cannot submit guesses
+    without a CORS preflight, which the API never grants.
 - **Restart from the dashboard.** Changes that need a service restart
   (listeners, the HTTPS certificate selection, token files, logging) show a
   **Restart service now** button. It calls `POST /api/v1/service/restart`,

@@ -151,12 +151,15 @@ func newHarness(t *testing.T) *harness {
 	metrics := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "benchwarmer_up 1\n")
 	})
+	auth := NewAuthenticator(secrets.Tokens{Management: mgmtTok, Agent: agentTok, Inference: infTok})
+	signIn := NewSignIn(nil)
+	auth.UseSessions(signIn)
 	h := New(Options{
 		Backend: be,
-		Auth:    NewAuthenticator(secrets.Tokens{Management: mgmtTok, Agent: agentTok, Inference: infTok}),
+		Auth:    auth,
 		Metrics: metrics, Version: "test",
 		Logger: slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
-		SignIn: NewSignIn(mgmtTok, nil),
+		SignIn: signIn,
 		Setup: func() SetupInfo {
 			return SetupInfo{DataDir: `C:\ProgramData\Benchwarmer`, Models: []ModelFile{{Name: "m.gguf", Path: `C:\ProgramData\Benchwarmer\models\m.gguf`}}}
 		},
@@ -179,6 +182,7 @@ func (hr *harness) assertLogsClean() {
 type req struct {
 	method, path, body, token string
 	peer, host                string
+	json                      bool // send Content-Type: application/json
 }
 
 func (hr *harness) do(r req) *httptest.ResponseRecorder {
@@ -198,6 +202,9 @@ func (hr *harness) do(r req) *httptest.ResponseRecorder {
 	}
 	if r.token != "" {
 		hreq.Header.Set("Authorization", "Bearer "+r.token)
+	}
+	if r.json {
+		hreq.Header.Set("Content-Type", "application/json")
 	}
 	rec := httptest.NewRecorder()
 	hr.h.ServeHTTP(rec, hreq)

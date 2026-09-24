@@ -114,14 +114,14 @@ jobs:
 
           **Install:** see [docs/deploy/install.md]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$V/docs/deploy/install.md) for prerequisites (Defender ASR exclusion, GPU driver, firewall and certificate for LAN access) and first-run setup.
 
-          - **MSI** (recommended, and the one to use with Group Policy): \`benchwarmer-$N-x64.msi\`. From an elevated prompt run \`msiexec /i benchwarmer-$N-x64.msi /qn\`, or assign it to computers with GPO Software Installation. A newer MSI upgrades an older one in place.
+          - **MSI** (recommended, and the one to use with Group Policy): \`benchwarmer-$N-x64.msi\`. From an elevated prompt run \`msiexec /i benchwarmer-$N-x64.msi /qn /norestart\`, or assign it to computers with GPO Software Installation. A newer MSI upgrades an older one in place.
           - **By hand:** unzip \`benchwarmer-$V-windows-amd64.zip\` and run \`.\\install.ps1\` from an elevated PowerShell in that folder.
 
           Use one route per machine. After installing, copy a GGUF model to \`C:\\ProgramData\\Benchwarmer\\models\\\` and choose it in the dashboard (http://127.0.0.1:8481/).
 
           Unsigned: verify downloads against \`SHA256SUMS\`.
           EOF
-      - name: Publish (idempotent per tag)
+      - name: Publish (idempotent per tag, never replaces assets)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -131,7 +131,18 @@ jobs:
           cd out
           files=("benchwarmer-$N-x64.msi" "benchwarmer-$V-windows-amd64.zip" SHA256SUMS)
           if gh release view "$V" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$V" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            # A re-run only fills in missing assets. Published files are never
+            # replaced: anyone who downloaded them holds their SHA256SUMS.
+            have=$(gh release view "$V" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+            missing=()
+            for f in "${files[@]}"; do grep -qxF "$f" <<<"$have" || missing+=("$f"); done
+            if [ "${#missing[@]}" -gt 0 ] && [ "${#missing[@]}" -lt "${#files[@]}" ]; then
+              echo "release $V is partly published; this build's files would not match SHA256SUMS. Fix it by hand." >&2
+              exit 1
+            fi
+            if [ "${#missing[@]}" -gt 0 ]; then
+              gh release upload "$V" "${missing[@]}" --repo "$GITHUB_REPOSITORY"
+            fi
             gh release edit "$V" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$V" "${files[@]}" --title "$V" --notes-file notes.md --verify-tag --repo "$GITHUB_REPOSITORY"

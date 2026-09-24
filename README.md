@@ -37,7 +37,7 @@ analysis and decisions.
 
 ## Install
 
-Each release publishes an MSI (for Group Policy or `msiexec /i ... /qn`) and
+Each release publishes an MSI (for Group Policy or `msiexec /i ... /qn /norestart`) and
 a zip for installing by hand. See [docs/deploy/install.md](docs/deploy/install.md)
 for prerequisites, both routes, and first-run setup.
 

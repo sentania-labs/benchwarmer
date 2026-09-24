@@ -63,7 +63,10 @@ func (f *fakeInst) Stop(time.Duration) (runtime.StopResult, error) {
 	default:
 	}
 	f.once.Do(func() { close(f.exited) })
-	return runtime.StopResult{AlreadyExited: already, RootExit: time.Millisecond, TreeEmpty: 2 * time.Millisecond}, f.stopErr
+	f.mu.Lock()
+	err := f.stopErr
+	f.mu.Unlock()
+	return runtime.StopResult{AlreadyExited: already, RootExit: time.Millisecond, TreeEmpty: 2 * time.Millisecond}, err
 }
 func (f *fakeInst) Exited() <-chan struct{} { return f.exited }
 func (f *fakeInst) ExitErr() error          { return f.exitErr }
@@ -132,7 +135,7 @@ func (f *fakeFacts) Build(_ time.Time, in FactInput) (policy.GPUFacts, policy.Ap
 	return g, f.apps, policy.SessionFacts{}
 }
 func (f *fakeFacts) AgentReport(time.Time, api.AgentReport) {}
-func (f *fakeFacts) AgentStatus(time.Time) api.AgentStatus  { return api.AgentStatus{} }
+func (f *fakeFacts) AgentStatus(time.Time, time.Duration) api.AgentStatus { return api.AgentStatus{} }
 func (f *fakeFacts) set(fn func(g *policy.GPUFacts, a *policy.AppFacts)) {
 	f.mu.Lock()
 	fn(&f.gpu, &f.apps)
@@ -727,5 +730,42 @@ func TestEveryStateChangeCarriesRule(t *testing.T) {
 		if e.Type == events.StateChanged && (e.Rule == "" || e.Message == "" || e.PrevState == "") {
 			t.Errorf("state change without rule/explanation: %+v", e)
 		}
+	}
+}
+
+func TestFailedKillIsRetriedAndBlocksNewRuntime(t *testing.T) {
+	r := newRig(t, nil)
+	r.toReady()
+	inst := r.ad.last()
+	inst.mu.Lock()
+	inst.stopErr = errors.New("descendants still present after timeout")
+	inst.mu.Unlock()
+	r.facts.set(func(_ *policy.GPUFacts, a *policy.AppFacts) { a.Games = []policy.AppMatch{game("x.exe")} })
+	r.stepUntil(state.Error)
+	if _, ok := r.ev.find(events.KillFailed); !ok {
+		t.Fatal("no kill_failed event")
+	}
+	// The game leaves and every timer expires, but the old runtime is
+	// unverified: nothing new may start.
+	r.facts.set(func(_ *policy.GPUFacts, a *policy.AppFacts) { a.Games = nil })
+	r.clk.Advance(6 * time.Minute)
+	for i := 0; i < 20; i++ {
+		r.c.Step(true)
+		time.Sleep(2 * time.Millisecond)
+	}
+	if r.ad.count() != 1 {
+		t.Fatalf("started a second runtime while the first was unverified (%d)", r.ad.count())
+	}
+	if st := r.c.Status(); st.Decision.Rule != "safety.runtime_unverified" {
+		t.Fatalf("decision %q", st.Decision.Rule)
+	}
+	// The kill starts working; the retry verifies it and loading resumes.
+	inst.mu.Lock()
+	inst.stopErr = nil
+	inst.mu.Unlock()
+	r.clk.Advance(5 * time.Minute)
+	r.stepUntil(state.Ready)
+	if r.ad.count() != 2 {
+		t.Fatalf("instances %d", r.ad.count())
 	}
 }

@@ -154,6 +154,20 @@ func TestEndToEndLifecycle(t *testing.T) {
 
 	waitState(state.Ready, 15*time.Second)
 
+	// Regression: an agent report followed by a status read used to
+	// deadlock the controller (the fact builder called back into it).
+	ctl.AgentReport(api.AgentReport{SessionID: 1, ForegroundName: "explorer.exe", IdleSeconds: 30})
+	statusDone := make(chan api.Status, 1)
+	go func() { statusDone <- ctl.Status() }()
+	select {
+	case st := <-statusDone:
+		if !st.Agent.Connected {
+			t.Fatalf("agent should be connected: %+v", st.Agent)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Status() hung after an agent report (controller deadlock)")
+	}
+
 	// A game starts while a request is streaming.
 	s1 := stream()
 	time.Sleep(300 * time.Millisecond)

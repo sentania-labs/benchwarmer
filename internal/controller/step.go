@@ -25,6 +25,7 @@ func (c *Controller) step(now time.Time, collect bool) {
 	snap := c.snapshot(now)
 	d := policy.Evaluate(snap, c.cfg)
 	d = c.applyManual(d)
+	d = c.applyZombie(d)
 	if d.Competing {
 		if c.st == state.Cooldown && c.decision.Rule == policy.RuleCooldown {
 			// A competing workload reappeared while the cooldown was
@@ -55,11 +56,19 @@ func (c *Controller) absorbAsync(now time.Time) {
 		c.onLoadResult(now, r)
 	default:
 	}
-	select {
-	case r := <-c.stopCh:
-		c.onStopped(now, r)
-	default:
+	for more := true; more; {
+		select {
+		case r := <-c.stopCh:
+			if r.cleanup {
+				c.onZombieStopped(now, r)
+			} else {
+				c.onStopped(now, r)
+			}
+		default:
+			more = false
+		}
 	}
+	c.retryZombie(now)
 	if c.inst != nil && c.st != state.Preempting {
 		select {
 		case <-c.inst.Exited():
@@ -95,7 +104,14 @@ func (c *Controller) observe(now time.Time) {
 	if c.inst != nil {
 		in.OwnPIDs = c.inst.Members()
 	}
-	in.RuntimeBusy = c.st == state.Loading || c.st == state.Busy || c.st == state.Draining
+	// Busy from the gate, not the state: the state only moves to Busy in
+	// act(), after this observation, so a request in flight would otherwise
+	// let the runtime's own utilization count as trusted external demand.
+	active := 0
+	if c.d.Gate != nil {
+		active, _ = c.d.Gate.Active()
+	}
+	in.RuntimeBusy = c.st == state.Loading || c.st == state.Draining || c.st == state.Preempting || active > 0
 	name, _ := c.activeProfile(now)
 	in.Profile = c.cfg.Profiles[name]
 	if c.d.Facts != nil {
@@ -190,16 +206,26 @@ func (c *Controller) act(now time.Time, d policy.Decision) {
 			c.beginStop(now, d, "stopping model load")
 		}
 	case state.Ready, state.Busy:
-		n, _ := c.d.Gate.Active()
+		var n int
+		if d.Action.Yields() {
+			// Close first and take the count under the gate's lock, so a
+			// request admitted a moment ago is counted.
+			n = c.closeGate(d)
+		} else {
+			if c.d.Gate != nil && c.inst != nil && !c.d.Gate.IsOpen() {
+				// Loaded and allowed to run: admit. The gate opens here,
+				// after this step's decision, not when loading finishes.
+				c.d.Gate.Open(c.inst.BaseURL())
+			}
+			n, _ = c.d.Gate.Active()
+		}
 		switch d.Action {
 		case policy.ActionPreempt:
-			c.closeGate(d)
 			if n > 0 {
 				c.forceClose(now, d, "hard contention")
 			}
 			c.beginStop(now, d, "")
 		case policy.ActionDrain:
-			c.closeGate(d)
 			if n == 0 {
 				c.beginStop(now, d, "no request active; unloading now")
 				return
@@ -272,15 +298,16 @@ func withData(e events.Event, data map[string]any) events.Event {
 	return e
 }
 
-func (c *Controller) closeGate(d policy.Decision) {
+// closeGate stops admission and returns how many requests are still active.
+func (c *Controller) closeGate(d policy.Decision) int {
 	if c.d.Gate == nil {
-		return
+		return 0
 	}
 	cond := state.Yielding
 	if !c.st.Admitting() {
 		cond = state.Unavailable
 	}
-	c.d.Gate.Close(proxy.Closed{Condition: cond, Reason: d.Reason, RetryAfter: d.NextLoadAt})
+	return c.d.Gate.Close(proxy.Closed{Condition: cond, Reason: d.Reason, RetryAfter: d.NextLoadAt})
 }
 
 func (c *Controller) forceClose(now time.Time, d policy.Decision, why string) {
@@ -332,8 +359,9 @@ func joinMsg(a, b string) string {
 
 func (c *Controller) onStopped(now time.Time, r stopResult) {
 	pid := 0
-	if c.inst != nil {
-		pid = c.inst.PID()
+	inst := c.inst
+	if inst != nil {
+		pid = inst.PID()
 	}
 	c.inst = nil
 	c.drainStart, c.drainDeadline = time.Time{}, time.Time{}
@@ -344,7 +372,9 @@ func (c *Controller) onStopped(now time.Time, r stopResult) {
 	c.manualPending = ""
 	if r.err != nil {
 		c.emit(events.Event{Time: now, Type: events.KillFailed, Severity: policy.SeverityCritical, RuntimePID: pid,
-			Message: "Runtime termination could not be verified: " + r.err.Error()})
+			Message: "Runtime termination could not be verified: " + r.err.Error() + "; retrying"})
+		c.zombie, c.zombieAttempts = inst, 1
+		c.zombieRetryAt = now.Add(c.zombieBackoff())
 		c.setRecovery(now, c.cfg.Recovery.DeviceLostCooldown.D(), "kill failure")
 		c.transition(now, state.Error, y, "Runtime termination could not be verified", nil)
 		return
@@ -473,7 +503,8 @@ func (c *Controller) onLoadResult(now time.Time, r loadResult) {
 	if r.err != nil {
 		diag := r.inst.Diagnostics()
 		c.inst = nil
-		go func() { _, _ = r.inst.Stop(c.cfg.Runtime.KillVerifyTimeout.D()) }()
+		c.zombie, c.zombieAttempts, c.zombieRetryAt = r.inst, 0, now
+		c.retryZombie(now)
 		c.closeGate(c.decision)
 		c.loadFailed(now, c.decision, r.err, diag)
 		return
@@ -487,9 +518,8 @@ func (c *Controller) onLoadResult(now time.Time, r loadResult) {
 	c.transition(now, state.Ready, c.decision, fmt.Sprintf("Model ready after %.1f s", c.lastLoadS), map[string]any{"load_ms": now.Sub(c.loadStart).Milliseconds()})
 	c.emit(events.Event{Time: now, Type: events.LoadCompleted, Message: fmt.Sprintf("Model loaded in %.1f s", c.lastLoadS),
 		Data: map[string]any{"load_ms": now.Sub(c.loadStart).Milliseconds()}})
-	if c.d.Gate != nil {
-		c.d.Gate.Open(r.inst.BaseURL())
-	}
+	// The gate opens in act() once this step's decision confirms the worker
+	// may run; a game that appeared during loading must win first.
 }
 
 func (c *Controller) loadFailed(now time.Time, d policy.Decision, err error, diag string) {
@@ -518,11 +548,70 @@ func (c *Controller) onCrash(now time.Time) {
 	}
 	c.emit(events.Event{Time: now, Type: events.RuntimeCrashed, Severity: policy.SeverityWarning, RuntimePID: inst.PID(),
 		Message: "Runtime exited unexpectedly: " + exit, Data: map[string]any{"exit": exit, "diagnostics_tail": tail(inst.Diagnostics(), 2048), "state": c.st}})
-	// Make sure nothing of the tree survives.
-	go func() { _, _ = inst.Stop(c.cfg.Runtime.KillVerifyTimeout.D()) }()
+	// Make sure nothing of the tree survives before anything else starts.
+	c.zombie, c.zombieAttempts, c.zombieRetryAt = inst, 0, now
+	c.retryZombie(now)
 	c.drainStart, c.drainDeadline, c.yield = time.Time{}, time.Time{}, policy.Decision{}
 	c.backoff(now)
 	c.transition(now, state.Error, c.decision, "Runtime crashed", nil)
+}
+
+// retryZombie starts (or re-starts, after backoff) terminating an
+// unverified runtime.
+func (c *Controller) retryZombie(now time.Time) {
+	if c.zombie == nil || c.zombieStopping || now.Before(c.zombieRetryAt) {
+		return
+	}
+	c.zombieStopping = true
+	inst := c.zombie
+	timeout := c.cfg.Runtime.KillVerifyTimeout.D()
+	go func() {
+		r, err := inst.Stop(timeout)
+		c.stopCh <- stopResult{res: r, err: err, cleanup: true}
+		c.signalWake()
+	}()
+}
+
+func (c *Controller) onZombieStopped(now time.Time, r stopResult) {
+	c.zombieStopping = false
+	if c.zombie == nil {
+		return
+	}
+	pid := c.zombie.PID()
+	if r.err != nil {
+		c.zombieAttempts++
+		c.zombieRetryAt = now.Add(c.zombieBackoff())
+		c.emit(events.Event{Time: now, Type: events.KillFailed, Severity: policy.SeverityCritical, RuntimePID: pid,
+			Message: fmt.Sprintf("Runtime termination still not verified (attempt %d): %v", c.zombieAttempts, r.err)})
+		return
+	}
+	c.zombie = nil
+	c.emit(events.Event{Time: now, Type: events.RuntimeStopped, RuntimePID: pid,
+		Message: "Previous runtime process tree verified terminated",
+		Data:    map[string]any{"root_exit_ms": r.res.RootExit.Milliseconds(), "tree_empty_ms": r.res.TreeEmpty.Milliseconds(), "already_exited": r.res.AlreadyExited}})
+}
+
+func (c *Controller) zombieBackoff() time.Duration {
+	d := 10 * time.Second
+	for i := 1; i < c.zombieAttempts && d < 5*time.Minute; i++ {
+		d *= 2
+	}
+	return min(d, 5*time.Minute)
+}
+
+// applyZombie refuses to load while a previous runtime is unverified.
+func (c *Controller) applyZombie(d policy.Decision) policy.Decision {
+	if c.zombie == nil || c.st.RuntimeRunning() {
+		return d
+	}
+	d.IdleState = state.Error
+	if d.Action != policy.ActionRun {
+		return d
+	}
+	d.Action, d.Rule, d.Tier, d.Severity = policy.ActionHold, "safety.runtime_unverified", policy.TierSafety, policy.SeverityWarning
+	d.Reason = fmt.Sprintf("Previous runtime (pid %d) not yet confirmed terminated; retrying", c.zombie.PID())
+	d.IdleState = state.Error
+	return d
 }
 
 // backoff schedules a bounded exponential retry after a crash or failed load.

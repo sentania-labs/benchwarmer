@@ -113,7 +113,7 @@ func New(o Options) (*Service, error) {
 		}
 	}
 
-	facts := NewFacts(func() time.Duration { c, _ := s.ctl.Config(); return c.Signals.SessionStaleAfter.D() })
+	facts := NewFacts()
 	s.ctl = controller.New(controller.Deps{
 		Config: s.cfg, ConfigSource: lr.Source, ConfigStore: auditingStore{cs: cs, st: st, met: s.met},
 		Adapter: llamacpp.New(), Telemetry: s.tel, Processes: procs, Facts: facts, Gate: s.gate,
@@ -144,7 +144,7 @@ func (s *Service) Run(ctx context.Context, evs <-chan winsvc.Event) error {
 		MaxDuration:  func() time.Duration { c, _ := s.ctl.Config(); return c.Runtime.MaxRequestDuration.D() },
 		Token:        func() string { return s.infTok },
 		RequireToken: func() bool { c, _ := s.ctl.Config(); return c.Security.RequireInferenceToken },
-		Condition:    func() state.Condition { return s.ctl.Status().Condition },
+		Condition:    s.ctl.Condition,
 		Observer:     requestObserver{s.met},
 		Log:          s.log,
 	}), ReadHeaderTimeout: 10 * time.Second}

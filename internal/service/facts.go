@@ -21,13 +21,11 @@ type Facts struct {
 	mu      sync.Mutex
 	agent   *observe.AgentReport
 	agentAt time.Time
-	stale   func() time.Duration
 }
 
-// NewFacts returns a fact builder. staleAfter reports the current
-// session-staleness window from config.
-func NewFacts(staleAfter func() time.Duration) *Facts {
-	return &Facts{obs: observe.New(), stale: staleAfter}
+// NewFacts returns a fact builder.
+func NewFacts() *Facts {
+	return &Facts{obs: observe.New()}
 }
 
 var _ controller.FactBuilder = (*Facts)(nil)
@@ -60,11 +58,11 @@ func (f *Facts) AgentReport(now time.Time, r api.AgentReport) {
 }
 
 // AgentStatus implements controller.FactBuilder.
-func (f *Facts) AgentStatus(now time.Time) api.AgentStatus {
+func (f *Facts) AgentStatus(now time.Time, staleAfter time.Duration) api.AgentStatus {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.agent == nil {
 		return api.AgentStatus{}
 	}
-	return api.AgentStatus{Connected: now.Sub(f.agentAt) <= f.stale(), LastReport: f.agentAt, SessionID: f.agent.SessionID}
+	return api.AgentStatus{Connected: now.Sub(f.agentAt) <= staleAfter, LastReport: f.agentAt, SessionID: f.agent.SessionID}
 }

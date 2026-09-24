@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sentania-labs/benchwarmer/internal/api"
@@ -49,7 +50,9 @@ type FactInput struct {
 type FactBuilder interface {
 	Build(now time.Time, in FactInput) (policy.GPUFacts, policy.AppFacts, policy.SessionFacts)
 	AgentReport(now time.Time, r api.AgentReport)
-	AgentStatus(now time.Time) api.AgentStatus
+	// AgentStatus must not call back into the controller: it runs under
+	// the controller lock.
+	AgentStatus(now time.Time, staleAfter time.Duration) api.AgentStatus
 }
 
 // ConfigStore persists configuration atomically. *config.Store satisfies it.
@@ -125,6 +128,9 @@ type loadResult struct {
 type stopResult struct {
 	res runtime.StopResult
 	err error
+	// cleanup marks the result of terminating a zombie (a runtime whose
+	// termination has not been verified) rather than a policy-driven stop.
+	cleanup bool
 }
 
 // Controller owns lifecycle state. All fields are guarded by mu.
@@ -176,6 +182,18 @@ type Controller struct {
 	manualPending string // "drain" or "reload" requested by the API
 	persisted     []byte
 	recentErrors  []events.Event
+
+	// zombie is a runtime whose termination is not verified (failed kill,
+	// crash, failed load). No new runtime starts while it is set; its stop
+	// is retried with backoff.
+	zombie         runtime.Instance
+	zombieStopping bool
+	zombieRetryAt  time.Time
+	zombieAttempts int
+
+	// cond mirrors st.Condition() for lock-free readers (the proxy sets a
+	// response header on every request).
+	cond atomic.Value
 }
 
 type vramCheck struct {
@@ -196,11 +214,13 @@ func New(d Deps) *Controller {
 	if d.Events == nil {
 		d.Events = events.SinkFunc(func(events.Event) {})
 	}
-	return &Controller{
+	c := &Controller{
 		d: d, cfg: d.Config, cfgSource: d.ConfigSource, st: state.Stopped,
-		readyCh: make(chan loadResult, 1), stopCh: make(chan stopResult, 1), wake: make(chan struct{}, 1),
+		readyCh: make(chan loadResult, 1), stopCh: make(chan stopResult, 4), wake: make(chan struct{}, 1),
 		mode: policy.ModeFacts{Mode: policy.ModeAuto},
 	}
+	c.cond.Store(state.Unavailable)
+	return c
 }
 
 // Start restores persisted state, reconciles orphaned runtimes, applies the
@@ -311,6 +331,7 @@ func (c *Controller) transition(now time.Time, to state.State, d policy.Decision
 		return false
 	}
 	c.st = to
+	c.cond.Store(to.Condition())
 	if c.d.Metrics != nil {
 		c.d.Metrics.IncTransition(from, to)
 		c.d.Metrics.SetState(to)

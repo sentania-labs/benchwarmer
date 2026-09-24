@@ -165,6 +165,15 @@ func (c *Controller) Events(q api.EventQuery) ([]events.Event, error) {
 	return c.d.EventReader.Events(q)
 }
 
+// Condition returns the user-visible condition without taking the
+// controller lock.
+func (c *Controller) Condition() state.Condition {
+	if v, ok := c.cond.Load().(state.Condition); ok {
+		return v
+	}
+	return state.Unavailable
+}
+
 // Status assembles the /api/v1/status document.
 func (c *Controller) Status() api.Status {
 	c.mu.Lock()
@@ -204,7 +213,7 @@ func (c *Controller) Status() api.Status {
 	s.Trigger = trigger(d)
 	s.Timers = c.timerStatus(now, d)
 	if c.d.Facts != nil {
-		s.Agent = c.d.Facts.AgentStatus(now)
+		s.Agent = c.d.Facts.AgentStatus(now, c.cfg.Signals.SessionStaleAfter.D())
 	}
 	s.Summary = c.summary(now, s)
 	return s

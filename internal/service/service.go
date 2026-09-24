@@ -118,7 +118,7 @@ func New(o Options) (*Service, error) {
 		Config: s.cfg, ConfigSource: lr.Source, ConfigStore: auditingStore{cs: cs, st: st, met: s.met},
 		Adapter: llamacpp.New(), Telemetry: s.tel, Processes: procs, Facts: facts, Gate: s.gate,
 		Events: events.SinkFunc(s.sink.Emit), EventReader: eventReader{st}, Persist: persister{st},
-		Metrics: s.met, Log: s.log, Version: version.Version,
+		Metrics: s.met, Log: s.log, Version: version.Version, BootTime: signals.BootTime,
 	})
 	return s, nil
 }
@@ -174,7 +174,7 @@ func (s *Service) Run(ctx context.Context, evs <-chan winsvc.Event) error {
 	go func() { s.ctl.Run(runCtx); close(ctlDone) }()
 	go s.housekeeping(runCtx)
 
-	deadline := time.Now().Add(20 * time.Second)
+	var deadline time.Time
 loop:
 	for {
 		select {
@@ -186,9 +186,7 @@ loop:
 			}
 			switch e.Kind {
 			case winsvc.Stop, winsvc.Shutdown:
-				if !e.Deadline.IsZero() {
-					deadline = e.Deadline
-				}
+				deadline = e.Deadline
 				break loop
 			case winsvc.Suspend:
 				s.ctl.PrepareSuspend(5 * time.Second)
@@ -200,7 +198,11 @@ loop:
 		}
 	}
 
-	// Release the GPU first: stop admitting, terminate the runtime.
+	// Release the GPU first: stop admitting, terminate the runtime. The
+	// budget runs from the stop request, not from service start.
+	if deadline.IsZero() {
+		deadline = time.Now().Add(20 * time.Second)
+	}
 	budget := time.Until(deadline) - 2*time.Second
 	if budget < time.Second {
 		budget = time.Second
@@ -331,8 +333,13 @@ func (a auditingStore) Save(c config.Config) error {
 		return err
 	}
 	a.met.IncConfigChange("applied")
-	_, err := a.st.AppendConfigChange(time.Now(), "api", config.Redact(c), config.Impact{})
-	return err
+	// The config is already persisted; a history failure must not make the
+	// caller think the change was not applied (the file would then differ
+	// from the running config after the next restart).
+	if _, err := a.st.AppendConfigChange(time.Now(), "api", config.Redact(c), config.Impact{}); err != nil {
+		slog.Warn("config history not recorded", "err", err)
+	}
+	return nil
 }
 
 type requestObserver struct{ m *metrics.Metrics }

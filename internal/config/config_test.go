@@ -218,3 +218,14 @@ func TestClassifyImpact(t *testing.T) {
 		t.Fatalf("profile change is live: %+v", im)
 	}
 }
+
+func TestRestoreRedactedSurvivesArgEdits(t *testing.T) {
+	old := Default()
+	old.Runtime.Args = []string{"--api-key", "sk-123", "--threads", "8"}
+	in := Redact(old)
+	in.Runtime.Args = append([]string{"--flash-attn"}, in.Runtime.Args...) // user adds an arg in front
+	got := RestoreRedacted(in, old).Runtime.Args
+	if strings.Join(got, " ") != "--flash-attn --api-key sk-123 --threads 8" {
+		t.Fatalf("got %v", got)
+	}
+}

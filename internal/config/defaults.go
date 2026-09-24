@@ -11,8 +11,11 @@ func Default() Config {
 	return Config{
 		SchemaVersion: SchemaVersion,
 		Runtime: Runtime{
-			Executable:              `C:\Benchwarmer\llama\llama-server.exe`,
-			ModelPath:               `C:\Benchwarmer\models\model.gguf`,
+			// Under Program Files (admin-only write, the ASR-excluded path):
+			// a user-writable runtime path would let any user swap the
+			// binary the service launches.
+			Executable:              `C:\Program Files\Benchwarmer\runtime\vulkan\llama-server.exe`,
+			ModelPath:               `C:\ProgramData\Benchwarmer\models\model.gguf`,
 			Args:                    []string{},
 			ContextSize:             8192,
 			GPULayers:               999,
@@ -151,6 +154,18 @@ func DefaultApplications() []AppRule {
 		{Name: "GOG Galaxy", Exe: "GalaxyClient.exe", Class: ClassLauncher},
 		{Name: "Riot Client", Exe: "RiotClientServices.exe", Class: ClassLauncher},
 		{Name: "Xbox app", Exe: "XboxPcApp.exe", Class: ClassLauncher},
+		// Launcher UI helpers: they use the GPU to draw the store pages and
+		// run as launcher children, so they must not look like games.
+		{Name: "EA app web engine", Exe: "QtWebEngineProcess.exe", Class: ClassLauncher},
+		{Name: "EA background service", Exe: "EABackgroundService.exe", Class: ClassLauncher},
+		{Name: "Ubisoft web core", Exe: "UplayWebCore.exe", Class: ClassLauncher},
+		{Name: "Ubisoft Connect", Exe: "UbisoftConnect.exe", Class: ClassLauncher},
+		{Name: "GOG Galaxy helper", Exe: "GalaxyClient Helper.exe", Class: ClassLauncher},
+		{Name: "Riot Client UI", Exe: "RiotClientUx.exe", Class: ClassLauncher},
+		{Name: "Riot Client UI render", Exe: "RiotClientUxRender.exe", Class: ClassLauncher},
+		{Name: "Battle.net helper", Exe: "Agent.exe", Class: ClassLauncher},
+		{Name: "Epic Online Services", Exe: "EpicOnlineServicesUserHelper.exe", Class: ClassLauncher},
+		{Name: "Steam client service", Exe: "steamservice.exe", Class: ClassLauncher},
 		// Redistributable installers live in the library but are not games.
 		{Name: "Steam redistributables", Glob: `*\steamapps\common\Steamworks Shared\*`, Class: ClassIgnore},
 		// Anything else in a library folder is a game.

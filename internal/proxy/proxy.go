@@ -145,10 +145,26 @@ func authorized(r *http.Request, o Options) bool {
 	}
 	need := tok != "" && (!isLoopback(r) || (o.RequireToken != nil && o.RequireToken()))
 	if !need {
-		return true
+		// Tokenless use relies on the caller being local. A browser page
+		// reaching loopback through DNS rebinding carries a foreign Host
+		// header, so require a loopback host name as well.
+		return loopbackHost(r.Host)
 	}
 	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	return ok && subtle.ConstantTimeCompare([]byte(got), []byte(tok)) == 1
+}
+
+func loopbackHost(hostport string) bool {
+	h := hostport
+	if host, _, err := net.SplitHostPort(hostport); err == nil {
+		h = host
+	}
+	h = strings.Trim(h, "[]")
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
 }
 
 func isLoopback(r *http.Request) bool {

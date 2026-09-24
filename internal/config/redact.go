@@ -50,13 +50,35 @@ func RedactArgs(args []string) []string {
 
 // RestoreRedacted merges secrets from old into an incoming config whose
 // values were returned redacted, so a UI can round-trip a config it read.
+// Values are matched by flag name, so adding, removing, or reordering other
+// arguments does not break the round trip. A redacted value with no matching
+// secret in old is left as the literal placeholder and fails validation.
 func RestoreRedacted(incoming, old Config) Config {
 	out := Clone(incoming)
-	oldArgs, oldRed := old.Runtime.Args, RedactArgs(old.Runtime.Args)
-	if len(out.Runtime.Args) == len(oldArgs) {
-		for i, a := range out.Runtime.Args {
-			if strings.Contains(a, Redacted) && oldRed[i] == a {
-				out.Runtime.Args[i] = oldArgs[i]
+	secrets := map[string]string{} // flag name -> original value
+	oa := old.Runtime.Args
+	for i := 0; i < len(oa); i++ {
+		name, val, hasEq := strings.Cut(oa[i], "=")
+		if !strings.HasPrefix(name, "-") {
+			continue
+		}
+		if hasEq {
+			secrets[name] = val
+		} else if i+1 < len(oa) && !strings.HasPrefix(oa[i+1], "-") {
+			secrets[name] = oa[i+1]
+		}
+	}
+	a := out.Runtime.Args
+	for i := range a {
+		name, val, hasEq := strings.Cut(a[i], "=")
+		switch {
+		case hasEq && val == Redacted:
+			if v, ok := secrets[name]; ok {
+				a[i] = name + "=" + v
+			}
+		case a[i] == Redacted && i > 0:
+			if v, ok := secrets[a[i-1]]; ok {
+				a[i] = v
 			}
 		}
 	}

@@ -769,3 +769,24 @@ func TestFailedKillIsRetriedAndBlocksNewRuntime(t *testing.T) {
 		t.Fatalf("instances %d", r.ad.count())
 	}
 }
+
+func TestUntilRebootSurvivesServiceRestartInSameBoot(t *testing.T) {
+	p := &memPersist{}
+	boot := time.Date(2026, 9, 23, 8, 0, 0, 0, chicago)
+	mk := func(bt time.Time) *rig {
+		r := newRig(t, nil)
+		r.c.d.Persist, r.c.d.BootTime = p, func() (time.Time, error) { return bt, nil }
+		r.c.Start()
+		return r
+	}
+	r := mk(boot)
+	if _, err := r.c.SetMode(api.ModeRequest{Mode: policy.ModePause, Duration: "until_reboot"}); err != nil {
+		t.Fatal(err)
+	}
+	if r2 := mk(boot); r2.c.mode.Mode != policy.ModePause {
+		t.Fatalf("same boot: mode %s", r2.c.mode.Mode)
+	}
+	if r3 := mk(boot.Add(time.Hour)); r3.c.mode.Mode != policy.ModeAuto {
+		t.Fatalf("after reboot: mode %s", r3.c.mode.Mode)
+	}
+}

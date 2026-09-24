@@ -117,6 +117,12 @@ func (c *Controller) observe(now time.Time) {
 	if c.d.Facts != nil {
 		c.gpu, c.apps, c.session = c.d.Facts.Build(now, in)
 	}
+	// Until the release of our own VRAM is confirmed (or times out), memory
+	// the driver has not freed yet is ours, not a competing workload.
+	if c.vram.active && c.vram.footprint > 0 && !c.st.RuntimeRunning() {
+		c.gpu.ExternalVRAMMiB = max(0, c.gpu.ExternalVRAMMiB-c.vram.footprint)
+		c.gpu.ExternalVRAMGrowthMiB = 0
+	}
 	if c.d.Metrics != nil {
 		c.d.Metrics.SetGPU(c.gpu)
 	}
@@ -147,8 +153,17 @@ func (c *Controller) trackTelemetryHealth(now time.Time) {
 	}
 	if c.telemetryLost && g.Confidence != policy.ConfidenceNone {
 		c.telemetryLost = false
-		c.emit(events.Event{Time: now, Type: events.TelemetryRecovered, Message: "GPU telemetry recovered (confidence " + string(g.Confidence) + ")"})
-		c.setRecovery(now, c.cfg.Recovery.TelemetryRecoveryCooldown.D(), "telemetry recovery")
+		// Escalate: a load that itself breaks the counters must not cycle
+		// load, loss, recover, load forever. Reset after a stable run.
+		c.telemetryLosses++
+		d := c.cfg.Recovery.TelemetryRecoveryCooldown.D()
+		for i := 1; i < c.telemetryLosses && d < c.cfg.Recovery.CrashBackoffMax.D(); i++ {
+			d *= 2
+		}
+		d = min(d, c.cfg.Recovery.CrashBackoffMax.D())
+		c.emit(events.Event{Time: now, Type: events.TelemetryRecovered,
+			Message: fmt.Sprintf("GPU telemetry recovered (confidence %s); waiting %s before loading (loss %d)", g.Confidence, d, c.telemetryLosses)})
+		c.setRecovery(now, d, fmt.Sprintf("telemetry recovery (loss %d)", c.telemetryLosses))
 	}
 }
 
@@ -459,11 +474,24 @@ func (c *Controller) checkVRAMRelease(now time.Time) {
 }
 
 func (c *Controller) checkCrashReset(now time.Time) {
-	if c.crashCount > 0 && c.st.Admitting() && !c.loadedAt.IsZero() && now.Sub(c.loadedAt) >= c.cfg.Recovery.CrashResetAfter.D() {
-		c.crashCount = 0
+	if c.st.Admitting() && !c.loadedAt.IsZero() && now.Sub(c.loadedAt) >= c.cfg.Recovery.CrashResetAfter.D() {
+		c.crashCount, c.telemetryLosses = 0, 0
 	}
-	if c.st.Admitting() && c.gpu.OwnVRAMMiB > c.footprint && now.Sub(c.loadedAt) < 30*time.Second {
-		c.footprint = c.gpu.OwnVRAMMiB
+	// Learn the loaded footprint in the first 30 s after loading. With
+	// attribution, own VRAM is measured directly; without it, the growth of
+	// adapter usage over the pre-load baseline is the best estimate (own VRAM
+	// is otherwise capped at the stored footprint and could never grow).
+	if c.st.Admitting() && now.Sub(c.loadedAt) < 30*time.Second {
+		candidate := 0
+		switch c.gpu.Confidence {
+		case policy.ConfidenceHigh:
+			candidate = c.gpu.OwnVRAMMiB
+		case policy.ConfidenceDegraded:
+			candidate = c.gpu.VRAMUsedMiB - c.baseline
+		}
+		if candidate > c.footprint {
+			c.footprint = candidate
+		}
 	}
 }
 

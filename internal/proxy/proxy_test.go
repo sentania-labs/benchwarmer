@@ -348,3 +348,16 @@ func TestOnlyV1Served(t *testing.T) {
 		t.Fatalf("got %d", resp.StatusCode)
 	}
 }
+
+func TestLoopbackWithoutTokenRejectsForeignHost(t *testing.T) {
+	r := newRig(t, upstream(t, 1, 0))
+	h := r.srv.Config.Handler
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
+	req.RemoteAddr = "127.0.0.1:5555"
+	req.Host = "evil.example.com:8480" // DNS-rebound page
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 401 {
+		t.Fatalf("foreign Host on loopback without token: %d", rec.Code)
+	}
+}

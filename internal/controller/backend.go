@@ -136,11 +136,17 @@ func (c *Controller) UpdateConfig(_ context.Context, nc config.Config, actor str
 	}
 	im := config.Classify(c.cfg, nc)
 	c.cfg, c.cfgSource = nc, "primary"
+	c.schedCacheValid = false
 	if im.ServiceRestart {
 		c.restartNeeded = true
 	}
-	if im.RuntimeReload && c.st.RuntimeRunning() && c.st != state.Draining && c.st != state.Preempting {
-		c.manualPending = "reload"
+	if im.RuntimeReload {
+		// A different model or context has a different footprint; relearn
+		// it on the next load rather than trusting the old figure.
+		c.footprint = 0
+		if c.st.RuntimeRunning() && c.st != state.Draining && c.st != state.Preempting {
+			c.manualPending = "reload"
+		}
 	}
 	c.emit(events.Event{Time: now, Type: events.ConfigChanged,
 		Message: fmt.Sprintf("Configuration updated by %s: %s", actor, strings.Join(im.Changed, ", ")),
@@ -190,7 +196,7 @@ func (c *Controller) Status() api.Status {
 	name, src := c.activeProfile(now)
 	s.Profile = api.ProfileStatus{Active: name, Source: src, Timezone: c.cfg.Timezone}
 	if c.mode.Mode != policy.ModeAIPriority {
-		s.Profile.NextChange = schedule.NextChange(c.cfg, now)
+		s.Profile.NextChange = c.nextScheduleChange(now)
 	}
 	n, oldest := 0, time.Duration(0)
 	if c.d.Gate != nil {
@@ -217,6 +223,17 @@ func (c *Controller) Status() api.Status {
 	}
 	s.Summary = c.summary(now, s)
 	return s
+}
+
+// nextScheduleChange caches schedule.NextChange until the cached instant
+// passes or the config changes; the full scan is too slow to run under the
+// controller lock on every status read.
+func (c *Controller) nextScheduleChange(now time.Time) time.Time {
+	if c.schedCacheValid && (c.schedCache.IsZero() || now.Before(c.schedCache)) && now.Sub(c.schedCacheAt) < time.Hour {
+		return c.schedCache
+	}
+	c.schedCache, c.schedCacheAt, c.schedCacheValid = schedule.NextChange(c.cfg, now), now, true
+	return c.schedCache
 }
 
 func (c *Controller) timerStatus(now time.Time, d policy.Decision) api.TimerStatus {
@@ -333,13 +350,15 @@ func (c *Controller) Shutdown(timeout time.Duration) {
 	c.mu.Unlock()
 	c.waitStopped(timeout)
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.inst != nil {
-		// Out of time: kill without waiting for policy.
-		_, _ = c.inst.Stop(2 * time.Second)
-		c.inst = nil
-	}
+	inst := c.inst
+	c.inst = nil
 	c.persist()
+	c.mu.Unlock()
+	if inst != nil {
+		// Out of time: kill without waiting for policy, outside the lock.
+		// If the process exits anyway, the Job Object kills the tree.
+		_, _ = inst.Stop(2 * time.Second)
+	}
 }
 
 func (c *Controller) waitStopped(timeout time.Duration) {

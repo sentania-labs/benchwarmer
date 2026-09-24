@@ -67,9 +67,13 @@ type EventReader interface {
 
 // Persisted is the controller state that survives a service restart.
 type Persisted struct {
-	Mode            policy.ModeFacts  `json:"mode"`
-	ModeSetAt       time.Time         `json:"mode_set_at,omitzero"`
-	UntilReboot     bool              `json:"until_reboot,omitempty"`
+	Mode        policy.ModeFacts `json:"mode"`
+	ModeSetAt   time.Time        `json:"mode_set_at,omitzero"`
+	UntilReboot bool             `json:"until_reboot,omitempty"`
+	// BootTime is the system boot time when the state was saved; an
+	// "until reboot" mode survives a service restart within the same boot.
+	BootTime        time.Time         `json:"boot_time,omitzero"`
+	TelemetryLosses int               `json:"telemetry_losses,omitempty"`
 	Timers          policy.TimerFacts `json:"timers"`
 	CrashCount      int               `json:"crash_count"`
 	FootprintMiB    int               `json:"footprint_mib"`
@@ -116,8 +120,10 @@ type Deps struct {
 	Persist      Persist     // optional
 	Metrics      Metrics     // optional
 	Now          func() time.Time
-	Log          *slog.Logger
-	Version      string
+	// BootTime reports the system boot time (optional).
+	BootTime func() (time.Time, error)
+	Log      *slog.Logger
+	Version  string
 }
 
 type loadResult struct {
@@ -176,12 +182,13 @@ type Controller struct {
 	procsOK      bool
 	lastProcScan time.Time
 
-	decision      policy.Decision
-	lastEvaluated time.Time
-	telemetryLost bool
-	manualPending string // "drain" or "reload" requested by the API
-	persisted     []byte
-	recentErrors  []events.Event
+	decision        policy.Decision
+	lastEvaluated   time.Time
+	telemetryLost   bool
+	telemetryLosses int    // consecutive losses, for escalating recovery
+	manualPending   string // "drain" or "reload" requested by the API
+	persisted       []byte
+	recentErrors    []events.Event
 
 	// zombie is a runtime whose termination is not verified (failed kill,
 	// crash, failed load). No new runtime starts while it is set; its stop
@@ -190,6 +197,10 @@ type Controller struct {
 	zombieStopping bool
 	zombieRetryAt  time.Time
 	zombieAttempts int
+
+	schedCache      time.Time
+	schedCacheAt    time.Time
+	schedCacheValid bool
 
 	// cond mirrors st.Condition() for lock-free readers (the proxy sets a
 	// response header on every request).
@@ -236,11 +247,19 @@ func (c *Controller) Start() {
 			c.timers = p.Timers
 			c.timers.RecoveryUntil, c.timers.RecoveryReason = time.Time{}, ""
 			c.crashCount, c.footprint, c.lastLoadS = p.CrashCount, p.FootprintMiB, p.LastLoadSeconds
-			// A mode "until reboot" does not survive a restart; an expired
-			// temporary mode reverts to auto.
-			if !p.UntilReboot && (p.Mode.Until == nil || p.Mode.Until.After(now)) && p.Mode.Mode != "" {
-				c.mode, c.modeSetAt = p.Mode, p.ModeSetAt
+			// An expired temporary mode reverts to auto; "until reboot"
+			// survives a service restart only within the same boot.
+			sameBoot := false
+			if p.UntilReboot && c.d.BootTime != nil && !p.BootTime.IsZero() {
+				if bt, err := c.d.BootTime(); err == nil {
+					d := bt.Sub(p.BootTime)
+					sameBoot = d > -2*time.Minute && d < 2*time.Minute
+				}
 			}
+			if (!p.UntilReboot || sameBoot) && (p.Mode.Until == nil || p.Mode.Until.After(now)) && p.Mode.Mode != "" {
+				c.mode, c.modeSetAt, c.untilReboot = p.Mode, p.ModeSetAt, p.UntilReboot
+			}
+			c.telemetryLosses = p.TelemetryLosses
 		}
 	}
 	c.emit(events.Event{Time: now, Type: events.ServiceStarted, State: c.st, Condition: c.st.Condition(),
@@ -365,7 +384,10 @@ func (c *Controller) persist() {
 		return
 	}
 	p := Persisted{Mode: c.mode, ModeSetAt: c.modeSetAt, UntilReboot: c.untilReboot, Timers: c.timers,
-		CrashCount: c.crashCount, FootprintMiB: c.footprint, LastLoadSeconds: c.lastLoadS}
+		CrashCount: c.crashCount, FootprintMiB: c.footprint, LastLoadSeconds: c.lastLoadS, TelemetryLosses: c.telemetryLosses}
+	if c.d.BootTime != nil {
+		p.BootTime, _ = c.d.BootTime()
+	}
 	b, _ := json.Marshal(p)
 	if string(b) == string(c.persisted) {
 		return

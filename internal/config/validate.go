@@ -190,6 +190,9 @@ func validateRuntime(v *validator, r Runtime) {
 		v.add("runtime.model_path", "must be an absolute path")
 	}
 	for i, a := range r.Args {
+		if strings.Contains(a, Redacted) {
+			v.add(fmt.Sprintf("runtime.args[%d]", i), "contains the %s placeholder; re-enter the secret value", Redacted)
+		}
 		name, _, _ := strings.Cut(a, "=")
 		if reservedArgs[name] {
 			v.add(fmt.Sprintf("runtime.args[%d]", i), "%s is set by Benchwarmer; use the dedicated runtime field", name)

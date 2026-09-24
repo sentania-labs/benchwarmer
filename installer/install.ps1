@@ -50,15 +50,37 @@ if ($RuntimeZip) {
   Expand-Archive -Force $RuntimeZip $dest
 }
 
-# 3. Data directory and ACLs.
+# 3. Data directory.
 Step "Preparing $Data"
 New-Item -ItemType Directory -Force $Data, $Secrets, (Join-Path $Data 'models'), (Join-Path $Data 'logs') | Out-Null
-# Data: service and admins full, users read (models, logs readable).
-icacls $Data /inheritance:r /grant:r 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' "${SvcSid}:(OI)(CI)M" 'Users:(OI)(CI)RX' | Out-Null
-# Secrets: no user access except the agent token (below).
-icacls $Secrets /inheritance:r /grant:r 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' "${SvcSid}:(OI)(CI)M" | Out-Null
 
-# 4. Tokens (32 random bytes, base64url), only if missing.
+# 4. Config: keep an existing one; seed the example on first install.
+$cfg = Join-Path $Data 'config.json'
+if (-not (Test-Path $cfg) -and (Test-Path (Join-Path $Src 'config.example.json'))) {
+  Copy-Item (Join-Path $Src 'config.example.json') $cfg
+}
+
+# 5. Service registration. This comes before the ACLs: the virtual account
+# NT SERVICE\Benchwarmer only resolves to a SID once the service exists.
+Step "Registering service ($SvcSid)"
+& (Join-Path $Prog 'benchwarmer.exe') service install --account $Account --data $Data
+if ($LASTEXITCODE -ne 0) { throw "service install failed ($LASTEXITCODE)" }
+
+# 6. ACLs. Every icacls call is checked: a silent failure would leave
+# secrets with the permissive ProgramData defaults.
+function Set-Acl-Checked([string] $Path, [string[]] $IcaclsArgs) {
+  & icacls $Path @IcaclsArgs | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Path ($LASTEXITCODE)" }
+}
+# Data (config, database, history): service and administrators only. The
+# config can carry runtime arguments with secrets.
+Set-Acl-Checked $Data @('/inheritance:r', '/grant:r', 'SYSTEM:(OI)(CI)F', 'Administrators:(OI)(CI)F', "${SvcSid}:(OI)(CI)M")
+# Logs contain no secrets or prompts; readable by local users for support.
+Set-Acl-Checked (Join-Path $Data 'logs') @('/grant', 'Users:(OI)(CI)RX')
+# Models: readable by users (large, not secret).
+Set-Acl-Checked (Join-Path $Data 'models') @('/grant', 'Users:(OI)(CI)RX')
+
+# 7. Tokens (32 random bytes, base64url), only if missing.
 function New-Token {
   $b = New-Object byte[] 32
   [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
@@ -71,25 +93,17 @@ foreach ($t in 'management', 'inference', 'agent') {
     Set-Content -Path $p -Value (New-Token) -NoNewline -Encoding ascii
   }
 }
-# The tray runs as the interactive user and needs the agent token only.
-icacls (Join-Path $Secrets 'agent.token') /grant 'INTERACTIVE:R' | Out-Null
+# The tray runs as the interactive user and needs the agent token only. It
+# must traverse the data and secrets folders to reach it.
+Set-Acl-Checked $Data @('/grant', 'INTERACTIVE:(X)')
+Set-Acl-Checked $Secrets @('/grant', 'INTERACTIVE:(X)')
+Set-Acl-Checked (Join-Path $Secrets 'agent.token') @('/grant', 'INTERACTIVE:R')
 
-# 5. Config: keep an existing one; seed the example on first install.
-$cfg = Join-Path $Data 'config.json'
-if (-not (Test-Path $cfg) -and (Test-Path (Join-Path $Src 'config.example.json'))) {
-  Copy-Item (Join-Path $Src 'config.example.json') $cfg
-}
-
-# 6. Service registration.
-Step "Registering service ($SvcSid)"
-& (Join-Path $Prog 'benchwarmer.exe') service install --account $Account --data $Data
-if ($LASTEXITCODE -ne 0) { throw "service install failed ($LASTEXITCODE)" }
-
-# 7. Tray for every user session.
+# 8. Tray for every user session.
 Step 'Registering tray app'
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'Benchwarmer Tray' -Value "`"$(Join-Path $Prog 'bwtray.exe')`""
 
-# 8. Start and verify.
+# 9. Start and verify.
 Step 'Starting service'
 Start-Service $Name
 $ok = $false
@@ -100,7 +114,7 @@ for ($i = 0; $i -lt 30 -and -not $ok; $i++) {
 if (-not $ok) { throw 'Service did not answer on http://127.0.0.1:8481/api/v1/health within 30 s; see the event log and logs folder.' }
 Write-Host "Service healthy (version $($h.version))."
 
-# 9. Policy prerequisites.
+# 10. Policy prerequisites.
 $excl = (Get-MpPreference).AttackSurfaceReductionOnlyExclusions
 if (-not ($excl | Where-Object { $_.TrimEnd('\') -ieq $Prog.TrimEnd('\') })) {
   Write-Warning "No Defender ASR exclusion for $Prog was found. If ASR rule 01443614-cd74-433a-b99e-2ecdc07bfc25 is in Block mode, the runtime and tray will be blocked. See docs/deploy/policy-requirements.md."

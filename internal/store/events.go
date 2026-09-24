@@ -10,8 +10,10 @@ import (
 	"github.com/sentania-labs/benchwarmer/internal/events"
 )
 
-// MaxEventsLimit caps one Events query.
-const MaxEventsLimit = 1000
+// MaxEventsLimit caps one Events query. It is one more than the API's
+// largest page so the API's look-ahead row (used to decide whether an older
+// page exists) is never truncated away.
+const MaxEventsLimit = 1001
 
 // EventQuery selects events newest first. Limit <= 0 means 100; it is capped
 // at MaxEventsLimit. BeforeID > 0 returns only events with a smaller ID (for

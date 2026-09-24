@@ -20,6 +20,10 @@ func Active(c config.Config, now time.Time) (profile, source string) {
 		// Validation rejects bad zones; fail safe to the default profile.
 		return c.DefaultProfile, "default"
 	}
+	return activeIn(c, now, loc)
+}
+
+func activeIn(c config.Config, now time.Time, loc *time.Location) (profile, source string) {
 	local := now.In(loc)
 	for _, s := range c.Schedules {
 		if s.Enabled && inWindow(s, local) {
@@ -61,10 +65,21 @@ func hasDay(s config.Schedule, d time.Weekday) bool {
 // changes, searching up to eight days ahead at minute resolution. Zero means
 // no change in that horizon.
 func NextChange(c config.Config, now time.Time) time.Time {
-	cur, curSrc := Active(c, now)
+	loc, err := time.LoadLocation(c.Timezone)
+	if err != nil {
+		return time.Time{}
+	}
+	hasEnabled := false
+	for _, s := range c.Schedules {
+		hasEnabled = hasEnabled || s.Enabled
+	}
+	if !hasEnabled {
+		return time.Time{}
+	}
+	cur, curSrc := activeIn(c, now, loc)
 	t := now.Truncate(time.Minute).Add(time.Minute)
 	for end := now.Add(8 * 24 * time.Hour); t.Before(end); t = t.Add(time.Minute) {
-		if p, src := Active(c, t); p != cur || src != curSrc {
+		if p, src := activeIn(c, t, loc); p != cur || src != curSrc {
 			return t
 		}
 	}

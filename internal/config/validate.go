@@ -160,8 +160,6 @@ func Validate(c Config) error {
 	} {
 		if p == "" {
 			v.add(field, "is required")
-		} else if err := dataRelative(p); err != nil {
-			v.add(field, "%v", err)
 		}
 	}
 
@@ -314,6 +312,21 @@ func ValidateChange(c Config) error {
 	v := &validator{}
 	if t := c.Listen.InferenceTLS; t.Enabled && isPFXPath(t.CertFile) {
 		v.add("listen.inference_tls.cert_file", "%s", PFXHelp)
+	}
+	// Token paths: new values must stay inside the data folder. A file
+	// written by an older version with an absolute path still loads;
+	// provisioning then refuses a path outside the data folder at run time
+	// (temporary tokens, no model load, reported), instead of the whole
+	// config falling back to defaults.
+	sec := c.Security
+	for field, p := range map[string]string{
+		"security.management_token_file": sec.ManagementTokenFile,
+		"security.inference_token_file":  sec.InferenceTokenFile,
+		"security.agent_token_file":      sec.AgentTokenFile,
+	} {
+		if err := dataRelative(p); p != "" && err != nil {
+			v.add(field, "%v", err)
+		}
 	}
 	return v.err()
 }

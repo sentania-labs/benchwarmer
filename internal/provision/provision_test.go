@@ -276,13 +276,32 @@ func TestDirTargets(t *testing.T) {
 func TestTokenTargets(t *testing.T) {
 	dir := filepath.Join("C:", "ProgramData", "Benchwarmer")
 	ts := TokenTargets(dir, defaultFiles())
-	for i, x := range ts {
+	if len(ts) != 4 {
+		t.Fatalf("targets %+v", ts)
+	}
+	for i, x := range ts[:3] {
 		if !x.Protected || !x.Secret {
 			t.Errorf("%s: token files must be protected and secret", x.Path)
 		}
 		if got := strings.Contains(x.SDDL, ";IU)"); got != (i == 2) {
 			t.Errorf("%s: interactive access %v", x.Path, got)
 		}
+	}
+	// The interactive user can reach the agent token through secrets.
+	if ts[3].Path != filepath.Join(dir, "secrets") || ts[3].SDDL != SecretsSDDL || ts[3].Protected {
+		t.Errorf("agent token parent %+v", ts[3])
+	}
+	// A nested agent token gets traverse on every folder above it.
+	f := defaultFiles()
+	f.Agent = `keys\sub\agent.token`
+	ts = TokenTargets(dir, f)
+	var parents []string
+	for _, x := range ts[3:] {
+		parents = append(parents, x.Path)
+	}
+	want := []string{filepath.Join(dir, "keys", "sub"), filepath.Join(dir, "keys")}
+	if strings.Join(parents, "|") != strings.Join(want, "|") {
+		t.Errorf("parents %v, want %v", parents, want)
 	}
 }
 

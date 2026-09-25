@@ -84,12 +84,20 @@
             Account="LocalSystem"
             Arguments="run --service --data &quot;[CommonAppDataFolder]Benchwarmer&quot;"
             Vital="yes" />
+        <!-- Stopping is waited on: the service drains and stops the runtime
+             before its files are replaced or removed. Starting is not: a
+             start that policy blocks (an ASR exclusion not yet applied)
+             must not roll the install back; recovery actions retry it. -->
         <ServiceControl
-            Id="BenchwarmerServiceControl"
+            Id="BenchwarmerServiceStop"
             Name="Benchwarmer"
-            Start="install"
             Stop="both"
             Remove="uninstall"
+            Wait="yes" />
+        <ServiceControl
+            Id="BenchwarmerServiceStart"
+            Name="Benchwarmer"
+            Start="install"
             Wait="no" />
       </Component>
 

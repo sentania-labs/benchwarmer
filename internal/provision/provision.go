@@ -130,11 +130,19 @@ func DirTargets(dataDir string) []Target {
 
 // TokenTargets are the token file ACLs.
 func TokenTargets(dataDir string, f secrets.Files) []Target {
-	return []Target{
+	agent := secrets.Resolve(dataDir, f.Agent)
+	ts := []Target{
 		{Path: secrets.Resolve(dataDir, f.Management), SDDL: TokenSDDL, Protected: true, Secret: true},
 		{Path: secrets.Resolve(dataDir, f.Inference), SDDL: TokenSDDL, Protected: true, Secret: true},
-		{Path: secrets.Resolve(dataDir, f.Agent), SDDL: AgentTokenSDDL, Protected: true, Secret: true},
+		{Path: agent, SDDL: AgentTokenSDDL, Protected: true, Secret: true},
 	}
+	// The tray reads the agent token as the interactive user, so every
+	// folder between the data folder and it needs traverse for them, not
+	// only the default secrets folder.
+	for d := filepath.Dir(agent); insideDir(dataDir, d); d = filepath.Dir(d) {
+		ts = append(ts, Target{Path: d, SDDL: SecretsSDDL, Secret: true})
+	}
+	return ts
 }
 
 // policyFor is how Start treats an entry, by its path relative to the data
@@ -147,6 +155,9 @@ func policyFor(rel string, dir bool) (Target, bool) {
 		t.Accept = []string{TokenSDDL, AgentTokenSDDL}
 		return t, false
 	}
+	// A folder on the way to a nested agent token keeps the traverse ACE
+	// Finish gives it (Start runs before the config names the token).
+	t.Accept = []string{SecretsSDDL}
 	switch filepath.ToSlash(rel) {
 	case "secrets":
 		t.SDDL = SecretsSDDL
@@ -464,11 +475,7 @@ func (p *Run) tokenSafe(path string) bool {
 }
 
 func tokenPaths(dataDir string, f secrets.Files) []string {
-	var out []string
-	for _, t := range TokenTargets(dataDir, f) {
-		out = append(out, t.Path)
-	}
-	return out
+	return []string{secrets.Resolve(dataDir, f.Management), secrets.Resolve(dataDir, f.Inference), secrets.Resolve(dataDir, f.Agent)}
 }
 
 func ephemeralTokens() (secrets.Tokens, error) {

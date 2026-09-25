@@ -22,11 +22,13 @@ func (c *Controller) step(now time.Time, collect bool) {
 		c.observe(now)
 	}
 	c.trackTelemetryHealth(now)
+	c.checkSetup(now)
 
 	snap := c.snapshot(now)
 	d := policy.Evaluate(snap, c.cfg)
 	d = c.applyManual(d)
 	d = c.applyZombie(d)
+	d = c.applyLoadBlocked(d)
 	if d.Competing {
 		if c.st == state.Cooldown && c.decision.Rule == policy.RuleCooldown {
 			// A competing workload reappeared while the cooldown was
@@ -47,6 +49,42 @@ func (c *Controller) step(now time.Time, collect bool) {
 	c.checkCrashReset(now)
 	c.publish(now)
 	c.persist()
+}
+
+// checkSetup confirms, while nothing is running, that the runtime could be
+// started: the executable and model files exist. A fresh install has no
+// model, and reporting that is better than failing a load every backoff
+// period. Checked every few seconds, so a model copied in is noticed.
+func (c *Controller) checkSetup(now time.Time) {
+	if c.st.RuntimeRunning() || c.d.Adapter == nil {
+		return
+	}
+	if c.setupResult == nil {
+		if !c.lastSetupCheck.IsZero() && now.Sub(c.lastSetupCheck) < 5*time.Second {
+			return
+		}
+		c.lastSetupCheck = now
+		// The check stats files, which can hang on an unreachable network
+		// path; it runs outside the controller so it cannot stall it.
+		ch := make(chan string, 1)
+		c.setupResult = ch
+		adapter, rt := c.d.Adapter, c.cfg.Runtime
+		go func() {
+			p := ""
+			if err := adapter.Validate(rt); err != nil {
+				p = strings.ReplaceAll(err.Error(), "\n", "; ")
+			}
+			ch <- p
+			c.signalWake()
+		}()
+	}
+	// Usually a local stat answers at once; otherwise keep the last answer
+	// and pick this one up on a later step.
+	select {
+	case p := <-c.setupResult:
+		c.setupProblem, c.setupResult = p, nil
+	case <-time.After(200 * time.Millisecond):
+	}
 }
 
 // absorbAsync handles results from load and stop goroutines and unexpected
@@ -177,7 +215,7 @@ func (c *Controller) snapshot(now time.Time) policy.Snapshot {
 		Now:  now,
 		Mode: c.mode,
 		Runtime: policy.RuntimeFacts{State: c.st, ActiveRequests: n, OldestRequestAge: oldest,
-			DrainingSince: c.drainStart, FootprintMiB: c.footprint},
+			DrainingSince: c.drainStart, FootprintMiB: c.footprint, SetupProblem: c.setupProblem},
 		GPU: c.gpu, Apps: c.apps, Session: c.session, Power: c.power, Timers: c.timers,
 	}
 	if c.inst != nil {
@@ -701,6 +739,22 @@ func (c *Controller) applyZombie(d policy.Decision) policy.Decision {
 	d.Reason = fmt.Sprintf("Previous runtime (pid %d) not yet confirmed terminated; retrying", c.zombie.PID())
 	d.IdleState = state.Error
 	return d
+}
+
+// RuleSecretsUnprotected holds the worker while Deps.LoadBlocked is set.
+const RuleSecretsUnprotected = "safety.secrets_unprotected"
+
+// applyLoadBlocked replaces the decision while loading is blocked, so the
+// status names the blocking problem rather than whatever the policy would
+// otherwise wait for. The runtime is never started in that case, so there
+// is nothing running to yield.
+func (c *Controller) applyLoadBlocked(d policy.Decision) policy.Decision {
+	if c.d.LoadBlocked == "" || c.st.RuntimeRunning() {
+		return d
+	}
+	return policy.Decision{Action: policy.ActionHold, Rule: RuleSecretsUnprotected, Tier: policy.TierSafety,
+		Severity: policy.SeverityCritical, Reason: c.d.LoadBlocked, Profile: d.Profile, ProfileSource: d.ProfileSource,
+		Mode: d.Mode, IdleState: state.Error}
 }
 
 // backoff schedules a bounded exponential retry after a crash or failed load.

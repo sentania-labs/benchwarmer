@@ -132,8 +132,13 @@ type Deps struct {
 	GPUResetsSince func(time.Time)
 	// BootTime reports the system boot time (optional).
 	BootTime func() (time.Time, error)
-	Log      *slog.Logger
-	Version  string
+	// LoadBlocked, when set, is why no model may be loaded for the life of
+	// this process: the service could not secure its secrets at start (ADR
+	// 0012). The worker stays Unavailable with this reason; everything
+	// else (API, dashboard, events) keeps working.
+	LoadBlocked string
+	Log         *slog.Logger
+	Version     string
 }
 
 type loadResult struct {
@@ -194,6 +199,9 @@ type Controller struct {
 
 	decision        policy.Decision
 	lastEvaluated   time.Time
+	setupProblem    string // why the runtime cannot start at all; see checkSetup
+	lastSetupCheck  time.Time
+	setupResult     chan string // in-flight file check, nil when none
 	telemetryLost   bool
 	telemetryLosses int // consecutive losses, for escalating recovery
 	gpuResets       int // GPU driver resets without a stable run since, for escalating recovery

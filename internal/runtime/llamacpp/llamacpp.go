@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -62,12 +63,20 @@ func New() *Adapter { return &Adapter{owned: map[*Instance]struct{}{}} }
 // non-empty regular file, and the listener is loopback.
 func (a *Adapter) Validate(cfg config.Runtime) error {
 	var errs []error
-	if fi, err := os.Stat(cfg.Executable); err != nil {
+	if cfg.Executable == "" {
+		errs = append(errs, errors.New("no runtime executable is configured"))
+	} else if fi, err := os.Stat(cfg.Executable); errors.Is(err, fs.ErrNotExist) {
+		errs = append(errs, fmt.Errorf("runtime executable %s not found", cfg.Executable))
+	} else if err != nil {
 		errs = append(errs, fmt.Errorf("executable: %w", err))
 	} else if !fi.Mode().IsRegular() {
 		errs = append(errs, fmt.Errorf("executable %s is not a regular file", cfg.Executable))
 	}
-	if fi, err := os.Stat(cfg.ModelPath); err != nil {
+	if cfg.ModelPath == "" {
+		errs = append(errs, errors.New("no model file is chosen"))
+	} else if fi, err := os.Stat(cfg.ModelPath); errors.Is(err, fs.ErrNotExist) {
+		errs = append(errs, fmt.Errorf("model file %s not found", cfg.ModelPath))
+	} else if err != nil {
 		errs = append(errs, fmt.Errorf("model: %w", err))
 	} else if !fi.Mode().IsRegular() {
 		errs = append(errs, fmt.Errorf("model %s is not a regular file", cfg.ModelPath))

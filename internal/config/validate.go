@@ -313,6 +313,21 @@ func ValidateChange(c Config) error {
 	if t := c.Listen.InferenceTLS; t.Enabled && isPFXPath(t.CertFile) {
 		v.add("listen.inference_tls.cert_file", "%s", PFXHelp)
 	}
+	// Token paths: new values must stay inside the data folder. A file
+	// written by an older version with an absolute path still loads;
+	// provisioning then refuses a path outside the data folder at run time
+	// (temporary tokens, no model load, reported), instead of the whole
+	// config falling back to defaults.
+	sec := c.Security
+	for field, p := range map[string]string{
+		"security.management_token_file": sec.ManagementTokenFile,
+		"security.inference_token_file":  sec.InferenceTokenFile,
+		"security.agent_token_file":      sec.AgentTokenFile,
+	} {
+		if err := dataRelative(p); p != "" && err != nil {
+			v.add(field, "%v", err)
+		}
+	}
 	return v.err()
 }
 
@@ -422,4 +437,29 @@ func isAbs(p string) bool {
 	}
 	return len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/') &&
 		((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z'))
+}
+
+// dataRelative checks that a token file reference stays inside the data
+// folder. The service creates token files as SYSTEM and grants the agent
+// token to interactive users, so a path the API could point anywhere
+// would let a token holder create or re-permission files elsewhere. The
+// check is lexical and platform-independent: both separators count.
+func dataRelative(p string) error {
+	s := strings.ReplaceAll(p, `\`, "/")
+	switch {
+	case strings.HasPrefix(s, "/"):
+		return errors.New("must be relative to the data folder (no leading separator or UNC path)")
+	case strings.Contains(s, ":"):
+		// A drive letter, a drive-relative path, or an alternate stream.
+		return errors.New("must be relative to the data folder (no drive letter or colon)")
+	}
+	for _, seg := range strings.Split(s, "/") {
+		if seg == ".." {
+			return errors.New("must stay inside the data folder (no .. segments)")
+		}
+	}
+	if c := filepath.ToSlash(filepath.Clean(filepath.FromSlash(s))); c == "." {
+		return errors.New("must name a file inside the data folder")
+	}
+	return nil
 }

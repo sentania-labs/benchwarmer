@@ -85,9 +85,14 @@ type fakeAdapter struct {
 	reconciles int
 	startErr   error
 	autoReady  bool
+	invalid    error // returned by Validate
 }
 
-func (a *fakeAdapter) Validate(config.Runtime) error { return nil }
+func (a *fakeAdapter) Validate(config.Runtime) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.invalid
+}
 func (a *fakeAdapter) Start(context.Context, config.Runtime) (runtime.Instance, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -882,5 +887,59 @@ func TestGPUResetNotRecountedAfterRestart(t *testing.T) {
 	newRigWith(t, p, func(d *Deps) { d.GPUResetsSince = func(t time.Time) { since = t } })
 	if since.Before(dump) {
 		t.Fatalf("watermark %v is before the handled dump %v: it would be counted again", since, dump)
+	}
+}
+
+// A fresh install has no model: the controller reports setup required
+// instead of attempting loads, and loads once the file appears.
+func TestSetupRequiredUntilModelAppears(t *testing.T) {
+	r := newRig(t, nil)
+	r.ad.mu.Lock()
+	r.ad.invalid = errors.New(`model file C:\ProgramData\Benchwarmer\models\model.gguf not found`)
+	r.ad.mu.Unlock()
+	r.clk.Advance(3 * time.Minute) // past the startup wait
+	for i := 0; i < 5; i++ {
+		r.c.Step(true)
+	}
+	st := r.c.Status()
+	if st.Decision.Rule != policy.RuleSetupRequired || r.state() != state.Stopped {
+		t.Fatalf("rule %s state %s, want setup required while stopped", st.Decision.Rule, r.state())
+	}
+	if len(r.ad.insts) != 0 {
+		t.Fatal("a load was attempted without a model")
+	}
+	r.ad.mu.Lock()
+	r.ad.invalid = nil
+	r.ad.mu.Unlock()
+	r.clk.Advance(6 * time.Second) // next file check
+	r.stepUntil(state.Ready)
+}
+
+// A service that could not secure its secrets never loads, and says why,
+// even once every other rule would allow a load.
+func TestLoadBlockedNeverLoads(t *testing.T) {
+	const why = "Data folder permissions could not be secured"
+	r := newRigWith(t, nil, func(d *Deps) { d.LoadBlocked = why })
+	r.c.Step(true)
+	r.clk.Advance(10 * time.Minute)
+	for range 5 {
+		r.c.Step(true)
+		time.Sleep(2 * time.Millisecond)
+	}
+	st := r.c.Status()
+	if st.Condition != state.Unavailable || st.State != state.Error {
+		t.Fatalf("condition %s state %s", st.Condition, st.State)
+	}
+	if st.Decision.Rule != RuleSecretsUnprotected || st.Decision.Reason != why {
+		t.Fatalf("decision %q: %q", st.Decision.Rule, st.Decision.Reason)
+	}
+	r.ad.mu.Lock()
+	n := len(r.ad.insts)
+	r.ad.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("runtime started %d time(s)", n)
+	}
+	if code := r.post(); code != http.StatusServiceUnavailable {
+		t.Fatalf("inference status %d", code)
 	}
 }

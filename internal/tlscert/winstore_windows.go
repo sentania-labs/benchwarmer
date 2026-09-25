@@ -112,6 +112,40 @@ func storeCertificate(thumbprint, subject string) (*tls.Certificate, error) {
 	return &tls.Certificate{Certificate: chain, PrivateKey: signer, Leaf: bestLeaf}, nil
 }
 
+// ListStore describes the certificates in LocalMachine\My that could serve
+// the inference listener: currently valid, allowed for server
+// authentication, and with a private key. It feeds the dashboard's picker.
+func ListStore() ([]StoreCert, error) {
+	name, _ := windows.UTF16PtrFromString("MY")
+	store, err := windows.CertOpenStore(windows.CERT_STORE_PROV_SYSTEM, 0, 0,
+		windows.CERT_SYSTEM_STORE_LOCAL_MACHINE|windows.CERT_STORE_READONLY_FLAG, uintptr(unsafe.Pointer(name)))
+	if err != nil {
+		return nil, fmt.Errorf("tls: open LocalMachine\\My: %w", err)
+	}
+	defer windows.CertCloseStore(store, 0)
+	now := time.Now()
+	out := []StoreCert{}
+	var prev *windows.CertContext
+	for {
+		ctx, err := windows.CertFindCertificateInStore(store, windows.X509_ASN_ENCODING|windows.PKCS_7_ASN_ENCODING, 0,
+			windows.CERT_FIND_ANY, nil, prev)
+		if err != nil {
+			break // CRYPT_E_NOT_FOUND ends the enumeration and frees prev
+		}
+		prev = ctx
+		der := append([]byte(nil), unsafe.Slice(ctx.EncodedCert, ctx.Length)...)
+		leaf, err := x509.ParseCertificate(der)
+		if err != nil || now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) || !usableForServer(leaf) || !hasPrivateKey(ctx) {
+			continue
+		}
+		sum := sha1.Sum(der)
+		out = append(out, StoreCert{Thumbprint: strings.ToUpper(hex.EncodeToString(sum[:])), Subject: leaf.Subject.String(),
+			Issuer: leaf.Issuer.String(), DNSNames: leaf.DNSNames, NotAfter: leaf.NotAfter,
+			SelfSigned: leaf.Subject.String() == leaf.Issuer.String()})
+	}
+	return out, nil
+}
+
 // matchesSubject accepts a DNS name the certificate is valid for (including
 // through a wildcard) or, failing that, a substring of the subject DN.
 func matchesSubject(c *x509.Certificate, s string) bool {

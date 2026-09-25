@@ -4,10 +4,12 @@
 // Usage:
 //
 //	benchwarmer run [--data DIR] [--service] [--simulate-gpu [--sim-control FILE]]
-//	benchwarmer service install [--account virtual|system] [--data DIR]
+//	benchwarmer service install [--account system] [--data DIR]
 //	benchwarmer service remove
+//	benchwarmer service restart [--delay D]
 //	benchwarmer config default
 //	benchwarmer config validate FILE
+//	benchwarmer login [--code CODE] [--data DIR]
 //	benchwarmer version
 package main
 
@@ -20,6 +22,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/sentania-labs/benchwarmer/internal/config"
 	"github.com/sentania-labs/benchwarmer/internal/logfile"
@@ -41,7 +44,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: benchwarmer run|service|config|version (see package documentation)")
+		return errors.New("usage: benchwarmer run|service|config|login|version (see package documentation)")
 	}
 	switch args[0] {
 	case "run":
@@ -50,6 +53,8 @@ func run(args []string) error {
 		return cmdService(args[1:])
 	case "config":
 		return cmdConfig(args[1:])
+	case "login":
+		return cmdLogin(args[1:])
 	case "version":
 		fmt.Println(version.Version)
 		return nil
@@ -65,21 +70,20 @@ func cmdRun(args []string) error {
 	simCtl := fs.String("sim-control", "", "development only: JSON file injecting simulated competing load")
 	_ = fs.Parse(args)
 
+	// The service logs to a file, but the file is opened only after
+	// service.New has provisioned the data folder (ADR 0012): before that
+	// the config and the logs folder may have been planted by a non-admin,
+	// and SYSTEM must not write where they point. Early lines are held in
+	// memory and written once the file is open.
 	var out io.Writer = os.Stderr
-	cfg, _ := peekConfig(*data)
+	early := &earlyLog{}
 	if *asService {
-		dir := cfg.Logging.Dir
-		if dir == "" {
-			dir = filepath.Join(*data, "logs")
-		}
-		lf, err := logfile.Open(filepath.Join(dir, "benchwarmer.log"), int64(cfg.Retention.LogMaxMB)<<20, cfg.Retention.LogFiles)
-		if err != nil {
-			return err
-		}
-		defer lf.Close()
-		out = lf
+		out = early
 	}
-	log := slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: level(cfg.Logging.Level)}))
+	cfg, _ := peekConfig(*data) // log level only
+	lv := new(slog.LevelVar)
+	lv.Set(level(cfg.Logging.Level))
+	log := slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: lv}))
 	slog.SetDefault(log)
 
 	if *asService {
@@ -89,9 +93,29 @@ func cmdRun(args []string) error {
 			log.Warn("no console for graceful runtime stop; runtime stops will hard-kill", "err", err)
 		}
 	}
-	svc, err := service.New(service.Options{DataDir: *data, SimulateGPU: *sim, SimControl: *simCtl, Log: log, UI: webui.Handler()})
+	so := service.Options{DataDir: *data, SimulateGPU: *sim, SimControl: *simCtl, Log: log, UI: webui.Handler()}
+	if *asService {
+		so.ServiceName = serviceName
+	}
+	svc, err := service.New(so)
 	if err != nil {
 		return err
+	}
+	if *asService {
+		c, _ := svc.Controller().Config() // provisioned, trusted config
+		lv.Set(level(c.Logging.Level))
+		dir := c.Logging.Dir
+		if dir == "" {
+			dir = filepath.Join(*data, "logs")
+		}
+		if fi, lerr := os.Lstat(dir); lerr == nil && fi.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+			log.Error("log folder is a link or junction; not writing a log file there", "dir", dir)
+		} else if lf, err := logfile.Open(filepath.Join(dir, "benchwarmer.log"), int64(c.Retention.LogMaxMB)<<20, c.Retention.LogFiles); err != nil {
+			log.Error("cannot open the log file", "err", err)
+		} else {
+			defer lf.Close()
+			early.switchTo(lf)
+		}
 	}
 	opts := winsvc.Options{Name: serviceName}
 	h := winsvc.HandlerFunc(func(ctx context.Context, evs <-chan winsvc.Event) error { return svc.Run(ctx, evs) })
@@ -158,4 +182,31 @@ func cmdConfig(args []string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown config command %q", args[0])
+}
+
+// earlyLog buffers log output until the log file can be opened safely, then
+// writes the buffer to it and passes everything through.
+type earlyLog struct {
+	mu  sync.Mutex
+	buf []byte
+	w   io.Writer
+}
+
+func (e *earlyLog) Write(p []byte) (int, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.w != nil {
+		return e.w.Write(p)
+	}
+	if len(e.buf) < 1<<20 {
+		e.buf = append(e.buf, p...)
+	}
+	return len(p), nil
+}
+
+func (e *earlyLog) switchTo(w io.Writer) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, _ = w.Write(e.buf)
+	e.buf, e.w = nil, w
 }

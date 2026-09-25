@@ -37,6 +37,8 @@ func TestOpenAPIMatchesWireTypes(t *testing.T) {
 		"AppRule": config.AppRule{}, "AntiThrashConfig": config.AntiThrash{}, "RecoveryConfig": config.Recovery{},
 		"ModesConfig": config.Modes{}, "SignalsConfig": config.Signals{}, "SecurityConfig": config.Security{},
 		"RetentionConfig": config.Retention{}, "MetricsConfig": config.Metrics{}, "LoggingConfig": config.Logging{},
+		"SetupInfo": SetupInfo{}, "ModelFile": ModelFile{}, "RuntimeInstall": RuntimeInstall{}, "StoreCertificate": StoreCertificate{},
+		"SignInCode": SignInCode{}, "SignInRegistered": SignInRegistered{}, "SignInToken": SignInToken{}, "Restarting": Restarting{},
 	}
 	for name, v := range schemas {
 		got := schemaProps(t, doc, name)

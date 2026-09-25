@@ -399,6 +399,35 @@ func TestPolicyTable(t *testing.T) {
 		}, want{action: ActionHold, rule: RuleNoProcessList}},
 
 		// Eligibility and timers.
+		{"missing model holds as setup required", func() Snapshot {
+			s := idle(evening)
+			s.Runtime.SetupProblem = `model file C:\m.gguf not found`
+			return s
+		}, want{action: ActionHold, rule: RuleSetupRequired, idle: state.Stopped}},
+		{"setup required outranks a recovery wait", func() Snapshot {
+			s := idle(evening)
+			s.Runtime.SetupProblem = "no model file is chosen"
+			s.Timers.RecoveryUntil, s.Timers.RecoveryReason = evening.Add(time.Minute), "startup"
+			return s
+		}, want{action: ActionHold, rule: RuleSetupRequired}},
+		{"setup required is shown instead of telemetry lost while idle", func() Snapshot {
+			s := idle(evening)
+			s.Runtime.SetupProblem = "no model file is chosen"
+			s.GPU.Confidence, s.GPU.NoneFor = ConfidenceNone, time.Hour
+			return s
+		}, want{action: ActionHold, rule: RuleSetupRequired}},
+		{"telemetry lost still releases a running runtime", func() Snapshot {
+			s := ready(evening)
+			s.Runtime.SetupProblem = "model file deleted while loaded"
+			s.GPU.Confidence, s.GPU.NoneFor = ConfidenceNone, time.Hour
+			return s
+		}, want{action: ActionPreempt, rule: RuleTelemetryLost}},
+		{"a game still wins over setup required", func() Snapshot {
+			s := idle(evening)
+			s.Runtime.SetupProblem = "no model file is chosen"
+			s.Apps.Games = []AppMatch{game("eldenring.exe")}
+			return s
+		}, want{action: ActionHold, rule: RuleGameProcess}},
 		{"insufficient free VRAM holds", func() Snapshot {
 			s := idle(evening)
 			s.GPU.VRAMFreeMiB = 9000

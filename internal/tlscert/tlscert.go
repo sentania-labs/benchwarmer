@@ -52,6 +52,16 @@ const StoreRefresh = 10 * time.Minute
 
 func (s Source) fromStore() bool { return s.StoreThumbprint != "" || s.StoreSubject != "" }
 
+// StoreCert is a certificate in the Windows store that can serve HTTPS.
+type StoreCert struct {
+	Thumbprint string    `json:"thumbprint"`
+	Subject    string    `json:"subject"`
+	Issuer     string    `json:"issuer"`
+	DNSNames   []string  `json:"dns_names"`
+	NotAfter   time.Time `json:"not_after"`
+	SelfSigned bool      `json:"self_signed"`
+}
+
 // Info describes the certificate in use.
 type Info struct {
 	Subject    string    `json:"subject"`

@@ -86,6 +86,23 @@ func TestStoreCertificateNotFound(t *testing.T) {
 	}
 }
 
+func TestListStoreIncludesUsableCertificate(t *testing.T) {
+	tp := newStoreCert(t, "bw-store-list.example.lan", "-KeyAlgorithm ECDSA_nistP256 -Provider 'Microsoft Software Key Storage Provider'")
+	certs, err := ListStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range certs {
+		if c.Thumbprint == tp {
+			if len(c.DNSNames) == 0 || c.DNSNames[0] != "bw-store-list.example.lan" {
+				t.Fatalf("names %v", c.DNSNames)
+			}
+			return
+		}
+	}
+	t.Fatalf("certificate %s not listed among %d", tp, len(certs))
+}
+
 // A key in a legacy software CSP is opened through CNG's compatibility
 // layer and serves HTTPS. Only when CNG cannot open it (for example some
 // hardware CSPs) is it refused, with an error naming the cause.

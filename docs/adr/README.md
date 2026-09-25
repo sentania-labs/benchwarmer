@@ -13,6 +13,7 @@
 | [0009](0009-installer.md) | Installer and packaging | Accepted |
 | [0010](0010-inference-tls.md) | HTTPS on the inference listener | Accepted |
 | [0011](0011-gpu-driver-resets.md) | GPU driver resets, graceful stop, AMD idle/D3 driver bug | Accepted |
+| [0012](0012-product-packaging.md) | Product packaging (MSI), self-provisioning, first-run setup | Accepted |
 
 Format: context, decision, consequences. "Provisional" means the decision
 stands unless the Phase 0 measurement named in it contradicts it.

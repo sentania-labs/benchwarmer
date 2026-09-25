@@ -67,6 +67,10 @@ type RuntimeFacts struct {
 	// the last load's figure; used to infer external VRAM when attribution
 	// is degraded.
 	FootprintMiB int `json:"footprint_mib"`
+	// SetupProblem, when set, says why the runtime cannot be started at
+	// all (for example no model file yet). A fresh install reports it
+	// instead of failing loads in a loop.
+	SetupProblem string `json:"setup_problem,omitempty"`
 }
 
 // GPUFacts are telemetry-derived facts for the target adapter.

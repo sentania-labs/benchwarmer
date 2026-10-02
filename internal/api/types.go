@@ -15,8 +15,10 @@ import (
 // Health is GET /api/v1/health. It reports whether the service itself is
 // working, not whether inference is available.
 type Health struct {
-	OK      bool   `json:"ok"`
-	Version string `json:"version"`
+	// InstanceID changes when the management service is recreated.
+	InstanceID string `json:"instance_id"`
+	OK         bool   `json:"ok"`
+	Version    string `json:"version"`
 	// Problems lists service-level faults (config fallback, store errors,
 	// telemetry collector down).
 	Problems []string `json:"problems,omitempty"`

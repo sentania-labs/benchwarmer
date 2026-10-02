@@ -66,6 +66,8 @@ type Input struct {
 	Sample *telemetry.Sample
 	// Processes is the process snapshot; nil when the snapshot failed.
 	Processes []signals.Process
+	// RuntimePID is the root identity retained independently of enumeration.
+	RuntimePID int
 	// OwnPIDs are the runtime's current members (empty when not running).
 	OwnPIDs []int
 	// RuntimeActive is true while the runtime is loading or serving a
@@ -136,6 +138,10 @@ func (o *Observer) Observe(now time.Time, in Input) Facts {
 	own := make(map[uint32]bool, len(in.OwnPIDs))
 	for _, p := range in.OwnPIDs {
 		own[uint32(p)] = true
+	}
+	// A transiently empty membership query does not mean the runtime stopped.
+	if in.RuntimePID > 0 {
+		own[uint32(in.RuntimePID)] = true
 	}
 	gpu, perPID := o.gpu(now, in, own)
 	sess, fresh := o.session(now, in)
@@ -236,13 +242,15 @@ func confidence(in Input, own map[uint32]bool) policy.Confidence {
 	}
 	var sum uint64
 	ownSeen := false
+	var ownBytes uint64
 	for _, p := range s.Processes {
 		sum += p.DedicatedBytes
 		if own[p.PID] {
 			ownSeen = true
+			ownBytes += p.DedicatedBytes
 		}
 	}
-	if len(own) > 0 && !ownSeen {
+	if len(own) > 0 && (!ownSeen || (in.FootprintMiB > 0 && ownBytes == 0)) {
 		return policy.ConfidenceDegraded
 	}
 	adapter := float64(s.DedicatedUsedBytes) / mib

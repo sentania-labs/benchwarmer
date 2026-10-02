@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,13 +69,14 @@ type route struct {
 }
 
 type handler struct {
-	o      Options
-	routes map[string]map[string]route // path -> method -> route
+	instanceID string
+	o          Options
+	routes     map[string]map[string]route // path -> method -> route
 }
 
 // New returns the management listener's handler: /api/v1/* and /metrics.
 func New(o Options) http.Handler {
-	h := &handler{o: o}
+	h := &handler{o: o, instanceID: rand.Text()}
 	h.routes = map[string]map[string]route{
 		"/api/v1/health": {"GET": {AccessRead, true, 0, h.health}},
 		"/api/v1/status": {"GET": {AccessRead, true, 0, h.status}},
@@ -236,7 +238,7 @@ func peerHost(r *http.Request) string {
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 	s := h.o.Backend.Status()
-	out := Health{OK: true, Version: h.o.Version}
+	out := Health{OK: true, Version: h.o.Version, InstanceID: h.instanceID}
 	if s.ConfigSource != "primary" {
 		out.Problems = append(out.Problems, fmt.Sprintf("configuration loaded from %s copy", s.ConfigSource))
 	}

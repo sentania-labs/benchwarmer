@@ -54,6 +54,7 @@ browser tab. Use "Forget token" to clear it.
 ## Development
 
 Requires Go (version from `go.mod`; the `go` command fetches it automatically).
+The dashboard tests require Node.js 22 or newer.
 Development works on Linux; Windows-specific code is cross-compiled and
 exercised by the Windows CI job.
 

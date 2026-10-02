@@ -943,3 +943,44 @@ func TestLoadBlockedNeverLoads(t *testing.T) {
 		t.Fatalf("inference status %d", code)
 	}
 }
+
+type missingMembersInstance struct{ runtime.Instance }
+
+func (missingMembersInstance) Members() []int { return nil }
+
+type recordingFacts struct {
+	FactBuilder
+	last FactInput
+}
+
+func (f *recordingFacts) Build(now time.Time, in FactInput) (policy.GPUFacts, policy.AppFacts, policy.SessionFacts) {
+	f.last = in
+	return f.FactBuilder.Build(now, in)
+}
+
+func TestMissingMembershipRetainsRootAndRecordsEvidence(t *testing.T) {
+	r := newRig(t, nil)
+	r.toReady()
+	f := &recordingFacts{FactBuilder: r.facts}
+	r.c.d.Facts = f
+	r.c.inst = missingMembersInstance{r.c.inst}
+	for range 3 {
+		r.c.Step(true)
+	}
+	if f.last.RuntimePID != r.ad.last().PID() || len(f.last.OwnPIDs) != 0 {
+		t.Fatalf("root not retained independently: %+v", f.last)
+	}
+	e, ok := r.ev.find(events.TelemetryDegraded)
+	if !ok || e.RuntimePID != f.last.RuntimePID || e.Data["root_in_members"] != false {
+		t.Fatalf("missing diagnostic: %+v", e)
+	}
+	count := 0
+	for _, typ := range r.ev.types() {
+		if typ == events.TelemetryDegraded {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("logged repeated loss %d times", count)
+	}
+}

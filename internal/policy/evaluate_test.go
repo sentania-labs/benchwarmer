@@ -587,3 +587,36 @@ func TestDSTScheduleBoundaryInPolicy(t *testing.T) {
 		t.Fatalf("after: %s %s", d.Profile, d.ProfileSource)
 	}
 }
+
+func TestLockedSessionDoesNotCountAsInteractiveUse(t *testing.T) {
+	c := config.Default()
+	// Existing installations may not have the new lock-screen ignore rules.
+	c.Applications = nil
+	for _, loaded := range []bool{false, true} {
+		s := idle(evening)
+		if loaded {
+			s = ready(evening)
+		}
+		s.Session = SessionFacts{Known: true, Locked: true, Fullscreen: true, ForegroundName: "LockApp.exe"}
+		check(t, Evaluate(s, c), want{action: ActionRun, rule: RuleRun, competing: no()})
+		// Even with GPU use, a locked foreground is not an interactive signal.
+		s.GPU.ExternalUtilPct = 30
+		check(t, Evaluate(s, c), want{action: ActionRun, rule: RuleRun})
+		s.Session.Locked = false
+		d := Evaluate(s, c)
+		if d.Rule != RuleFullscreenGPU {
+			t.Fatalf("unlocked fullscreen: %+v", d)
+		}
+	}
+}
+
+func TestLockedSessionStillYieldsToGamesAndMemoryPressure(t *testing.T) {
+	c := config.Default()
+	s := ready(evening)
+	s.Session = SessionFacts{Known: true, Locked: true, Fullscreen: true, ForegroundName: "LockApp.exe"}
+	s.Apps.Games = []AppMatch{game("game.exe")}
+	check(t, Evaluate(s, c), want{action: ActionDrain, rule: RuleGameProcess})
+	s.Apps.Games = nil
+	s.GPU.ExternalVRAMMiB = 4000
+	check(t, Evaluate(s, c), want{action: ActionPreempt, rule: RuleCriticalVRAMExt})
+}

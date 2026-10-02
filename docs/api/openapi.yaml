@@ -648,8 +648,9 @@ components:
 
     Health:
       type: object
-      required: [ok, version]
+      required: [ok, version, instance_id]
       properties:
+        instance_id: { type: string, description: "Opaque service instance identity; changes on restart." }
         ok: { type: boolean }
         version: { type: string }
         problems:

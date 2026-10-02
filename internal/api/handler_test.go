@@ -672,3 +672,26 @@ func TestWriteUnavailable(t *testing.T) {
 		t.Fatalf("503: %d %+v headers=%v", rec.Code, e, rec.Header())
 	}
 }
+
+func TestHealthInstanceIdentity(t *testing.T) {
+	read := func(hr *harness) Health {
+		t.Helper()
+		rec := hr.do(req{method: "GET", path: "/api/v1/health"})
+		var h Health
+		if err := json.Unmarshal(rec.Body.Bytes(), &h); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusOK || h.InstanceID == "" {
+			t.Fatalf("health identity missing: %s", rec.Body.String())
+		}
+		return h
+	}
+	first, second := newHarness(t), newHarness(t)
+	a, b := read(first), read(first)
+	if a.InstanceID != b.InstanceID {
+		t.Fatal("instance identity changed between polls")
+	}
+	if read(second).InstanceID == a.InstanceID {
+		t.Fatal("new service reused old identity")
+	}
+}

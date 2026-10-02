@@ -263,7 +263,7 @@ func (e *eval) yieldRules() []match {
 		}
 	}
 	ss := s.Session
-	if ss.Known && ss.Fullscreen && ss.ForegroundClass == "" && g.ExternalUtilTrusted && g.ExternalUtilPct >= e.softUtil {
+	if ss.Known && !ss.Locked && ss.Fullscreen && ss.ForegroundClass == "" && g.ExternalUtilTrusted && g.ExternalUtilPct >= e.softUtil {
 		add(match{action: ActionDrain, rule: RuleFullscreenGPU, tier: TierGaming, severity: SeverityWarning,
 			reason: fmt.Sprintf("Unclassified fullscreen app %s with external GPU use %.0f%%", ss.ForegroundName, g.ExternalUtilPct),
 			evidence: []Evidence{
@@ -283,7 +283,7 @@ func (e *eval) yieldRules() []match {
 			evidence: appEvidence(a), competing: true, preempt: true, idle: state.Cooldown})
 	}
 	if e.p.DrainOnAmbiguous {
-		if ss.Known && ss.Fullscreen && ss.ForegroundClass == "" {
+		if ss.Known && !ss.Locked && ss.Fullscreen && ss.ForegroundClass == "" {
 			add(match{action: ActionDrain, rule: RuleAmbiguous, tier: pt, severity: SeverityNotice,
 				reason:    fmt.Sprintf("Unclassified fullscreen app %s in the foreground", ss.ForegroundName),
 				evidence:  []Evidence{ev("foreground", ss.ForegroundName, nil, "agent"), ev("fullscreen", true, nil, "agent")},

@@ -66,6 +66,8 @@ type Input struct {
 	Sample *telemetry.Sample
 	// Processes is the process snapshot; nil when the snapshot failed.
 	Processes []signals.Process
+	// RuntimePID is the root identity retained independently of enumeration.
+	RuntimePID int
 	// OwnPIDs are the runtime's current members (empty when not running).
 	OwnPIDs []int
 	// RuntimeActive is true while the runtime is loading or serving a
@@ -137,6 +139,10 @@ func (o *Observer) Observe(now time.Time, in Input) Facts {
 	for _, p := range in.OwnPIDs {
 		own[uint32(p)] = true
 	}
+	// A transiently empty membership query does not mean the runtime stopped.
+	if in.RuntimePID > 0 {
+		own[uint32(in.RuntimePID)] = true
+	}
 	gpu, perPID := o.gpu(now, in, own)
 	sess, fresh := o.session(now, in)
 	return Facts{GPU: gpu, Apps: o.apps(now, in, own, perPID, fresh), Session: sess}
@@ -187,7 +193,17 @@ func (o *Observer) gpu(now time.Time, in Input, own map[uint32]bool) (policy.GPU
 		g.OwnUtilPct = d.OwnUtilPct
 		g.ExternalUtilPct = d.TotalUtilPct
 		g.ExternalUtilTrusted = !in.RuntimeActive
-		// External VRAM = adapter used minus the runtime's footprint.
+		// A previous load's footprint cannot claim memory that this sample
+		// explicitly attributes to another process, especially before the
+		// new runtime has allocated its model. Split's external total also
+		// includes unattributed adapter bytes, so sum process entries here.
+		var externalBytes uint64
+		for _, p := range s.Processes {
+			if !own[p.PID] {
+				externalBytes += p.DedicatedBytes
+			}
+		}
+		measuredExternal := int(externalBytes / mib)
 		if running {
 			fp := in.FootprintMiB
 			if measured := int(d.OwnDedicatedBytes / mib); fp == 0 && measured > 0 {
@@ -199,9 +215,9 @@ func (o *Observer) gpu(now time.Time, in Input, own map[uint32]bool) (policy.GPU
 				// model as external would make the worker preempt itself.
 				fp = in.Config.Runtime.RequiredFreeVRAMMiB
 			}
-			g.OwnVRAMMiB = min(fp, g.VRAMUsedMiB)
+			g.OwnVRAMMiB = min(fp, max(g.VRAMUsedMiB-measuredExternal, 0))
 		}
-		g.ExternalVRAMMiB = max(g.VRAMUsedMiB-g.OwnVRAMMiB, 0)
+		g.ExternalVRAMMiB = max(g.VRAMUsedMiB-g.OwnVRAMMiB, measuredExternal)
 	}
 
 	if o.lastConf != g.Confidence {
@@ -236,13 +252,15 @@ func confidence(in Input, own map[uint32]bool) policy.Confidence {
 	}
 	var sum uint64
 	ownSeen := false
+	var ownBytes uint64
 	for _, p := range s.Processes {
 		sum += p.DedicatedBytes
 		if own[p.PID] {
 			ownSeen = true
+			ownBytes += p.DedicatedBytes
 		}
 	}
-	if len(own) > 0 && !ownSeen {
+	if len(own) > 0 && (!ownSeen || (in.FootprintMiB > 0 && ownBytes == 0)) {
 		return policy.ConfidenceDegraded
 	}
 	adapter := float64(s.DedicatedUsedBytes) / mib

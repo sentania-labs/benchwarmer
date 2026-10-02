@@ -39,6 +39,7 @@ type TelemetrySource interface {
 type FactInput struct {
 	Sample       *telemetry.Sample // nil when no source is configured
 	Procs        []signals.Process // nil when the snapshot failed
+	RuntimePID   int               // root identity, independent of process-tree enumeration
 	OwnPIDs      []int
 	RuntimeBusy  bool // busy or loading: own utilization cannot be separated without attribution
 	FootprintMiB int
@@ -197,19 +198,20 @@ type Controller struct {
 	procsOK      bool
 	lastProcScan time.Time
 
-	decision        policy.Decision
-	lastEvaluated   time.Time
-	setupProblem    string // why the runtime cannot start at all; see checkSetup
-	lastSetupCheck  time.Time
-	setupResult     chan string // in-flight file check, nil when none
-	telemetryLost   bool
-	telemetryLosses int // consecutive losses, for escalating recovery
-	gpuResets       int // GPU driver resets without a stable run since, for escalating recovery
-	lastGPUCheck    time.Time
-	lastGPUReset    time.Time
-	manualPending   string // "drain" or "reload" requested by the API
-	persisted       []byte
-	recentErrors    []events.Event
+	decision            policy.Decision
+	lastEvaluated       time.Time
+	setupProblem        string // why the runtime cannot start at all; see checkSetup
+	lastSetupCheck      time.Time
+	setupResult         chan string // in-flight file check, nil when none
+	attributionDegraded bool
+	telemetryLost       bool
+	telemetryLosses     int // consecutive losses, for escalating recovery
+	gpuResets           int // GPU driver resets without a stable run since, for escalating recovery
+	lastGPUCheck        time.Time
+	lastGPUReset        time.Time
+	manualPending       string // "drain" or "reload" requested by the API
+	persisted           []byte
+	recentErrors        []events.Event
 
 	// zombie is a runtime whose termination is not verified (failed kill,
 	// crash, failed load). No new runtime starts while it is set; its stop

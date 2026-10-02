@@ -418,3 +418,46 @@ func TestClassifierFollowsConfig(t *testing.T) {
 		t.Fatalf("games %+v", a.Games)
 	}
 }
+
+func TestRuntimeRootSurvivesMissingMembership(t *testing.T) {
+	for _, busy := range []bool{false, true} {
+		in := running(input(sample(15072, proc{pidRuntime, 0, 14344, ""}, proc{pidDWM, 1.74, 1064, ""}), withRuntime(desktop())), busy)
+		in.RuntimePID, in.OwnPIDs, in.FootprintMiB = pidRuntime, nil, 14344
+		f := New().Observe(t0, in)
+		if f.GPU.OwnVRAMMiB != 14344 || f.GPU.ExternalVRAMMiB != 1064 || f.GPU.Confidence != policy.ConfidenceHigh {
+			t.Fatalf("lost root attribution: %+v", f.GPU)
+		}
+		for _, p := range f.Apps.Ordinary {
+			if p.PID == pidRuntime {
+				t.Fatal("runtime counted as an external app")
+			}
+		}
+		// Actual external pressure still counts when enumeration fails.
+		in.Sample = sample(16000, proc{pidRuntime, 0, 12000, ""}, proc{pidChrome, 70, 4000, ""})
+		g := New().Observe(t0, in).GPU
+		if g.ExternalVRAMMiB != 4000 || g.ExternalUtilPct != 70 {
+			t.Fatalf("external pressure lost: %+v", g)
+		}
+	}
+}
+
+func TestRuntimeMemoryCounterMissingWithEngineEntry(t *testing.T) {
+	// An engine entry alone is not proof of a valid memory measurement.
+	in := running(input(sample(15072, proc{pidRuntime, 0, 0, ""}, proc{pidDWM, 0, 1064, ""}), withRuntime(desktop())), true)
+	in.RuntimePID, in.FootprintMiB = pidRuntime, 14344
+	// Even a consistent process total cannot validate a zero own-memory reading.
+	in.Sample.Processes[1].DedicatedBytes = 15408 * mib
+	g := New().Observe(t0, in).GPU
+	if g.Confidence != policy.ConfidenceDegraded || g.OwnVRAMMiB != 0 || g.ExternalVRAMMiB != 15408 || g.ExternalUtilTrusted {
+		t.Fatalf("missing memory treated as valid zero: %+v", g)
+	}
+}
+
+func TestReloadFootprintCannotHideMeasuredExternalVRAM(t *testing.T) {
+	in := running(input(sample(4000, proc{pidRuntime, 0, 0, ""}, proc{pidChrome, 0, 4000, ""}), withRuntime(desktop())), true)
+	in.RuntimePID, in.FootprintMiB = pidRuntime, 14344
+	g := New().Observe(t0, in).GPU
+	if g.ExternalVRAMMiB != 4000 || g.OwnVRAMMiB != 0 {
+		t.Fatalf("previous footprint hides competing allocation during reload: %+v", g)
+	}
+}

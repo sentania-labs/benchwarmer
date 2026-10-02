@@ -42,7 +42,7 @@ func (f *Facts) Build(now time.Time, in controller.FactInput) (policy.GPUFacts, 
 	at := f.agentAt
 	f.mu.Unlock()
 	out := f.obs.Observe(now, observe.Input{
-		Sample: in.Sample, Processes: in.Procs, OwnPIDs: in.OwnPIDs, RuntimeActive: in.RuntimeBusy,
+		Sample: in.Sample, Processes: in.Procs, OwnPIDs: in.OwnPIDs, RuntimePID: in.RuntimePID, RuntimeActive: in.RuntimeBusy,
 		FootprintMiB: in.FootprintMiB, Profile: in.Profile, Config: in.Config, Agent: agent, AgentAt: at,
 	})
 	return out.GPU, out.Apps, out.Session

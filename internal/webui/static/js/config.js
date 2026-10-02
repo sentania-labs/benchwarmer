@@ -1,6 +1,7 @@
 // Configuration pages: GET api/v1/config into a draft, edit it through
 // structured forms or raw JSON, and PUT the whole object back. Values shown
 // as "<redacted>" are left untouched so the server restores them.
+import { waitForRestart } from "./restart.js";
 import { h, replace, warnIcon } from "./dom.js";
 import { get, put, post, signIn, ApiError } from "./api.js";
 import { clockTime, titleize } from "./format.js";
@@ -172,7 +173,10 @@ async function reloadRuntime() {
 // API to answer again (with the new listener settings) and reloads.
 async function restartService() {
   if (!window.confirm("Restart the Benchwarmer service now? The model is unloaded first, and inference is unavailable for a minute or so.")) return;
+  let previous;
   try {
+    previous = (await get("api/v1/health", { interactive: true, timeoutMs: 5000 })).instance_id;
+    if (!previous) throw new Error("This service does not report a restart identity. Restart it through Windows Services.");
     await post("api/v1/service/restart");
   } catch (e) {
     st.message = "Restart failed: " + e.message;
@@ -182,28 +186,13 @@ async function restartService() {
   st.impact = null;
   st.message = "Restarting the service...";
   renderTop();
-  // Wait for the old process to stop answering, then for the new one.
-  const up = async () => {
-    try {
-      await get("api/v1/health", { interactive: false });
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const started = Date.now();
-  let wentDown = false;
-  while (Date.now() - started < 120000) {
-    const ok = await up();
-    if (!ok) wentDown = true;
-    else if (wentDown) {
-      location.reload();
-      return;
-    }
-    await sleep(1000);
+  const restarted = await waitForRestart(previous,
+    timeoutMs => get("api/v1/health", { interactive: false, timeoutMs }));
+  if (restarted) {
+    location.reload();
+    return;
   }
-  st.message = "The service has not come back after two minutes. If the management address changed, open the dashboard at the new address; otherwise see C:\\ProgramData\\Benchwarmer\\logs\\restart.log and the Windows event log.";
+  st.message = "The service restart could not be confirmed after two minutes. If the management address changed, open the dashboard at the new address; otherwise see C:\\ProgramData\\Benchwarmer\\logs\\restart.log and the Windows event log.";
   renderTop();
 }
 

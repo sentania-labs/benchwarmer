@@ -185,6 +185,8 @@ func DefaultApplications() []AppRule {
 		{Name: "Edge", Exe: "msedge.exe", Class: ClassOrdinary},
 		{Name: "Firefox", Exe: "firefox.exe", Class: ClassOrdinary},
 		// Desktop plumbing: never a trigger on its own.
+		{Name: "Windows lock screen", Exe: "LockApp.exe", Class: ClassIgnore},
+		{Name: "Windows sign-in", Exe: "LogonUI.exe", Class: ClassIgnore},
 		{Name: "Desktop Window Manager", Exe: "dwm.exe", Class: ClassIgnore},
 		{Name: "Explorer", Exe: "explorer.exe", Class: ClassIgnore},
 		{Name: "Shell", Exe: "ShellExperienceHost.exe", Class: ClassIgnore},

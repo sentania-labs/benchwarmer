@@ -79,7 +79,7 @@ export function askToken(reason) {
   });
 }
 
-async function once(method, path, body) {
+async function once(method, path, body, timeoutMs) {
   const headers = { Accept: "application/json" };
   if (token) headers.Authorization = "Bearer " + token;
   const init = { method, headers, cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" };
@@ -87,6 +87,7 @@ async function once(method, path, body) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
+  if (timeoutMs) init.signal = AbortSignal.timeout(timeoutMs);
   const res = await fetch(path, init);
   let data = null;
   const text = await res.text();
@@ -110,7 +111,7 @@ export async function request(method, path, body, opts = {}) {
   let reason = null;
   for (;;) {
     try {
-      return await once(method, path, body);
+      return await once(method, path, body, opts.timeoutMs);
     } catch (e) {
       if (!(e instanceof ApiError) || e.status !== 401 || !interactive) throw e;
       if (token) {

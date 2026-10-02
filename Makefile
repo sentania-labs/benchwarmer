@@ -4,7 +4,7 @@ DIST     ?= dist
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  := -s -w -X github.com/sentania-labs/benchwarmer/internal/version.Version=$(VERSION)
 
-.PHONY: all fmt-check vet lint test test-race vuln windows check stage package clean
+.PHONY: all fmt-check vet lint test-webui test test-race vuln windows check stage package clean
 
 all: check
 
@@ -26,7 +26,10 @@ lint: fmt-check vet $(BIN)/staticcheck
 	$(BIN)/staticcheck ./...
 	GOOS=windows $(BIN)/staticcheck ./...
 
-test:
+test-webui:
+	node --test internal/webui/*.test.mjs
+
+test: test-webui
 	$(GO) test -count=1 ./...
 
 test-race:
@@ -41,7 +44,7 @@ windows:
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/fakellama.exe ./cmd/fakellama
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS) -H windowsgui" -o $(DIST)/bwtray.exe ./cmd/bwtray
 
-check: lint test-race vuln windows
+check: lint test-webui test-race vuln windows
 
 # Release file set (ADR 0012): what the MSI and the zip both install under
 # C:\Program Files\Benchwarmer\. The llama.cpp runtime is the release pinned

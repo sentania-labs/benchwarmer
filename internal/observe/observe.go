@@ -193,7 +193,17 @@ func (o *Observer) gpu(now time.Time, in Input, own map[uint32]bool) (policy.GPU
 		g.OwnUtilPct = d.OwnUtilPct
 		g.ExternalUtilPct = d.TotalUtilPct
 		g.ExternalUtilTrusted = !in.RuntimeActive
-		// External VRAM = adapter used minus the runtime's footprint.
+		// A previous load's footprint cannot claim memory that this sample
+		// explicitly attributes to another process, especially before the
+		// new runtime has allocated its model. Split's external total also
+		// includes unattributed adapter bytes, so sum process entries here.
+		var externalBytes uint64
+		for _, p := range s.Processes {
+			if !own[p.PID] {
+				externalBytes += p.DedicatedBytes
+			}
+		}
+		measuredExternal := int(externalBytes / mib)
 		if running {
 			fp := in.FootprintMiB
 			if measured := int(d.OwnDedicatedBytes / mib); fp == 0 && measured > 0 {
@@ -205,9 +215,9 @@ func (o *Observer) gpu(now time.Time, in Input, own map[uint32]bool) (policy.GPU
 				// model as external would make the worker preempt itself.
 				fp = in.Config.Runtime.RequiredFreeVRAMMiB
 			}
-			g.OwnVRAMMiB = min(fp, g.VRAMUsedMiB)
+			g.OwnVRAMMiB = min(fp, max(g.VRAMUsedMiB-measuredExternal, 0))
 		}
-		g.ExternalVRAMMiB = max(g.VRAMUsedMiB-g.OwnVRAMMiB, 0)
+		g.ExternalVRAMMiB = max(g.VRAMUsedMiB-g.OwnVRAMMiB, measuredExternal)
 	}
 
 	if o.lastConf != g.Confidence {

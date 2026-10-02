@@ -39,3 +39,18 @@ func TestMissingRuntimeMembershipDoesNotPreemptInference(t *testing.T) {
 		t.Fatalf("real contention not protected: %+v", d)
 	}
 }
+
+func TestReloadStillPreemptsForMeasuredExternalMemory(t *testing.T) {
+	const mib = 1 << 20
+	cfg := config.Default()
+	zone, _ := time.LoadLocation("America/Chicago")
+	now := time.Date(2026, 10, 2, 10, 0, 0, 0, zone)
+	sample := telemetry.Sample{Complete: true, HasAdapterInstances: true, DedicatedTotalBytes: 16200 * mib, DedicatedUsedBytes: 4000 * mib,
+		Processes: []telemetry.ProcGPU{{PID: 100, DedicatedBytes: 0}, {PID: 10, DedicatedBytes: 4000 * mib}}}
+	in := controller.FactInput{Sample: &sample, RuntimePID: 100, OwnPIDs: []int{100}, RuntimeBusy: true, FootprintMiB: 14344, Config: cfg, Profile: cfg.Profiles["school_hours"]}
+	gpu, apps, session := NewFacts().Build(now, in)
+	d := policy.Evaluate(policy.Snapshot{Now: now, Mode: policy.ModeFacts{Mode: policy.ModeAuto}, Runtime: policy.RuntimeFacts{State: state.Loading}, GPU: gpu, Apps: apps, Session: session}, cfg)
+	if d.Action != policy.ActionPreempt || d.Rule != policy.RuleCriticalVRAMExt {
+		t.Fatalf("reload hid real contention: %+v", d)
+	}
+}

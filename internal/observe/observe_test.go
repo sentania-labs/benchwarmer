@@ -448,7 +448,16 @@ func TestRuntimeMemoryCounterMissingWithEngineEntry(t *testing.T) {
 	// Even a consistent process total cannot validate a zero own-memory reading.
 	in.Sample.Processes[1].DedicatedBytes = 15408 * mib
 	g := New().Observe(t0, in).GPU
-	if g.Confidence != policy.ConfidenceDegraded || g.OwnVRAMMiB != 14344 || g.ExternalVRAMMiB != 728 || g.ExternalUtilTrusted {
+	if g.Confidence != policy.ConfidenceDegraded || g.OwnVRAMMiB != 0 || g.ExternalVRAMMiB != 15408 || g.ExternalUtilTrusted {
 		t.Fatalf("missing memory treated as valid zero: %+v", g)
+	}
+}
+
+func TestReloadFootprintCannotHideMeasuredExternalVRAM(t *testing.T) {
+	in := running(input(sample(4000, proc{pidRuntime, 0, 0, ""}, proc{pidChrome, 0, 4000, ""}), withRuntime(desktop())), true)
+	in.RuntimePID, in.FootprintMiB = pidRuntime, 14344
+	g := New().Observe(t0, in).GPU
+	if g.ExternalVRAMMiB != 4000 || g.OwnVRAMMiB != 0 {
+		t.Fatalf("previous footprint hides competing allocation during reload: %+v", g)
 	}
 }

@@ -361,3 +361,69 @@ func TestLoopbackWithoutTokenRejectsForeignHost(t *testing.T) {
 		t.Fatalf("foreign Host on loopback without token: %d", rec.Code)
 	}
 }
+
+// An upstream may respond before the client has finished uploading. The proxy
+// must not drain or close the upload while its transport still forwards it.
+func TestStreamingResponseDuringUpload(t *testing.T) {
+	upload := make(chan string, 1)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := http.NewResponseController(w).EnableFullDuplex(); err != nil {
+			t.Error(err)
+			return
+		}
+		prefix := make([]byte, 1)
+		if _, err := io.ReadFull(r.Body, prefix); err != nil {
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: first\n\n")
+		w.(http.Flusher).Flush()
+		rest, err := io.ReadAll(r.Body)
+		if err != nil {
+			return
+		}
+		upload <- string(prefix) + string(rest)
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(up.Close)
+	r := newRig(t, up)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	timer := time.AfterFunc(3*time.Second, func() { _ = writer.CloseWithError(fmt.Errorf("upload timed out waiting for the response")) })
+	defer timer.Stop()
+	go func() { _, _ = io.WriteString(writer, "{") }()
+	req, err := http.NewRequest(http.MethodPost, r.srv.URL+"/v1/chat/completions", reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("early streaming response did not arrive: %v", err)
+	}
+	defer resp.Body.Close()
+	br := bufio.NewReader(resp.Body)
+	first, err := br.ReadString('\n')
+	if err != nil || first != "data: first\n" {
+		t.Fatalf("first chunk = %q, error = %v", first, err)
+	}
+	if _, err := io.WriteString(writer, "}"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rest, err := io.ReadAll(br)
+	if err != nil || !strings.Contains(string(rest), "data: [DONE]") {
+		t.Fatalf("stream was truncated: %q, error = %v", rest, err)
+	}
+	select {
+	case got := <-upload:
+		if got != "{}" {
+			t.Fatalf("forwarded upload = %q", got)
+		}
+	default:
+		t.Fatal("upstream did not finish reading the upload")
+	}
+}

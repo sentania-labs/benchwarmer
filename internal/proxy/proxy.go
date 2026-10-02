@@ -123,6 +123,10 @@ func New(o Options) http.Handler {
 				defer timer.Stop()
 			}
 		}
+		// The transport can still be reading the upload when an early response
+		// is flushed. Prevent HTTP/1 from draining and closing that body out
+		// from under it. HTTP/2 already permits concurrent reads and writes.
+		_ = http.NewResponseController(w).EnableFullDuplex()
 		sw := &statusWriter{ResponseWriter: w}
 		rp.ServeHTTP(sw, r.WithContext(context.WithValue(ctx, ticketKey{}, t)))
 		switch {

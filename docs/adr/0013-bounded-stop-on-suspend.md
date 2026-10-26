@@ -59,9 +59,12 @@ before sleep:
    that a kill before sleep is safer than a graceful stop. This is the
    existing resume-side cleanup, kept as the fallback.
 4. **Make the outcome visible.** `PrepareSuspend` emits `power_suspend_stop`
-   with `stopped`, `elapsed_ms`, and `budget_ms`; a stop that ran out of
-   budget, or a runtime whose termination is still unverified (a retained
-   `kill_failed` process, named by PID), is a warning. The existing
+   with `stopped`, `late`, `elapsed_ms`, and `budget_ms`; a stop that ran
+   out of budget, a stop first seen complete after the budget ended
+   (`late`, `stopped` false: the host had already released the notification,
+   so the system may have slept with the model loaded), or a runtime whose
+   termination is still unverified (a retained `kill_failed` process, named
+   by PID), is a warning. The existing
    `runtime_stopped` event keeps the per-stage timings (`root_exit_ms`,
    `tree_empty_ms`, `graceful`).
 5. **Unblock the controller.** `Instance.Members` no longer waits for a stop

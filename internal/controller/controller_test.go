@@ -724,6 +724,40 @@ func TestPrepareSuspendBudgetExpiresWithoutKillingEarly(t *testing.T) {
 	r.stepUntil(state.Ready)
 }
 
+// A stop that completes after the budget ended but before the next poll was
+// only seen finishing once the host had released the notification, so it
+// must not be reported as a stop inside the budget.
+func TestPrepareSuspendStopObservedAfterDeadlineIsLate(t *testing.T) {
+	r := newRig(t, nil)
+	r.toReady()
+	inst := r.ad.last()
+	inst.stopGate = make(chan struct{})
+	base := time.Now()
+	var elapsed time.Duration
+	now := func() time.Time { return base.Add(elapsed) }
+	sleep := func(time.Duration) {
+		// The stop finishes during the poll sleep, which also carries the
+		// clock past the 500ms deadline.
+		close(inst.stopGate)
+		for i := 0; i < 200 && r.state().RuntimeRunning(); i++ {
+			time.Sleep(10 * time.Millisecond)
+			r.c.Step(false)
+		}
+		elapsed = 600 * time.Millisecond
+	}
+	r.c.prepareSuspend(500*time.Millisecond, now, sleep)
+	if r.state().RuntimeRunning() {
+		t.Fatalf("stop did not complete: %s", r.state())
+	}
+	e, ok := r.ev.find(events.PowerSuspendStop)
+	if !ok || e.Severity != policy.SeverityWarning || e.Data["stopped"] != false || e.Data["late"] != true || !strings.Contains(e.Message, "only after the 500ms suspend budget ran out") {
+		t.Fatalf("suspend stop event %+v (found %v)", e, ok)
+	}
+	if e.Data["elapsed_ms"] != int64(600) || e.Data["budget_ms"] != int64(500) {
+		t.Fatalf("event data %+v", e.Data)
+	}
+}
+
 // A stop whose kill cannot be verified leaves the process as a zombie that
 // may still hold VRAM; the suspend result must not call that stopped, and
 // must say the termination is unverified rather than that the budget ran

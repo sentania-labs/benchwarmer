@@ -47,8 +47,9 @@ before sleep:
    documented ceiling for queueing and the acknowledgement itself. The real
    limit for a service control handler is still open and must be confirmed
    on the AMD host. The graceful stop exited in 0.8 s on the target
-   (ADR 0011), so the budget covers it with margin. Simulated, the stop of the fake runtime and its
-   child, from event to acknowledgement, takes 20-65 ms (see Verification).
+   (ADR 0011), so the budget covers it with margin. Simulated, the stop of
+   the fake runtime and its child, from event to acknowledgement, takes
+   20-65 ms (see Verification).
 3. **No hard kill to meet the budget.** If the runtime is still alive when
    the budget ends, the notification is released and the stop that is
    already running continues on its own terms (Ctrl+C was delivered; the
@@ -60,8 +61,9 @@ before sleep:
 4. **Make the outcome visible.** `PrepareSuspend` emits `power_suspend_stop`
    with `stopped`, `elapsed_ms`, and `budget_ms`; a stop that ran out of
    budget, or a runtime whose termination is still unverified (a retained
-   `kill_failed` process, named by PID), is a warning. The existing `runtime_stopped` event keeps the
-   per-stage timings (`root_exit_ms`, `tree_empty_ms`, `graceful`).
+   `kill_failed` process, named by PID), is a warning. The existing
+   `runtime_stopped` event keeps the per-stage timings (`root_exit_ms`,
+   `tree_empty_ms`, `graceful`).
 5. **Unblock the controller.** `Instance.Members` no longer waits for a stop
    in progress.
 

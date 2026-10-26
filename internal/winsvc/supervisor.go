@@ -43,11 +43,10 @@ type plane struct {
 	suspendBudget time.Duration
 	reqs          chan request
 	stopped       chan struct{} // closed when supervise returns
-	now           func() time.Time
 }
 
 func newPlane(o Options) *plane {
-	return &plane{o: o.withDefaults(), suspendBudget: DefaultSuspendBudget, reqs: make(chan request, EventBuffer), stopped: make(chan struct{}), now: time.Now}
+	return &plane{o: o.withDefaults(), suspendBudget: DefaultSuspendBudget, reqs: make(chan request, EventBuffer), stopped: make(chan struct{})}
 }
 
 // control is the body of the SCM control handler. It returns as soon as the
@@ -56,7 +55,7 @@ func newPlane(o Options) *plane {
 // acknowledged it or the suspend budget has passed. Waiting here is the only way
 // to stop the runtime before the system sleeps (ADR 0013).
 func (p *plane) control(cmd, eventType, sessionID uint32) {
-	r := request{cmd: cmd, eventType: eventType, sessionID: sessionID, at: p.now()}
+	r := request{cmd: cmd, eventType: eventType, sessionID: sessionID, at: time.Now()}
 	if cmd == ctlPowerEvent && eventType == pbtAPMSuspend {
 		r.done = make(chan struct{})
 	}

@@ -38,18 +38,11 @@ func TestTranslate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := translate(tt.cmd, tt.evt, tt.sid, now, o)
+			got, ok := translate(tt.cmd, tt.evt, tt.sid, now, o, DefaultSuspendBudget)
 			if ok != tt.ok || got != tt.want {
 				t.Fatalf("got %+v %v, want %+v %v", got, ok, tt.want, tt.ok)
 			}
 		})
-	}
-}
-
-func TestSuspendBudgetOption(t *testing.T) {
-	got, ok := translate(ctlPowerEvent, pbtAPMSuspend, 0, now, Options{SuspendBudget: 1500 * time.Millisecond})
-	if !ok || !got.Deadline.Equal(now.Add(1500*time.Millisecond)) {
-		t.Fatalf("got %+v %v", got, ok)
 	}
 }
 

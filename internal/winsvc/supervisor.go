@@ -39,20 +39,21 @@ type status struct {
 // Nothing here is Windows-specific, so the suspend contract is tested
 // everywhere.
 type plane struct {
-	o       Options
-	reqs    chan request
-	stopped chan struct{} // closed when supervise returns
-	now     func() time.Time
+	o             Options
+	suspendBudget time.Duration
+	reqs          chan request
+	stopped       chan struct{} // closed when supervise returns
+	now           func() time.Time
 }
 
 func newPlane(o Options) *plane {
-	return &plane{o: o.withDefaults(), reqs: make(chan request, EventBuffer), stopped: make(chan struct{}), now: time.Now}
+	return &plane{o: o.withDefaults(), suspendBudget: DefaultSuspendBudget, reqs: make(chan request, EventBuffer), stopped: make(chan struct{}), now: time.Now}
 }
 
 // control is the body of the SCM control handler. It returns as soon as the
 // request is queued, except for a suspend notification: Windows proceeds to
 // sleep once the handler returns, so that call waits until the Handler has
-// acknowledged it or SuspendBudget has passed. Waiting here is the only way
+// acknowledged it or the suspend budget has passed. Waiting here is the only way
 // to stop the runtime before the system sleeps (ADR 0013).
 func (p *plane) control(cmd, eventType, sessionID uint32) {
 	r := request{cmd: cmd, eventType: eventType, sessionID: sessionID, at: p.now()}
@@ -67,7 +68,7 @@ func (p *plane) control(cmd, eventType, sessionID uint32) {
 	if r.done == nil {
 		return
 	}
-	t := time.NewTimer(p.o.SuspendBudget)
+	t := time.NewTimer(p.suspendBudget)
 	defer t.Stop()
 	select {
 	case <-r.done:
@@ -119,7 +120,7 @@ func (p *plane) supervise(h Handler, report func(status)) (failed bool) {
 				report(last)
 				continue
 			}
-			ev, ok := translate(r.cmd, r.eventType, r.sessionID, r.at, p.o)
+			ev, ok := translate(r.cmd, r.eventType, r.sessionID, r.at, p.o, p.suspendBudget)
 			if !ok {
 				continue
 			}

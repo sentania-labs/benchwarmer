@@ -272,11 +272,7 @@ loop:
 				// The host holds Windows' suspend notification until
 				// this acknowledges it, and gives up at the deadline
 				// (ADR 0013).
-				budget := winsvc.DefaultSuspendBudget
-				if !e.Deadline.IsZero() {
-					budget = max(time.Until(e.Deadline), 0)
-				}
-				s.ctl.PrepareSuspend(budget)
+				s.ctl.PrepareSuspend(max(time.Until(e.Deadline), 0))
 				e.Ack()
 			case winsvc.Resume:
 				s.ctl.Resumed()

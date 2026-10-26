@@ -76,7 +76,7 @@ func runService(o Options, h Handler) error {
 
 // ctlHandler is the SCM's control handler (HandlerEx). It runs on the
 // dispatcher's thread, which serializes control requests, so a held suspend
-// also delays the next request by at most SuspendBudget.
+// also delays the next request by at most DefaultSuspendBudget.
 func ctlHandler(ctl, eventType, eventData, _ uintptr) uintptr {
 	var sid uint32
 	if uint32(ctl) == ctlSessionChange && eventData != 0 {

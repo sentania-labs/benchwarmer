@@ -172,6 +172,7 @@ func (s *sink) types() []events.Type {
 	}
 	return out
 }
+func (s *sink) reset() { s.mu.Lock(); s.ev = nil; s.mu.Unlock() }
 func (s *sink) find(t events.Type) (events.Event, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -666,13 +667,13 @@ func TestSuspendAndResume(t *testing.T) {
 func TestPrepareSuspendReportsStopWithinBudget(t *testing.T) {
 	r := newRig(t, nil)
 	r.toReady()
-	res := r.c.PrepareSuspend(2 * time.Second)
-	if !res.Stopped || res.Elapsed >= res.Budget {
-		t.Fatalf("result %+v", res)
-	}
+	r.c.PrepareSuspend(2 * time.Second)
 	e, ok := r.ev.find(events.PowerSuspendStop)
-	if !ok || e.Severity != "" || e.Data["stopped"] != true {
+	if !ok || e.Severity != "" || e.Data["stopped"] != true || e.Data["budget_ms"] != int64(2000) {
 		t.Fatalf("suspend stop event %+v (found %v)", e, ok)
+	}
+	if elapsed := e.Data["elapsed_ms"].(int64); elapsed >= 2000 {
+		t.Fatalf("elapsed %dms of a 2000ms budget", elapsed)
 	}
 	if _, ok := r.ev.find(events.RuntimeStopped); !ok {
 		t.Fatalf("runtime_stopped missing: %v", r.ev.types())
@@ -688,15 +689,12 @@ func TestPrepareSuspendBudgetExpiresWithoutKillingEarly(t *testing.T) {
 	inst := r.ad.last()
 	inst.stopGate = make(chan struct{})
 	t0 := time.Now()
-	res := r.c.PrepareSuspend(150 * time.Millisecond)
-	if res.Stopped {
-		t.Fatal("reported stopped while the runtime was still releasing the GPU")
-	}
+	r.c.PrepareSuspend(150 * time.Millisecond)
 	if d := time.Since(t0); d < 150*time.Millisecond || d > time.Second {
 		t.Fatalf("held %s for a 150ms budget", d)
 	}
 	e, ok := r.ev.find(events.PowerSuspendStop)
-	if !ok || e.Severity != policy.SeverityWarning || e.Data["stopped"] != false {
+	if !ok || e.Severity != policy.SeverityWarning || e.Data["stopped"] != false || !strings.Contains(e.Message, "budget ran out") {
 		t.Fatalf("suspend stop event %+v (found %v)", e, ok)
 	}
 	if !r.state().RuntimeRunning() {
@@ -722,14 +720,18 @@ func TestPrepareSuspendBudgetExpiresWithoutKillingEarly(t *testing.T) {
 }
 
 // A stop whose kill cannot be verified leaves the process as a zombie that
-// may still hold VRAM; the suspend result must not call that stopped.
+// may still hold VRAM; the suspend result must not call that stopped, and
+// must say the termination is unverified rather than that the budget ran
+// out.
 func TestPrepareSuspendUnverifiedKillIsNotStopped(t *testing.T) {
 	r := newRig(t, nil)
 	r.toReady()
-	r.ad.last().stopErr = errors.New("descendants still present after timeout")
-	res := r.c.PrepareSuspend(2 * time.Second)
-	if res.Stopped {
-		t.Fatal("reported stopped while the runtime termination was unverified")
+	inst := r.ad.last()
+	inst.stopErr = errors.New("descendants still present after timeout")
+	t0 := time.Now()
+	r.c.PrepareSuspend(2 * time.Second)
+	if d := time.Since(t0); d > time.Second {
+		t.Fatalf("held %s waiting on a zombie in backoff", d)
 	}
 	if _, ok := r.ev.find(events.KillFailed); !ok {
 		t.Fatalf("no kill_failed event: %v", r.ev.types())
@@ -738,15 +740,64 @@ func TestPrepareSuspendUnverifiedKillIsNotStopped(t *testing.T) {
 	if !ok || e.Severity != policy.SeverityWarning || e.Data["stopped"] != false {
 		t.Fatalf("suspend stop event %+v (found %v)", e, ok)
 	}
+	if e.RuntimePID != inst.PID() || !strings.Contains(e.Message, "unverified") || strings.Contains(e.Message, "budget ran out") {
+		t.Fatalf("suspend stop event %+v", e)
+	}
+
+	// A later sleep with the zombie still retained reports the same.
+	r.ev.reset()
+	r.c.PrepareSuspend(2 * time.Second)
+	e, ok = r.ev.find(events.PowerSuspendStop)
+	if !ok || e.Data["stopped"] != false || e.RuntimePID != inst.PID() || !strings.Contains(e.Message, "unverified") {
+		t.Fatalf("second suspend stop event %+v (found %v)", e, ok)
+	}
+}
+
+// A zombie whose verification is in flight when suspend arrives is waited
+// for within the budget, and counts as stopped once it is verified.
+func TestPrepareSuspendWaitsForZombieVerificationInFlight(t *testing.T) {
+	r := newRig(t, nil)
+	r.toReady()
+	inst := r.ad.last()
+	inst.stopErr = errors.New("descendants still present after timeout")
+	r.c.PrepareSuspend(2 * time.Second)
+	inst.mu.Lock()
+	inst.stopErr = nil
+	inst.stopGate = make(chan struct{})
+	inst.mu.Unlock()
+	r.clk.Advance(11 * time.Second)
+	r.c.Step(true)
+	r.c.mu.Lock()
+	inFlight := r.c.zombieStopping
+	r.c.mu.Unlock()
+	if !inFlight {
+		t.Fatal("zombie retry not started")
+	}
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		close(inst.stopGate)
+	}()
+	r.ev.reset()
+	r.c.PrepareSuspend(2 * time.Second)
+	e, ok := r.ev.find(events.PowerSuspendStop)
+	if !ok || e.Severity != "" || e.Data["stopped"] != true {
+		t.Fatalf("suspend stop event %+v (found %v)", e, ok)
+	}
+	if elapsed := e.Data["elapsed_ms"].(int64); elapsed < 100 {
+		t.Fatalf("did not wait for the verification: %dms", elapsed)
+	}
 }
 
 func TestPrepareSuspendWithNoRuntimeReturnsAtOnce(t *testing.T) {
 	r := newRig(t, nil)
 	r.c.Step(true)
 	t0 := time.Now()
-	res := r.c.PrepareSuspend(2 * time.Second)
-	if !res.Stopped || time.Since(t0) > 500*time.Millisecond {
-		t.Fatalf("result %+v after %s", res, time.Since(t0))
+	r.c.PrepareSuspend(2 * time.Second)
+	if d := time.Since(t0); d > 500*time.Millisecond {
+		t.Fatalf("held %s with no runtime", d)
+	}
+	if e, ok := r.ev.find(events.PowerSuspendStop); !ok || e.Data["stopped"] != true {
+		t.Fatalf("suspend stop event %+v (found %v)", e, ok)
 	}
 }
 

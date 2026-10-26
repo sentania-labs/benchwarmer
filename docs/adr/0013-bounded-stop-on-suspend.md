@@ -40,12 +40,14 @@ before sleep:
    graceful stop on receipt, waits for the runtime to be gone, then
    acknowledges. One host, one place where the wait is defined, tested off
    Windows (`supervisor_test.go`).
-2. **Budget: 2 seconds** (`winsvc.DefaultSuspendBudget`). The budget is the
-   longest the system is held back from sleeping. Windows documents about two
-   seconds for a power-broadcast recipient and no figure for a service
-   control handler, so 2 s is the documented ceiling, not a measured one. The
-   graceful stop exited in 0.8 s on the target (ADR 0011), so the budget
-   covers it with margin. Simulated, the stop of the fake runtime and its
+2. **Budget: 1.5 seconds** (`winsvc.DefaultSuspendBudget`). The budget is
+   the longest the system is held back from sleeping. Windows documents
+   about two seconds for a power-broadcast recipient and no figure for a
+   service control handler; 1.5 s leaves half a second of margin inside that
+   documented ceiling for queueing and the acknowledgement itself. The real
+   limit for a service control handler is still open and must be confirmed
+   on the AMD host. The graceful stop exited in 0.8 s on the target
+   (ADR 0011), so the budget covers it with margin. Simulated, the stop of the fake runtime and its
    child, from event to acknowledgement, takes 20-65 ms (see Verification).
 3. **No hard kill to meet the budget.** If the runtime is still alive when
    the budget ends, the notification is released and the stop that is
@@ -57,7 +59,8 @@ before sleep:
    existing resume-side cleanup, kept as the fallback.
 4. **Make the outcome visible.** `PrepareSuspend` emits `power_suspend_stop`
    with `stopped`, `elapsed_ms`, and `budget_ms`; a stop that ran out of
-   budget is a warning. The existing `runtime_stopped` event keeps the
+   budget, or a runtime whose termination is still unverified (a retained
+   `kill_failed` process, named by PID), is a warning. The existing `runtime_stopped` event keeps the
    per-stage timings (`root_exit_ms`, `tree_empty_ms`, `graceful`).
 5. **Unblock the controller.** `Instance.Members` no longer waits for a stop
    in progress.

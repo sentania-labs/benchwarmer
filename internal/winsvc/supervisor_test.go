@@ -24,7 +24,15 @@ func (r *recorder) all() []status {
 // a channel carrying supervise's result.
 func runPlane(t *testing.T, o Options, h Handler) (*plane, *recorder, <-chan bool) {
 	t.Helper()
+	return runPlaneWithBudget(t, o, DefaultSuspendBudget, h)
+}
+
+// runPlaneWithBudget runs the plane with a suspend budget other than the
+// production constant.
+func runPlaneWithBudget(t *testing.T, o Options, suspendBudget time.Duration, h Handler) (*plane, *recorder, <-chan bool) {
+	t.Helper()
 	p := newPlane(o)
+	p.suspendBudget = suspendBudget
 	rec := &recorder{}
 	out := make(chan bool, 1)
 	go func() { out <- p.supervise(h, rec.report) }()
@@ -78,7 +86,7 @@ func TestSuspendIsHeldUntilAcknowledged(t *testing.T) {
 			}
 		}
 	})
-	p, _, out := runPlane(t, Options{SuspendBudget: 5 * time.Second}, h)
+	p, _, out := runPlaneWithBudget(t, Options{}, 5*time.Second, h)
 
 	returned := goControl(p, ctlPowerEvent, pbtAPMSuspend, 0)
 	e := <-got
@@ -107,7 +115,7 @@ func TestSuspendIsReleasedAtTheBudget(t *testing.T) {
 			}
 		}
 	})
-	p, _, out := runPlane(t, Options{SuspendBudget: 80 * time.Millisecond}, h)
+	p, _, out := runPlaneWithBudget(t, Options{}, 80*time.Millisecond, h)
 	t0 := time.Now()
 	within(t, 2*time.Second, "control to give up at the budget", goControl(p, ctlPowerEvent, pbtAPMSuspend, 0))
 	if d := time.Since(t0); d < 80*time.Millisecond || d > time.Second {
@@ -128,7 +136,7 @@ func TestOtherControlsReturnAtOnce(t *testing.T) {
 			}
 		}
 	})
-	p, _, out := runPlane(t, Options{SuspendBudget: 5 * time.Second}, h)
+	p, _, out := runPlaneWithBudget(t, Options{}, 5*time.Second, h)
 	for _, c := range []struct{ cmd, evt, sid uint32 }{
 		{ctlPowerEvent, pbtAPMResumeAutomatic, 0},
 		{ctlSessionChange, wtsSessionLock, 3},
@@ -154,7 +162,7 @@ func TestSuspendDuringStopIsAcknowledgedByTheHost(t *testing.T) {
 		<-release // slow to stop
 		return nil
 	})
-	p, rec, out := runPlane(t, Options{SuspendBudget: 5 * time.Second, StopTimeout: 5 * time.Second}, h)
+	p, rec, out := runPlaneWithBudget(t, Options{StopTimeout: 5 * time.Second}, 5*time.Second, h)
 	within(t, time.Second, "stop to be queued", goControl(p, ctlStop, 0, 0))
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -180,7 +188,7 @@ func TestDroppedSuspendIsAcknowledged(t *testing.T) {
 		<-block
 		return nil
 	})
-	p, _, out := runPlane(t, Options{SuspendBudget: 10 * time.Second}, h)
+	p, _, out := runPlaneWithBudget(t, Options{}, 10*time.Second, h)
 	for i := 0; i < EventBuffer; i++ {
 		p.control(ctlSessionChange, wtsSessionLock, 1)
 	}
@@ -201,7 +209,7 @@ func TestHandlerExitReleasesHeldSuspend(t *testing.T) {
 		<-exit
 		return nil
 	})
-	p, _, out := runPlane(t, Options{SuspendBudget: 10 * time.Second}, h)
+	p, _, out := runPlaneWithBudget(t, Options{}, 10*time.Second, h)
 	returned := goControl(p, ctlPowerEvent, pbtAPMSuspend, 0)
 	time.Sleep(50 * time.Millisecond)
 	close(exit)

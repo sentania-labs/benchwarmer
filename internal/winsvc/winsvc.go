@@ -120,9 +120,6 @@ type Options struct {
 	// PreshutdownTimeout must match the value given to Install; it is the
 	// budget after a pre-shutdown notification.
 	PreshutdownTimeout time.Duration
-	// SuspendBudget is how long the control handler holds a suspend
-	// notification for the Handler to stop the runtime (ADR 0013).
-	SuspendBudget time.Duration
 }
 
 // Defaults for zero Options fields.
@@ -130,10 +127,14 @@ const (
 	DefaultStopTimeout        = 20 * time.Second
 	DefaultShutdownTimeout    = 5 * time.Second
 	DefaultPreshutdownTimeout = 30 * time.Second
-	// DefaultSuspendBudget is below the roughly two seconds Windows gives
-	// a power-broadcast recipient (ADR 0013) and above the 0.8 s the
-	// graceful stop took on the target (ADR 0011).
-	DefaultSuspendBudget = 2 * time.Second
+	// DefaultSuspendBudget is how long the control handler holds a suspend
+	// notification for the Handler to stop the runtime (ADR 0013). It
+	// leaves half a second of margin inside the roughly two seconds Windows
+	// documents for a power-broadcast recipient, and is above the 0.8 s the
+	// graceful stop took on the target (ADR 0011). The real limit for a
+	// service control handler is still open and must be confirmed on the
+	// AMD host.
+	DefaultSuspendBudget = 1500 * time.Millisecond
 )
 
 // EventBuffer is how many events may queue before the handler reads them.
@@ -149,9 +150,6 @@ func (o Options) withDefaults() Options {
 	}
 	if o.PreshutdownTimeout <= 0 {
 		o.PreshutdownTimeout = DefaultPreshutdownTimeout
-	}
-	if o.SuspendBudget <= 0 {
-		o.SuspendBudget = DefaultSuspendBudget
 	}
 	return o
 }
@@ -218,8 +216,8 @@ func SessionEvent(reason uint32) (SessionKind, bool) {
 }
 
 // translate maps one SCM control request to an event. sessionID is only
-// meaningful for session changes.
-func translate(cmd, eventType, sessionID uint32, now time.Time, o Options) (Event, bool) {
+// meaningful for session changes; suspendBudget sets a suspend's deadline.
+func translate(cmd, eventType, sessionID uint32, now time.Time, o Options, suspendBudget time.Duration) (Event, bool) {
 	o = o.withDefaults()
 	switch cmd {
 	case ctlStop:
@@ -232,7 +230,7 @@ func translate(cmd, eventType, sessionID uint32, now time.Time, o Options) (Even
 		if k, ok := PowerEvent(eventType); ok {
 			ev := Event{Kind: k}
 			if k == Suspend {
-				ev.Deadline = now.Add(o.SuspendBudget)
+				ev.Deadline = now.Add(suspendBudget)
 			}
 			return ev, true
 		}

@@ -320,41 +320,37 @@ func (c *Controller) summary(now time.Time, s api.Status) string {
 	return msg
 }
 
-// SuspendResult is what PrepareSuspend achieved.
-type SuspendResult struct {
-	// Stopped is true when no runtime process was left by the time the
-	// budget ended.
-	Stopped bool
-	Budget  time.Duration
-	// Elapsed is how long PrepareSuspend took: how long the system was held
-	// back from sleeping.
-	Elapsed time.Duration
-}
-
 // PrepareSuspend releases the GPU before sleep: it stops admitting, starts
 // the graceful stop at once, and waits up to budget for it to finish. It
 // never escalates to a hard kill because of the budget (ADR 0013): a stop
 // still running when the budget ends keeps going, and the resume side
 // verifies it. The caller is the Windows control handler, which holds the
-// system awake while this runs, so budget must be short.
-func (c *Controller) PrepareSuspend(budget time.Duration) SuspendResult {
+// system awake while this runs, so budget must be short. The outcome is
+// the power_suspend_stop event: stopped, elapsed_ms (how long the system
+// was held back from sleeping), and budget_ms.
+func (c *Controller) PrepareSuspend(budget time.Duration) {
 	t0 := time.Now()
 	c.mu.Lock()
 	c.power.Suspending = true
 	c.emit(events.Event{Type: events.PowerSuspend, Message: "System is suspending"})
 	c.mu.Unlock()
-	res := SuspendResult{Budget: budget, Stopped: c.waitStopped(budget)}
-	res.Elapsed = time.Since(t0)
+	stopped := c.waitStopped(budget)
+	elapsed := time.Since(t0)
 	e := events.Event{Type: events.PowerSuspendStop, Message: "Runtime stopped before the system slept",
-		Data: map[string]any{"stopped": res.Stopped, "elapsed_ms": res.Elapsed.Milliseconds(), "budget_ms": budget.Milliseconds()}}
-	if !res.Stopped {
+		Data: map[string]any{"stopped": stopped, "elapsed_ms": elapsed.Milliseconds(), "budget_ms": budget.Milliseconds()}}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch {
+	case stopped:
+	case c.zombie != nil:
+		e.Severity = policy.SeverityWarning
+		e.RuntimePID = c.zombie.PID()
+		e.Message = fmt.Sprintf("Runtime termination is unverified (pid %d, see kill_failed); the system may sleep with VRAM still held, and termination is retried after resume", e.RuntimePID)
+	default:
 		e.Severity = policy.SeverityWarning
 		e.Message = fmt.Sprintf("Runtime still stopping when the %s suspend budget ran out; the system may sleep with the model loaded, and the stop continues and is verified after resume", budget)
 	}
-	c.mu.Lock()
 	c.emit(e)
-	c.mu.Unlock()
-	return res
 }
 
 // Resumed records a resume and applies the resume cooldown.
@@ -390,19 +386,20 @@ func (c *Controller) Shutdown(timeout time.Duration) {
 	}
 }
 
-// waitStopped steps the controller until no runtime is running or timeout
-// passes, and reports whether no runtime process remains: none running and
-// none retained as a zombie whose termination is unverified. It always
-// steps once, so the stop begins even with no time to wait.
+// waitStopped steps the controller until no runtime is running, no zombie
+// verification is in flight, or timeout passes, and reports whether no
+// runtime process remains: none running and none retained as a zombie whose
+// termination is unverified. It always steps once, so the stop begins even
+// with no time to wait.
 func (c *Controller) waitStopped(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for {
 		c.Step(false)
 		c.mu.Lock()
-		running := c.st.RuntimeRunning()
-		gone := !running && c.inst == nil && c.zombie == nil
+		busy := c.st.RuntimeRunning() || c.zombieStopping
+		gone := !busy && c.inst == nil && c.zombie == nil
 		c.mu.Unlock()
-		if !running {
+		if !busy {
 			return gone
 		}
 		if !time.Now().Before(deadline) {

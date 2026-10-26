@@ -320,13 +320,50 @@ func (c *Controller) summary(now time.Time, s api.Status) string {
 	return msg
 }
 
-// PrepareSuspend releases the GPU before sleep, waiting up to timeout.
-func (c *Controller) PrepareSuspend(timeout time.Duration) {
+// PrepareSuspend releases the GPU before sleep: it stops admitting, starts
+// the graceful stop at once, and waits up to budget for it to finish. It
+// never escalates to a hard kill because of the budget (ADR 0013): a stop
+// still running when the budget ends keeps going, and the resume side
+// verifies it. The caller is the Windows control handler, which holds the
+// system awake while this runs, so budget must be short. The outcome is
+// the power_suspend_stop event: stopped (no runtime process remains, and the
+// stop was observed inside the budget), late (the runtime was gone, but only
+// seen so after the budget ended, when the host had already let the system
+// sleep), elapsed_ms (how long the system was held back from sleeping), and
+// budget_ms.
+func (c *Controller) PrepareSuspend(budget time.Duration) {
+	c.prepareSuspend(budget, time.Now, time.Sleep)
+}
+
+// prepareSuspend is PrepareSuspend with the clock and the poll sleep
+// injectable, so a test can order a stop's completion against the deadline.
+func (c *Controller) prepareSuspend(budget time.Duration, now func() time.Time, sleep func(time.Duration)) {
+	t0 := now()
 	c.mu.Lock()
 	c.power.Suspending = true
 	c.emit(events.Event{Type: events.PowerSuspend, Message: "System is suspending"})
 	c.mu.Unlock()
-	c.waitStopped(timeout)
+	gone, late := c.waitStoppedWith(budget, now, sleep)
+	stopped := gone && !late
+	elapsed := now().Sub(t0)
+	e := events.Event{Type: events.PowerSuspendStop, Message: "Runtime stopped before the system slept",
+		Data: map[string]any{"stopped": stopped, "late": late, "elapsed_ms": elapsed.Milliseconds(), "budget_ms": budget.Milliseconds()}}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch {
+	case late:
+		e.Severity = policy.SeverityWarning
+		e.Message = fmt.Sprintf("Runtime stopped only after the %s suspend budget ran out; the system may have slept with the model loaded", budget.Round(time.Millisecond))
+	case stopped:
+	case c.zombie != nil:
+		e.Severity = policy.SeverityWarning
+		e.RuntimePID = c.zombie.PID()
+		e.Message = fmt.Sprintf("Runtime termination is unverified (pid %d, see kill_failed); the system may sleep with VRAM still held, and termination is retried after resume", e.RuntimePID)
+	default:
+		e.Severity = policy.SeverityWarning
+		e.Message = fmt.Sprintf("Runtime still stopping when the %s suspend budget ran out; the system may sleep with the model loaded, and the stop continues and is verified after resume", budget.Round(time.Millisecond))
+	}
+	c.emit(e)
 }
 
 // Resumed records a resume and applies the resume cooldown.
@@ -362,16 +399,34 @@ func (c *Controller) Shutdown(timeout time.Duration) {
 	}
 }
 
-func (c *Controller) waitStopped(timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+// waitStopped steps the controller until no runtime is running, no zombie
+// verification is in flight, or timeout passes. It reports gone (no runtime
+// process remains: none running and none retained as a zombie whose
+// termination is unverified) and late (gone, but first seen after the
+// deadline, so it cannot be claimed as done within the timeout). A stop
+// that was already complete is never late. It always steps once, so the
+// stop begins even with no time to wait.
+func (c *Controller) waitStopped(timeout time.Duration) (gone, late bool) {
+	return c.waitStoppedWith(timeout, time.Now, time.Sleep)
+}
+
+func (c *Controller) waitStoppedWith(timeout time.Duration, now func() time.Time, sleep func(time.Duration)) (gone, late bool) {
+	deadline := now().Add(timeout)
+	sawBusy := false
+	for {
 		c.Step(false)
 		c.mu.Lock()
-		running := c.st.RuntimeRunning()
+		busy := c.st.RuntimeRunning() || c.zombieStopping
+		gone = !busy && c.inst == nil && c.zombie == nil
 		c.mu.Unlock()
-		if !running {
-			return
+		sawBusy = sawBusy || busy
+		expired := !now().Before(deadline)
+		if !busy {
+			return gone, gone && sawBusy && expired
 		}
-		time.Sleep(20 * time.Millisecond)
+		if expired {
+			return false, false
+		}
+		sleep(20 * time.Millisecond)
 	}
 }

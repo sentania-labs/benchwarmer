@@ -3,8 +3,7 @@
 package winsvc
 
 import (
-	"context"
-	"time"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -21,7 +20,7 @@ func Run(o Options, h Handler) error {
 	if !isSvc {
 		return RunConsole(o, h)
 	}
-	return svc.Run(o.Name, &service{opts: o.withDefaults(), h: h})
+	return runService(o.withDefaults(), h)
 }
 
 // IsService reports whether the process runs under the service control
@@ -32,99 +31,96 @@ func IsService() bool {
 	return err == nil && ok
 }
 
-type service struct {
-	opts Options
-	h    Handler
-}
-
 // Pre-shutdown gives the configured PreshutdownTimeout instead of the few
 // seconds a plain shutdown notification allows. Shutdown is accepted too,
 // so a system that skips pre-shutdown still stops the runtime.
-const accepts = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPreShutdown |
-	svc.AcceptPowerEvent | svc.AcceptSessionChange
+const accepts = windows.SERVICE_ACCEPT_STOP | windows.SERVICE_ACCEPT_SHUTDOWN | windows.SERVICE_ACCEPT_PRESHUTDOWN |
+	windows.SERVICE_ACCEPT_POWEREVENT | windows.SERVICE_ACCEPT_SESSIONCHANGE
 
-// Execute implements svc.Handler.
-func (s *service) Execute(_ []string, r <-chan svc.ChangeRequest, st chan<- svc.Status) (bool, uint32) {
-	st <- svc.Status{State: svc.StartPending, WaitHint: 10000}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	events := make(chan Event, EventBuffer)
-	done := make(chan error, 1)
-	go func() { done <- s.h.Run(ctx, events) }()
-	st <- svc.Status{State: svc.Running, Accepts: accepts}
-
-	var (
-		stopping   bool
-		deadline   time.Time
-		checkpoint uint32
-		ticker     *time.Ticker
-		tick       <-chan time.Time
-	)
-	defer func() {
-		if ticker != nil {
-			ticker.Stop()
-		}
-	}()
-	pending := func() {
-		checkpoint++
-		st <- svc.Status{State: svc.StopPending, CheckPoint: checkpoint, WaitHint: waitHint(deadline, time.Now())}
-	}
-	for {
-		select {
-		case err := <-done:
-			if err != nil && !stopping {
-				// A service-specific exit code marks a failure, so the
-				// SCM's recovery actions apply.
-				return true, 1
-			}
-			return false, 0
-		case <-tick:
-			pending()
-		case c := <-r:
-			if c.Cmd == svc.Interrogate {
-				st <- c.CurrentStatus
-				continue
-			}
-			var sid uint32
-			if c.Cmd == svc.SessionChange && c.EventData != 0 {
-				// Read at once: the SCM owns this memory. Known x/sys
-				// limitation: the control handler has already returned by
-				// the time Execute sees the request, so the read is best
-				// effort. The reason is in EventType; only the ID is read
-				// from the pointer. EventData is reinterpreted in place
-				// rather than converted from uintptr.
-				n := *(**windows.WTSSESSION_NOTIFICATION)(unsafe.Pointer(&c.EventData))
-				sid = n.SessionID
-			}
-			ev, ok := translate(uint32(c.Cmd), c.EventType, sid, time.Now(), s.opts)
-			if !ok {
-				continue
-			}
-			if ev.Kind == Stop || ev.Kind == Shutdown {
-				if stopping {
-					if ev.Deadline.Before(deadline) {
-						// A shutdown during a stop can only shorten it.
-						deadline = ev.Deadline
-						deliver(events, ev)
-					}
-					continue
-				}
-				stopping, deadline = true, ev.Deadline
-				pending()
-				deliver(events, ev)
-				cancel()
-				ticker = time.NewTicker(time.Second)
-				tick = ticker.C
-				continue
-			}
-			deliver(events, ev)
-		}
-	}
+// host is the service registered with the SCM. A process hosts one service,
+// so it is a package variable the SCM's callbacks can reach.
+type host struct {
+	name   *uint16
+	plane  *plane
+	h      Handler
+	handle windows.Handle
 }
 
-func deliver(events chan<- Event, ev Event) {
-	select {
-	case events <- ev:
-	default:
+var (
+	theHost       *host
+	initCallbacks sync.Once
+	ctlCallback   uintptr
+	mainCallback  uintptr
+)
+
+// runService hands the process to the SCM dispatcher and returns when the
+// service has stopped. It replaces x/sys/windows/svc.Run, whose control
+// handler returns before the service has seen the request; a suspend
+// notification needs the handler held (ADR 0013).
+func runService(o Options, h Handler) error {
+	name, err := windows.UTF16PtrFromString(o.Name)
+	if err != nil {
+		return err
 	}
+	initCallbacks.Do(func() {
+		ctlCallback = windows.NewCallback(ctlHandler)
+		mainCallback = windows.NewCallback(serviceMain)
+	})
+	theHost = &host{name: name, plane: newPlane(o), h: h}
+	table := []windows.SERVICE_TABLE_ENTRY{
+		{ServiceName: name, ServiceProc: mainCallback},
+		{ServiceName: nil, ServiceProc: 0},
+	}
+	return windows.StartServiceCtrlDispatcher(&table[0])
+}
+
+// ctlHandler is the SCM's control handler (HandlerEx). It runs on the
+// dispatcher's thread, which serializes control requests, so a held suspend
+// also delays the next request by at most DefaultSuspendBudget.
+func ctlHandler(ctl, eventType, eventData, _ uintptr) uintptr {
+	var sid uint32
+	if uint32(ctl) == ctlSessionChange && eventData != 0 {
+		// The SCM owns this memory and keeps it valid until the handler
+		// returns, so it is read here and not later.
+		n := *(**windows.WTSSESSION_NOTIFICATION)(unsafe.Pointer(&eventData))
+		sid = n.SessionID
+	}
+	theHost.plane.control(uint32(ctl), uint32(eventType), sid)
+	return uintptr(windows.NO_ERROR)
+}
+
+// serviceMain is the entry point the SCM calls once the service starts.
+func serviceMain(_ uint32, _ **uint16) uintptr {
+	h := theHost
+	handle, err := windows.RegisterServiceCtrlHandlerEx(h.name, ctlCallback, 0)
+	if err != nil {
+		if errno, ok := err.(windows.Errno); ok {
+			return uintptr(errno)
+		}
+		return uintptr(windows.ERROR_UNKNOWN_EXCEPTION)
+	}
+	h.handle = handle
+	h.plane.supervise(h.h, h.report)
+	return uintptr(windows.NO_ERROR)
+}
+
+// report sends one status to the SCM.
+func (h *host) report(s status) {
+	t := windows.SERVICE_STATUS{ServiceType: windows.SERVICE_WIN32_OWN_PROCESS, CheckPoint: s.checkpoint, WaitHint: s.waitHint}
+	switch s.phase {
+	case phaseStartPending:
+		t.CurrentState = windows.SERVICE_START_PENDING
+	case phaseRunning:
+		t.CurrentState, t.ControlsAccepted = windows.SERVICE_RUNNING, accepts
+	case phaseStopPending:
+		t.CurrentState = windows.SERVICE_STOP_PENDING
+	case phaseStopped:
+		t.CurrentState = windows.SERVICE_STOPPED
+		if s.failed {
+			// A service-specific exit code marks a failure, so the SCM's
+			// recovery actions apply.
+			t.Win32ExitCode, t.ServiceSpecificExitCode = uint32(windows.ERROR_SERVICE_SPECIFIC_ERROR), 1
+		}
+	}
+	_ = windows.SetServiceStatus(h.handle, &t)
 }

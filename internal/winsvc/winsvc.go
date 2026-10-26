@@ -3,6 +3,10 @@
 // events either way: stop, shutdown with its deadline, suspend, resume, and
 // session changes. Install and Remove register the service with its
 // identity (ADR 0006) and failure-recovery actions.
+//
+// The SCM host is this package's own rather than x/sys/windows/svc, because
+// a suspend notification must be handled before the control handler
+// returns (ADR 0013); x/sys returns as soon as the request is queued.
 package winsvc
 
 import (
@@ -21,7 +25,9 @@ const (
 	Stop Kind = iota + 1
 	// Shutdown: the system is shutting down (pre-shutdown or shutdown).
 	Shutdown
-	// Suspend: the system is about to sleep.
+	// Suspend: the system is about to sleep. Windows waits only for the
+	// control handler to return, so the handler must finish its work and
+	// call Event.Ack by the event's Deadline (ADR 0013).
 	Suspend
 	// Resume: the system woke up.
 	Resume
@@ -64,11 +70,25 @@ const (
 type Event struct {
 	Kind Kind
 	// Deadline, for Stop and Shutdown, is when the OS may terminate the
-	// process; the handler should have released the GPU by then.
+	// process; the handler should have released the GPU by then. For
+	// Suspend it is when the host stops holding the system back from
+	// sleeping, whether or not the handler has acknowledged.
 	Deadline time.Time
+	// Done, for Suspend, is closed by Ack. It is nil in console mode and
+	// for every other kind.
+	Done chan struct{}
 	// Session and SessionID are set for SessionChange.
 	Session   SessionKind
 	SessionID uint32
+}
+
+// Ack tells the host that a Suspend has been handled, which lets the system
+// go to sleep. Call it exactly once, on every path, including when the
+// event is abandoned. It does nothing for events without a Done channel.
+func (e Event) Ack() {
+	if e.Done != nil {
+		close(e.Done)
+	}
 }
 
 // Handler is the service body.
@@ -107,6 +127,14 @@ const (
 	DefaultStopTimeout        = 20 * time.Second
 	DefaultShutdownTimeout    = 5 * time.Second
 	DefaultPreshutdownTimeout = 30 * time.Second
+	// DefaultSuspendBudget is how long the control handler holds a suspend
+	// notification for the Handler to stop the runtime (ADR 0013). It
+	// leaves half a second of margin inside the roughly two seconds Windows
+	// documents for a power-broadcast recipient, and is above the 0.8 s the
+	// graceful stop took on the target (ADR 0011). The real limit for a
+	// service control handler is still open and must be confirmed on the
+	// AMD host.
+	DefaultSuspendBudget = 1500 * time.Millisecond
 )
 
 // EventBuffer is how many events may queue before the handler reads them.
@@ -130,6 +158,7 @@ func (o Options) withDefaults() Options {
 // x/sys/windows, so the translation is testable off Windows.
 const (
 	ctlStop          = 0x1
+	ctlInterrogate   = 0x4
 	ctlShutdown      = 0x5
 	ctlPowerEvent    = 0xD
 	ctlSessionChange = 0xE
@@ -187,8 +216,8 @@ func SessionEvent(reason uint32) (SessionKind, bool) {
 }
 
 // translate maps one SCM control request to an event. sessionID is only
-// meaningful for session changes.
-func translate(cmd, eventType, sessionID uint32, now time.Time, o Options) (Event, bool) {
+// meaningful for session changes; suspendBudget sets a suspend's deadline.
+func translate(cmd, eventType, sessionID uint32, now time.Time, o Options, suspendBudget time.Duration) (Event, bool) {
 	o = o.withDefaults()
 	switch cmd {
 	case ctlStop:
@@ -199,7 +228,11 @@ func translate(cmd, eventType, sessionID uint32, now time.Time, o Options) (Even
 		return Event{Kind: Shutdown, Deadline: now.Add(o.ShutdownTimeout)}, true
 	case ctlPowerEvent:
 		if k, ok := PowerEvent(eventType); ok {
-			return Event{Kind: k}, true
+			ev := Event{Kind: k}
+			if k == Suspend {
+				ev.Deadline = now.Add(suspendBudget)
+			}
+			return ev, true
 		}
 	case ctlSessionChange:
 		if s, ok := SessionEvent(eventType); ok {

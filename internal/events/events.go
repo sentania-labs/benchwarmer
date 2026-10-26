@@ -52,7 +52,10 @@ const (
 	TelemetryRecovered Type = "telemetry_recovered"
 	TelemetryDegraded  Type = "telemetry_degraded"
 
-	PowerSuspend      Type = "power_suspend"
+	PowerSuspend Type = "power_suspend"
+	// PowerSuspendStop records whether the runtime was stopped within the
+	// suspend budget (or only after it, "late"), and how long that took.
+	PowerSuspendStop  Type = "power_suspend_stop"
 	PowerResume       Type = "power_resume"
 	SessionChange     Type = "session_change"
 	AgentConnected    Type = "agent_connected"

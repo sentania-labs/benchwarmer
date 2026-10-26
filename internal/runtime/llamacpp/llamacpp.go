@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sentania-labs/benchwarmer/internal/config"
@@ -202,8 +203,11 @@ type Instance struct {
 	// zero means hard kill only.
 	graceful time.Duration
 
+	// stopMu serializes Stop, which holds it for the whole graceful wait.
+	// stopped is separate so readers (the controller lists Members every
+	// tick, under its own lock) never wait behind a stop in progress.
 	stopMu  sync.Mutex
-	stopped bool
+	stopped atomic.Bool
 	stopRes runtime.StopResult
 }
 
@@ -212,10 +216,7 @@ func (i *Instance) PID() int { return i.g.PID() }
 
 // Members lists the PIDs in the boundary; empty once stopped.
 func (i *Instance) Members() []int {
-	i.stopMu.Lock()
-	stopped := i.stopped
-	i.stopMu.Unlock()
-	if stopped {
+	if i.stopped.Load() {
 		return nil
 	}
 	m, err := i.g.Members()
@@ -313,7 +314,7 @@ func (i *Instance) healthy(ctx context.Context, u string) bool {
 func (i *Instance) Stop(timeout time.Duration) (runtime.StopResult, error) {
 	i.stopMu.Lock()
 	defer i.stopMu.Unlock()
-	if i.stopped {
+	if i.stopped.Load() {
 		return i.stopRes, nil
 	}
 	var res runtime.StopResult
@@ -369,7 +370,8 @@ func (i *Instance) Stop(timeout time.Duration) (runtime.StopResult, error) {
 		}
 	}
 	_ = i.g.Close()
-	i.stopped, i.stopRes = true, res
+	i.stopRes = res
+	i.stopped.Store(true)
 	i.a.release(i)
 	return res, nil
 }

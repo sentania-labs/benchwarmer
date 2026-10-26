@@ -391,17 +391,19 @@ func (c *Controller) Shutdown(timeout time.Duration) {
 }
 
 // waitStopped steps the controller until no runtime is running or timeout
-// passes, and reports whether none is. It always steps once, so the stop
-// begins even with no time to wait.
+// passes, and reports whether no runtime process remains: none running and
+// none retained as a zombie whose termination is unverified. It always
+// steps once, so the stop begins even with no time to wait.
 func (c *Controller) waitStopped(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for {
 		c.Step(false)
 		c.mu.Lock()
 		running := c.st.RuntimeRunning()
+		gone := !running && c.inst == nil && c.zombie == nil
 		c.mu.Unlock()
 		if !running {
-			return true
+			return gone
 		}
 		if !time.Now().Before(deadline) {
 			return false

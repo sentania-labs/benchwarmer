@@ -721,6 +721,25 @@ func TestPrepareSuspendBudgetExpiresWithoutKillingEarly(t *testing.T) {
 	r.stepUntil(state.Ready)
 }
 
+// A stop whose kill cannot be verified leaves the process as a zombie that
+// may still hold VRAM; the suspend result must not call that stopped.
+func TestPrepareSuspendUnverifiedKillIsNotStopped(t *testing.T) {
+	r := newRig(t, nil)
+	r.toReady()
+	r.ad.last().stopErr = errors.New("descendants still present after timeout")
+	res := r.c.PrepareSuspend(2 * time.Second)
+	if res.Stopped {
+		t.Fatal("reported stopped while the runtime termination was unverified")
+	}
+	if _, ok := r.ev.find(events.KillFailed); !ok {
+		t.Fatalf("no kill_failed event: %v", r.ev.types())
+	}
+	e, ok := r.ev.find(events.PowerSuspendStop)
+	if !ok || e.Severity != policy.SeverityWarning || e.Data["stopped"] != false {
+		t.Fatalf("suspend stop event %+v (found %v)", e, ok)
+	}
+}
+
 func TestPrepareSuspendWithNoRuntimeReturnsAtOnce(t *testing.T) {
 	r := newRig(t, nil)
 	r.c.Step(true)

@@ -689,13 +689,18 @@ func TestPrepareSuspendBudgetExpiresWithoutKillingEarly(t *testing.T) {
 	inst := r.ad.last()
 	inst.stopGate = make(chan struct{})
 	t0 := time.Now()
-	r.c.PrepareSuspend(150 * time.Millisecond)
-	if d := time.Since(t0); d < 150*time.Millisecond || d > time.Second {
+	// The service computes the budget from a deadline, so it carries
+	// sub-millisecond noise; the message must still read as 150ms.
+	r.c.PrepareSuspend(150*time.Millisecond - 13*time.Microsecond)
+	if d := time.Since(t0); d < 149*time.Millisecond || d > time.Second {
 		t.Fatalf("held %s for a 150ms budget", d)
 	}
 	e, ok := r.ev.find(events.PowerSuspendStop)
-	if !ok || e.Severity != policy.SeverityWarning || e.Data["stopped"] != false || !strings.Contains(e.Message, "budget ran out") {
+	if !ok || e.Severity != policy.SeverityWarning || e.Data["stopped"] != false || !strings.Contains(e.Message, "the 150ms suspend budget ran out") {
 		t.Fatalf("suspend stop event %+v (found %v)", e, ok)
+	}
+	if e.Data["budget_ms"] != int64(149) {
+		t.Fatalf("budget_ms %v: data must stay unrounded", e.Data["budget_ms"])
 	}
 	if !r.state().RuntimeRunning() {
 		t.Fatalf("state %s: stop is still in flight", r.state())

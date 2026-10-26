@@ -348,7 +348,7 @@ func (c *Controller) PrepareSuspend(budget time.Duration) {
 		e.Message = fmt.Sprintf("Runtime termination is unverified (pid %d, see kill_failed); the system may sleep with VRAM still held, and termination is retried after resume", e.RuntimePID)
 	default:
 		e.Severity = policy.SeverityWarning
-		e.Message = fmt.Sprintf("Runtime still stopping when the %s suspend budget ran out; the system may sleep with the model loaded, and the stop continues and is verified after resume", budget)
+		e.Message = fmt.Sprintf("Runtime still stopping when the %s suspend budget ran out; the system may sleep with the model loaded, and the stop continues and is verified after resume", budget.Round(time.Millisecond))
 	}
 	c.emit(e)
 }

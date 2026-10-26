@@ -603,6 +603,7 @@ components:
         - telemetry_recovered
         - telemetry_degraded
         - power_suspend
+        - power_suspend_stop
         - power_resume
         - session_change
         - agent_connected

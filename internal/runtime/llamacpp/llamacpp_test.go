@@ -420,3 +420,38 @@ func TestGracefulStopAndKillFallback(t *testing.T) {
 		t.Fatalf("fallback: %+v %v after %s", res, err, time.Since(t0))
 	}
 }
+
+// The controller lists Members on every tick under its own lock. If that
+// waited for a graceful stop to finish, the controller would stall for the
+// whole graceful timeout, and no bounded wait on it could work (ADR 0013).
+func TestMembersDoesNotWaitForAStopInProgress(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("Ctrl+C on a CI console would reach the test runner too; graceful stop on Windows is verified on the target")
+	}
+	cfg := testConfig(t, "-load-delay", "50ms", "-ignore-interrupt")
+	cfg.StopMode, cfg.GracefulStopTimeout = config.StopGraceful, config.Duration(2*time.Second)
+	i := start(t, New(), cfg)
+	if err := i.WaitReady(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	stopped := make(chan error, 1)
+	go func() { _, err := i.Stop(5 * time.Second); stopped <- err }()
+	time.Sleep(200 * time.Millisecond) // inside the graceful wait
+
+	got := make(chan []int, 1)
+	go func() { got <- i.Members() }()
+	select {
+	case m := <-got:
+		if len(m) == 0 {
+			t.Fatal("no members listed while the runtime is still alive")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Members blocked behind the stop in progress")
+	}
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+	if m := i.Members(); len(m) != 0 {
+		t.Fatalf("members after stop: %v", m)
+	}
+}

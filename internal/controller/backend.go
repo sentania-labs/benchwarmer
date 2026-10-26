@@ -320,13 +320,41 @@ func (c *Controller) summary(now time.Time, s api.Status) string {
 	return msg
 }
 
-// PrepareSuspend releases the GPU before sleep, waiting up to timeout.
-func (c *Controller) PrepareSuspend(timeout time.Duration) {
+// SuspendResult is what PrepareSuspend achieved.
+type SuspendResult struct {
+	// Stopped is true when no runtime process was left by the time the
+	// budget ended.
+	Stopped bool
+	Budget  time.Duration
+	// Elapsed is how long PrepareSuspend took: how long the system was held
+	// back from sleeping.
+	Elapsed time.Duration
+}
+
+// PrepareSuspend releases the GPU before sleep: it stops admitting, starts
+// the graceful stop at once, and waits up to budget for it to finish. It
+// never escalates to a hard kill because of the budget (ADR 0013): a stop
+// still running when the budget ends keeps going, and the resume side
+// verifies it. The caller is the Windows control handler, which holds the
+// system awake while this runs, so budget must be short.
+func (c *Controller) PrepareSuspend(budget time.Duration) SuspendResult {
+	t0 := time.Now()
 	c.mu.Lock()
 	c.power.Suspending = true
 	c.emit(events.Event{Type: events.PowerSuspend, Message: "System is suspending"})
 	c.mu.Unlock()
-	c.waitStopped(timeout)
+	res := SuspendResult{Budget: budget, Stopped: c.waitStopped(budget)}
+	res.Elapsed = time.Since(t0)
+	e := events.Event{Type: events.PowerSuspendStop, Message: "Runtime stopped before the system slept",
+		Data: map[string]any{"stopped": res.Stopped, "elapsed_ms": res.Elapsed.Milliseconds(), "budget_ms": budget.Milliseconds()}}
+	if !res.Stopped {
+		e.Severity = policy.SeverityWarning
+		e.Message = fmt.Sprintf("Runtime still stopping when the %s suspend budget ran out; the system may sleep with the model loaded, and the stop continues and is verified after resume", budget)
+	}
+	c.mu.Lock()
+	c.emit(e)
+	c.mu.Unlock()
+	return res
 }
 
 // Resumed records a resume and applies the resume cooldown.
@@ -362,15 +390,21 @@ func (c *Controller) Shutdown(timeout time.Duration) {
 	}
 }
 
-func (c *Controller) waitStopped(timeout time.Duration) {
+// waitStopped steps the controller until no runtime is running or timeout
+// passes, and reports whether none is. It always steps once, so the stop
+// begins even with no time to wait.
+func (c *Controller) waitStopped(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	for {
 		c.Step(false)
 		c.mu.Lock()
 		running := c.st.RuntimeRunning()
 		c.mu.Unlock()
 		if !running {
-			return
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

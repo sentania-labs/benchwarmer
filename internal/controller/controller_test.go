@@ -38,6 +38,10 @@ type fakeInst struct {
 	mu      sync.Mutex
 	stopped bool
 	started time.Time
+	// stopGate, when set, holds Stop until it is closed (a runtime slow to
+	// release the GPU).
+	stopGate  chan struct{}
+	stopCalls int
 }
 
 func (f *fakeInst) PID() int          { return f.pid }
@@ -56,7 +60,12 @@ func (f *fakeInst) WaitReady(ctx context.Context) error {
 func (f *fakeInst) Stop(time.Duration) (runtime.StopResult, error) {
 	f.mu.Lock()
 	f.stopped = true
+	f.stopCalls++
+	gate := f.stopGate
 	f.mu.Unlock()
+	if gate != nil {
+		<-gate
+	}
 	already := false
 	select {
 	case <-f.exited:
@@ -652,6 +661,84 @@ func TestSuspendAndResume(t *testing.T) {
 	}
 	r.clk.Advance(3*time.Minute + time.Second)
 	r.stepUntil(state.Ready)
+}
+
+func TestPrepareSuspendReportsStopWithinBudget(t *testing.T) {
+	r := newRig(t, nil)
+	r.toReady()
+	res := r.c.PrepareSuspend(2 * time.Second)
+	if !res.Stopped || res.Elapsed >= res.Budget {
+		t.Fatalf("result %+v", res)
+	}
+	e, ok := r.ev.find(events.PowerSuspendStop)
+	if !ok || e.Severity != "" || e.Data["stopped"] != true {
+		t.Fatalf("suspend stop event %+v (found %v)", e, ok)
+	}
+	if _, ok := r.ev.find(events.RuntimeStopped); !ok {
+		t.Fatalf("runtime_stopped missing: %v", r.ev.types())
+	}
+}
+
+// A stop that outlasts the budget is neither abandoned nor escalated: the
+// host is released at the budget, the stop keeps going, and the resume side
+// finishes verifying it (ADR 0013).
+func TestPrepareSuspendBudgetExpiresWithoutKillingEarly(t *testing.T) {
+	r := newRig(t, nil)
+	r.toReady()
+	inst := r.ad.last()
+	inst.stopGate = make(chan struct{})
+	t0 := time.Now()
+	res := r.c.PrepareSuspend(150 * time.Millisecond)
+	if res.Stopped {
+		t.Fatal("reported stopped while the runtime was still releasing the GPU")
+	}
+	if d := time.Since(t0); d < 150*time.Millisecond || d > time.Second {
+		t.Fatalf("held %s for a 150ms budget", d)
+	}
+	e, ok := r.ev.find(events.PowerSuspendStop)
+	if !ok || e.Severity != policy.SeverityWarning || e.Data["stopped"] != false {
+		t.Fatalf("suspend stop event %+v (found %v)", e, ok)
+	}
+	if !r.state().RuntimeRunning() {
+		t.Fatalf("state %s: stop is still in flight", r.state())
+	}
+	inst.mu.Lock()
+	calls := inst.stopCalls
+	inst.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("Stop called %d times", calls)
+	}
+
+	// The system sleeps and wakes; the stop finishes, and the resume
+	// cooldown applies as usual.
+	close(inst.stopGate)
+	r.c.Resumed()
+	r.stepUntil(state.Cooldown)
+	if r.ad.count() != 1 {
+		t.Fatalf("runtime restarted without waiting: %d starts", r.ad.count())
+	}
+	r.clk.Advance(3*time.Minute + time.Second)
+	r.stepUntil(state.Ready)
+}
+
+func TestPrepareSuspendWithNoRuntimeReturnsAtOnce(t *testing.T) {
+	r := newRig(t, nil)
+	r.c.Step(true)
+	t0 := time.Now()
+	res := r.c.PrepareSuspend(2 * time.Second)
+	if !res.Stopped || time.Since(t0) > 500*time.Millisecond {
+		t.Fatalf("result %+v after %s", res, time.Since(t0))
+	}
+}
+
+func TestPrepareSuspendStillStopsWithNoBudget(t *testing.T) {
+	r := newRig(t, nil)
+	r.toReady()
+	r.c.PrepareSuspend(0)
+	// The stop began even though there was no time to wait for it.
+	if r.state() == state.Ready {
+		t.Fatal("stop not started")
+	}
 }
 
 func TestShutdownStopsRuntime(t *testing.T) {

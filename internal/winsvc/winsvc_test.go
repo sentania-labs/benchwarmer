@@ -22,7 +22,7 @@ func TestTranslate(t *testing.T) {
 		{"stop", ctlStop, 0, 0, Event{Kind: Stop, Deadline: now.Add(10 * time.Second)}, true},
 		{"preshutdown", ctlPreShutdown, 0, 0, Event{Kind: Shutdown, Deadline: now.Add(DefaultPreshutdownTimeout)}, true},
 		{"shutdown", ctlShutdown, 0, 0, Event{Kind: Shutdown, Deadline: now.Add(DefaultShutdownTimeout)}, true},
-		{"suspend", ctlPowerEvent, 4, 0, Event{Kind: Suspend}, true},
+		{"suspend", ctlPowerEvent, 4, 0, Event{Kind: Suspend, Deadline: now.Add(DefaultSuspendBudget)}, true},
 		{"resume automatic", ctlPowerEvent, 0x12, 0, Event{Kind: Resume}, true},
 		{"resume suspend", ctlPowerEvent, 7, 0, Event{Kind: Resume}, true},
 		{"power status change ignored", ctlPowerEvent, 0xA, 0, Event{}, false},
@@ -43,6 +43,13 @@ func TestTranslate(t *testing.T) {
 				t.Fatalf("got %+v %v, want %+v %v", got, ok, tt.want, tt.ok)
 			}
 		})
+	}
+}
+
+func TestSuspendBudgetOption(t *testing.T) {
+	got, ok := translate(ctlPowerEvent, pbtAPMSuspend, 0, now, Options{SuspendBudget: 1500 * time.Millisecond})
+	if !ok || !got.Deadline.Equal(now.Add(1500*time.Millisecond)) {
+		t.Fatalf("got %+v %v", got, ok)
 	}
 }
 

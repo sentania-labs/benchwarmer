@@ -15,7 +15,7 @@ const TYPES = [
   "cooldown_started", "cooldown_reset", "suppression_started", "recovery_scheduled",
   "mode_changed", "mode_expired", "config_changed", "config_rejected", "config_recovered",
   "telemetry_lost", "telemetry_recovered", "telemetry_degraded",
-  "power_suspend", "power_resume", "session_change", "agent_connected", "agent_disconnected", "device_lost",
+  "power_suspend", "power_suspend_stop", "power_resume", "session_change", "agent_connected", "agent_disconnected", "device_lost",
   "requests_rejected", "request_force_closed",
 ];
 

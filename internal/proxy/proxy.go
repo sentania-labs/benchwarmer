@@ -81,7 +81,7 @@ func New(o Options) http.Handler {
 		ErrorLog: slog.NewLogLogger(o.Log.Handler(), slog.LevelDebug),
 	}
 	reject := func(r *http.Request, status int, outcome string, extra ...any) {
-		o.Log.Info("inference request rejected", append([]any{"peer", peerHost(r), "method", r.Method, "path", r.URL.Path,
+		o.Log.Info("inference request rejected", append([]any{"peer", peerHost(r), "method", r.Method, "path", api.LogPath(r),
 			"status", status, "outcome", outcome}, extra...)...)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

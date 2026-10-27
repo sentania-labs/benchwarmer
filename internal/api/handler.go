@@ -107,7 +107,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	h.serve(rec, r)
 	if h.o.Logger != nil {
-		h.o.Logger.Log(r.Context(), requestLogLevel(r, rec.status), "management request", "method", r.Method, "path", r.URL.Path,
+		h.o.Logger.Log(r.Context(), requestLogLevel(r, rec.status), "management request", "method", r.Method, "path", LogPath(r),
 			"status", rec.status, "peer", peerHost(r), "duration_ms", time.Since(start).Milliseconds())
 	}
 }
@@ -127,6 +127,17 @@ func requestLogLevel(r *http.Request, status int) slog.Level {
 		return slog.LevelDebug
 	}
 	return slog.LevelInfo
+}
+
+const maxLoggedPath = 256
+
+// LogPath returns the request path bounded for logging: a caller controls it
+// before any authentication, and a log line must not grow without limit.
+func LogPath(r *http.Request) string {
+	if p := r.URL.Path; len(p) > maxLoggedPath {
+		return p[:maxLoggedPath]
+	}
+	return r.URL.Path
 }
 
 func isLoopbackPeer(r *http.Request) bool {
@@ -241,7 +252,7 @@ func (h *handler) backendError(w http.ResponseWriter, r *http.Request, err error
 		writeError(w, re.Status, re.Code, re.Message)
 	default:
 		if h.o.Logger != nil {
-			h.o.Logger.Error("management request failed", "method", r.Method, "path", r.URL.Path, "error", err)
+			h.o.Logger.Error("management request failed", "method", r.Method, "path", LogPath(r), "error", err)
 		}
 		writeError(w, http.StatusInternalServerError, CodeInternal, "internal error; see the service log")
 	}

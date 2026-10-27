@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sentania-labs/benchwarmer/internal/api"
 )
 
 // The runtime reports the model and token counts in its response (the
@@ -130,7 +132,7 @@ func logRequest(log *slog.Logger, msg string, r *http.Request, id string, status
 	if status == 0 {
 		shown = "-"
 	}
-	a := []any{"request_id", id, "peer", peerHost(r), "method", r.Method, "path", r.URL.Path,
+	a := []any{"request_id", id, "peer", peerHost(r), "method", r.Method, "path", api.LogPath(r),
 		"status", shown, "outcome", outcome, "streamed", u.streamed}
 	a = append(a, u.attrs()...)
 	a = append(a, "duration_ms", d.Milliseconds())

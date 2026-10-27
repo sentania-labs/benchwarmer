@@ -689,3 +689,20 @@ func TestCutBeforeHeadersLogsDashStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestLoggedPathIsBounded(t *testing.T) {
+	r := newRig(t, upstream(t, 1, 0))
+	long := "/v1/" + strings.Repeat("a", 4000)
+	req := httptest.NewRequest(http.MethodPost, long, strings.NewReader(`{}`))
+	req.RemoteAddr = "192.168.1.50:5555"
+	r.srv.Config.Handler.ServeHTTP(httptest.NewRecorder(), req)
+	req = httptest.NewRequest(http.MethodGet, "/"+strings.Repeat("b", 4000), nil)
+	r.srv.Config.Handler.ServeHTTP(httptest.NewRecorder(), req)
+	logs := r.logText()
+	if got := strings.Count(logs, "inference request rejected"); got != 2 {
+		t.Fatalf("want two rejected lines, got %d", got)
+	}
+	if len(logs) > 2000 {
+		t.Errorf("logged paths not bounded: %d bytes", len(logs))
+	}
+}

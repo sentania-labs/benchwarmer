@@ -179,6 +179,10 @@ delivered to `models\` the same way.
   made in the dashboard stick. Action **Replace** makes the GPO the source
   of truth: dashboard changes are overwritten at the next policy refresh
   and the GPO's file takes effect when the service restarts.
+- Application rules added in a newer Benchwarmer release are merged into
+  an existing `config.json` when the service loads it, including a file
+  deployed by GPO, and the file is rewritten to show them. A built-in rule
+  you deleted (it is listed in `builtin_rules_seen`) is not brought back.
 - An invalid file does not stop the service: it reports the problem in its
   log and runs on the last settings that worked, or the defaults, without
   overwriting your file.

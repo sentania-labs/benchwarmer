@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -158,26 +157,7 @@ func (c *Controller) observe(now time.Time) {
 	if c.d.Facts != nil {
 		c.gpu, c.apps, c.session = c.d.Facts.Build(now, in)
 	}
-	// Retain the evidence for attribution loss without logging every tick.
-	// Counters and PIDs contain no request content or credentials.
-	degraded := in.RuntimePID > 0 && (!slices.Contains(in.OwnPIDs, in.RuntimePID) || c.gpu.Confidence != policy.ConfidenceHigh)
-	if degraded && !c.attributionDegraded {
-		var rootBytes uint64
-		rootSeen := false
-		for _, p := range c.sample.Processes {
-			if int(p.PID) == in.RuntimePID {
-				rootSeen = true
-				rootBytes += p.DedicatedBytes
-			}
-		}
-		c.emit(events.Event{Time: now, Type: events.TelemetryDegraded, Severity: policy.SeverityWarning,
-			RuntimePID: in.RuntimePID, Telemetry: events.TelemetryFrom(c.gpu),
-			Message: "Runtime GPU attribution incomplete; retaining the runtime root identity",
-			Data: map[string]any{"reported_member_count": len(in.OwnPIDs), "root_in_members": slices.Contains(in.OwnPIDs, in.RuntimePID),
-				"root_in_sample": rootSeen, "root_dedicated_bytes": rootBytes, "sample_process_count": len(c.sample.Processes),
-				"sample_complete": c.sample.Complete, "footprint_mib": in.FootprintMiB}})
-	}
-	c.attributionDegraded = degraded
+	c.trackAttribution(now, in)
 	// Until the release of our own VRAM is confirmed (or times out), memory
 	// the driver has not freed yet is ours, not a competing workload.
 	if c.vram.active && c.vram.footprint > 0 && !c.st.RuntimeRunning() {

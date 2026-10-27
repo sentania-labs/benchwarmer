@@ -20,6 +20,7 @@ const (
 	StateChanged    Type = "state_changed"
 	// DecisionChanged records a change of winning rule without a state
 	// change (e.g. cooldown reason changes from game to soft contention).
+	// Switches between game rules are not recorded.
 	DecisionChanged Type = "decision_changed"
 
 	LoadStarted   Type = "load_started"

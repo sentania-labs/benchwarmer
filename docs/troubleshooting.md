@@ -35,9 +35,12 @@ What the log records:
   byte; close to `duration_ms` when not streamed) and `duration_ms`. The model
   and token counts come from the runtime's response (`usage`/`timings`) and are
   omitted when it does not report them. A request cut by preemption or the
-  maximum duration logs `inference request cut` with the same fields. A
-  request refused while the worker yields logs `inference request rejected`
-  with `peer`, `path`, `condition` and `reason`.
+  maximum duration logs `inference request cut` with the same fields; its
+  `status` is `-` when no response header had been written yet. Every request
+  the proxy refuses logs `inference request rejected` with `peer`, `method`,
+  `path`, `status` and `outcome` (`unauthorized` for a missing or wrong token,
+  `not_found` outside `/v1/`, `unavailable` while the worker yields, which also
+  adds `condition` and `reason`). The token is never logged.
 - The history database does not record inference requests. The only other
   record is the `/metrics` request-duration histogram and rejected counter,
   which have no peer, model or token detail.

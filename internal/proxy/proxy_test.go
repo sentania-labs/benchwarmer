@@ -609,3 +609,83 @@ func TestCompressedStreamLogsStreamedWithoutCounts(t *testing.T) {
 		}
 	}
 }
+
+func TestUnauthorizedRequestIsLoggedWithoutToken(t *testing.T) {
+	r := newRig(t, upstream(t, 1, 0))
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions?key=hidden", strings.NewReader(`{}`))
+	req.RemoteAddr = "192.168.1.50:5555"
+	req.Header.Set("Authorization", "Bearer wrong-token-value")
+	rec := httptest.NewRecorder()
+	r.srv.Config.Handler.ServeHTTP(rec, req)
+	if rec.Code != 401 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	l := logLine(t, r, "inference request rejected")
+	for _, want := range []string{"peer=192.168.1.50", "method=POST", "path=/v1/chat/completions", "status=401", "outcome=unauthorized"} {
+		if !strings.Contains(l, want) {
+			t.Errorf("log line lacks %q: %s", want, l)
+		}
+	}
+	for _, leak := range []string{"wrong-token-value", "inference-secret", "hidden"} {
+		if strings.Contains(r.logText(), leak) {
+			t.Errorf("log leaks %q:\n%s", leak, r.logText())
+		}
+	}
+	if n := strings.Count(r.logText(), "inference request"); n != 1 {
+		t.Errorf("want exactly one line, got %d:\n%s", n, r.logText())
+	}
+}
+
+func TestNotFoundRequestIsLogged(t *testing.T) {
+	r := newRig(t, upstream(t, 1, 0))
+	resp, err := http.Get(r.srv.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	l := logLine(t, r, "inference request rejected")
+	for _, want := range []string{"peer=127.0.0.1", "method=GET", "path=/health", "status=404", "outcome=not_found"} {
+		if !strings.Contains(l, want) {
+			t.Errorf("log line lacks %q: %s", want, l)
+		}
+	}
+	if n := strings.Count(r.logText(), "inference request"); n != 1 {
+		t.Errorf("want exactly one line, got %d:\n%s", n, r.logText())
+	}
+}
+
+func TestCutBeforeHeadersLogsDashStatus(t *testing.T) {
+	started := make(chan struct{})
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		close(started)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(up.Close)
+	r := newRig(t, up)
+	errc := make(chan error, 1)
+	go func() {
+		resp, err := post(r.srv.URL, `{}`)
+		if resp != nil {
+			resp.Body.Close()
+		}
+		errc <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("request never reached the runtime")
+	}
+	r.gate.Close(Closed{Condition: state.Yielding})
+	r.gate.ForceCloseAll()
+	if err := <-errc; err == nil {
+		t.Fatal("client should see the cut")
+	}
+	waitIdle(t, r.gate)
+	l := logLine(t, r, "inference request cut")
+	for _, want := range []string{"status=-", "outcome=force_closed"} {
+		if !strings.Contains(l, want) {
+			t.Errorf("log line lacks %q: %s", want, l)
+		}
+	}
+}

@@ -80,8 +80,13 @@ func New(o Options) http.Handler {
 		},
 		ErrorLog: slog.NewLogLogger(o.Log.Handler(), slog.LevelDebug),
 	}
+	reject := func(r *http.Request, status int, outcome string, extra ...any) {
+		o.Log.Info("inference request rejected", append([]any{"peer", peerHost(r), "method", r.Method, "path", r.URL.Path,
+			"status", status, "outcome", outcome}, extra...)...)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/v1/") {
+			reject(r, http.StatusNotFound, "not_found")
 			writeError(w, http.StatusNotFound, api.Error{Error: "not found", Code: "not_found"})
 			return
 		}
@@ -91,6 +96,7 @@ func New(o Options) http.Handler {
 		}
 		w.Header().Set(HeaderCondition, string(cond))
 		if !authorized(r, o) {
+			reject(r, http.StatusUnauthorized, "unauthorized")
 			writeError(w, http.StatusUnauthorized, api.Error{Error: "inference token required", Code: "unauthorized"})
 			return
 		}
@@ -99,8 +105,7 @@ func New(o Options) http.Handler {
 			if o.Observer != nil {
 				o.Observer.RequestRejected()
 			}
-			o.Log.Info("inference request rejected", "peer", peerHost(r), "method", r.Method, "path", r.URL.Path,
-				"status", http.StatusServiceUnavailable, "condition", string(closed.Condition), "reason", closed.Reason)
+			reject(r, http.StatusServiceUnavailable, "unavailable", "condition", string(closed.Condition), "reason", closed.Reason)
 			rejectUnavailable(w, closed)
 			return
 		}

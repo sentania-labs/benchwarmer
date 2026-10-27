@@ -126,8 +126,12 @@ func (u *usage) attrs() []any {
 // logRequest writes the one-line account of a finished request. Only
 // metadata: never the query, body, or headers.
 func logRequest(log *slog.Logger, msg string, r *http.Request, id string, status int, outcome string, d time.Duration, u *usage) {
+	var shown any = status
+	if status == 0 {
+		shown = "-"
+	}
 	a := []any{"request_id", id, "peer", peerHost(r), "method", r.Method, "path", r.URL.Path,
-		"status", status, "outcome", outcome, "streamed", u.streamed}
+		"status", shown, "outcome", outcome, "streamed", u.streamed}
 	a = append(a, u.attrs()...)
 	a = append(a, "duration_ms", d.Milliseconds())
 	log.Info(msg, a...)

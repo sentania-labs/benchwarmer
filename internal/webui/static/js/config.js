@@ -438,6 +438,9 @@ function applicationsSection() {
     }, label);
     return h("li", { class: "rule", dataset: { path: p } },
       h("div", { class: "rule-head" }, h("span", { class: "rule-num" }, "#" + (i + 1)),
+        h("span", { class: "rule-origin " + (r.id ? "builtin" : "local"),
+          title: r.id ? "Shipped with Benchwarmer. Edits stay; deleting it keeps it deleted." : "Added on this PC." },
+          r.id ? "Built-in" : "Local"),
         h("span", { class: "rule-actions" },
           move(-1, "Up", idFor(p) + "-up"), move(1, "Down", idFor(p) + "-down"),
           h("button", { type: "button", class: "danger", "aria-label": "Remove rule " + (i + 1),
@@ -451,7 +454,7 @@ function applicationsSection() {
   });
   return [
     h("div", { class: "notice info" }, h("span", null,
-      "Rules are checked top to bottom and the first match wins. Put specific rules (a launcher's own executable) above broad ones (a whole library folder). Matching ignores case and treats / and \\ alike.")),
+      "Built-in rules ship with Benchwarmer; rules added in a newer version appear here after an upgrade, and one you delete stays deleted. Local rules were added on this PC. Rules are checked top to bottom and the first match wins. Put specific rules (a launcher's own executable) above broad ones (a whole library folder). Matching ignores case and treats / and \\ alike.")),
     h("ol", { class: "rules" }, rows),
     h("button", { type: "button", id: "add-rule", onclick: () => structural(() => list.push({ exe: "", class: "game" }),
       idFor("applications[" + list.length + "].exe")) }, "Add rule at the end"),

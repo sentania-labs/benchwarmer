@@ -14,20 +14,27 @@ import (
 // Parse decodes and validates a config document. Unknown fields are
 // rejected so a typo cannot silently fall back to a default.
 func Parse(b []byte) (Config, error) {
+	c, _, err := parse(b)
+	return c, err
+}
+
+// parse is Parse plus whether loading added shipped rules to the document.
+func parse(b []byte) (Config, bool, error) {
 	var c Config
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&c); err != nil {
-		return Config{}, fmt.Errorf("parse config: %w", err)
+		return Config{}, false, fmt.Errorf("parse config: %w", err)
 	}
 	if dec.More() {
-		return Config{}, errors.New("parse config: trailing data after JSON document")
+		return Config{}, false, errors.New("parse config: trailing data after JSON document")
 	}
 	upgrade(&c)
+	added := mergeBuiltinRules(&c)
 	if err := Validate(c); err != nil {
-		return Config{}, err
+		return Config{}, false, err
 	}
-	return c, nil
+	return c, added, nil
 }
 
 // upgrade fills fields added to schema version 1 after a config file may
@@ -148,8 +155,15 @@ func (s *Store) Load() (LoadResult, error) {
 	defer s.mu.Unlock()
 	b, err := os.ReadFile(s.path)
 	if err == nil {
-		c, perr := Parse(b)
+		c, merged, perr := parse(b)
 		if perr == nil {
+			if merged {
+				// Persist the new shipped rules so the file shows what is
+				// in effect; a failed write still leaves them active.
+				if out, merr := Marshal(c); merr == nil && WriteFileAtomic(s.path, out, 0o600) == nil {
+					b = out
+				}
+			}
 			// Keep last-good in step with a primary that validates.
 			if lg, err := os.ReadFile(s.lastGood); err != nil || !bytes.Equal(lg, b) {
 				_ = WriteFileAtomic(s.lastGood, b, 0o600)

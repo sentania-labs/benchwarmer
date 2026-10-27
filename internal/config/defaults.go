@@ -104,8 +104,9 @@ func Default() Config {
 			End:     "17:00",
 			Enabled: true,
 		}},
-		Timezone:     "America/Chicago",
-		Applications: DefaultApplications(),
+		Timezone:         "America/Chicago",
+		Applications:     DefaultApplications(),
+		BuiltinRulesSeen: DefaultRuleIDs(),
 		AntiThrash: AntiThrash{
 			Window:         d(10 * time.Minute),
 			MaxPreemptions: 2,
@@ -148,6 +149,14 @@ func Default() Config {
 // evaluated in order and the first match wins, so launcher executables are
 // listed before the library-folder rules that would otherwise catch them.
 func DefaultApplications() []AppRule {
+	rules := shippedApplications()
+	for i := range rules {
+		rules[i].ID = builtinID(rules[i])
+	}
+	return rules
+}
+
+func shippedApplications() []AppRule {
 	return []AppRule{
 		// Launchers: presence alone never makes the worker yield.
 		{Name: "Steam", Exe: "steam.exe", Class: ClassLauncher},

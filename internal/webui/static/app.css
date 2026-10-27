@@ -231,6 +231,8 @@ ol.rules { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 10p
 .rule { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
 .rule-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rule-num { font-weight: 700; }
+.rule-origin { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; margin-right: auto; }
+.rule-origin.local { color: var(--text); }
 .rule-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .error-summary { background: var(--bad-bg); color: var(--bad-ink); border: 2px solid var(--bad-mark); border-radius: var(--radius); padding: 12px 16px; margin: 12px 0; }
 .error-summary ul { margin: 0; padding-left: 18px; }

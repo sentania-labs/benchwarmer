@@ -264,6 +264,9 @@ func (h *handler) putConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cur, _ := h.o.Backend.Config()
+	if in.BuiltinRulesSeen == nil {
+		in.BuiltinRulesSeen = cur.BuiltinRulesSeen
+	}
 	h.applyConfig(w, r, config.RestoreRedacted(in, cur))
 }
 

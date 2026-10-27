@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -372,6 +373,29 @@ func TestConfigRedactedAndRoundTrip(t *testing.T) {
 	}
 	if hr.be.actors[0] != "api@127.0.0.1" {
 		t.Fatalf("actor %q", hr.be.actors[0])
+	}
+}
+
+func TestConfigPutWithoutBuiltinRulesSeenKeepsRecordedList(t *testing.T) {
+	hr := newHarness(t)
+	cur, _ := hr.be.Config()
+	want := slices.Clone(cur.BuiltinRulesSeen)
+	if len(want) == 0 {
+		t.Fatal("harness config records no seen built-in rules")
+	}
+	var doc map[string]json.RawMessage
+	body, _ := json.Marshal(cur)
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatal(err)
+	}
+	delete(doc, "builtin_rules_seen")
+	body, _ = json.Marshal(doc)
+	if rec := hr.do(req{method: "PUT", path: "/api/v1/config", body: string(body), token: mgmtTok}); rec.Code != 200 {
+		t.Fatalf("PUT: %d %s", rec.Code, rec.Body.String())
+	}
+	stored := hr.be.updates[len(hr.be.updates)-1]
+	if !slices.Equal(stored.BuiltinRulesSeen, want) {
+		t.Fatalf("seen list = %v, want %v", stored.BuiltinRulesSeen, want)
 	}
 }
 

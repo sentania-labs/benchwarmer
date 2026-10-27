@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -577,5 +578,34 @@ func TestUsageAttrsPreferUsageOverTimings(t *testing.T) {
 				t.Errorf("got %v, want %v", counts, c.want)
 			}
 		})
+	}
+}
+
+func TestCompressedStreamLogsStreamedWithoutCounts(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Content-Encoding", "gzip")
+		zw := gzip.NewWriter(w)
+		fmt.Fprint(zw, "data: {\"model\":\"small-q4.gguf\",\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":7}}\n\ndata: [DONE]\n\n")
+		zw.Close()
+	}))
+	t.Cleanup(up.Close)
+	r := newRig(t, up)
+	req, _ := http.NewRequest(http.MethodPost, r.srv.URL+"/v1/chat/completions", strings.NewReader(`{"stream":true}`))
+	req.Header.Set("Authorization", "Bearer inference-secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	l := logLine(t, r, "inference request")
+	if !strings.Contains(l, "streamed=true") {
+		t.Errorf("compressed SSE not logged as streamed: %s", l)
+	}
+	for _, no := range []string{"prompt_tokens", "completion_tokens", "model="} {
+		if strings.Contains(l, no) {
+			t.Errorf("counts read from compressed bytes (%s): %s", no, l)
+		}
 	}
 }

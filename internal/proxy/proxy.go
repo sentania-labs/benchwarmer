@@ -62,10 +62,12 @@ func New(o Options) http.Handler {
 		FlushInterval: -1,
 		ModifyResponse: func(resp *http.Response) error {
 			u, _ := resp.Request.Context().Value(usageKey{}).(*usage)
-			// A compressed body cannot be read for counts; log without them.
-			if u != nil && resp.Header.Get("Content-Encoding") == "" {
+			if u != nil {
 				u.streamed = streamedResponse(resp.Header)
-				resp.Body = tap{ReadCloser: resp.Body, u: u}
+				// A compressed body cannot be read for counts; log without them.
+				if resp.Header.Get("Content-Encoding") == "" {
+					resp.Body = tap{ReadCloser: resp.Body, u: u}
+				}
 			}
 			return nil
 		},

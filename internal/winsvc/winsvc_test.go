@@ -72,7 +72,7 @@ func TestStartName(t *testing.T) {
 
 func TestRecoveryPlan(t *testing.T) {
 	p := RecoveryPlan()
-	want := []RecoveryStep{{true, 30 * time.Second}, {true, 30 * time.Second}, {false, 0}}
+	want := []RecoveryStep{{true, 30 * time.Second}, {true, 2 * time.Minute}, {false, 0}}
 	if len(p) != len(want) {
 		t.Fatalf("plan %+v", p)
 	}
@@ -158,8 +158,9 @@ func (n wixNode) find(name string) []wixNode {
 	return out
 }
 
-// TestWixServiceConfigMatches keeps the MSI's ServiceConfig in step with what
-// the service repairs at startup, so an install leaves nothing to repair.
+// TestWixServiceConfigMatches keeps the MSI's service configuration in step
+// with what the service repairs at startup, so an install leaves nothing to
+// repair.
 func TestWixServiceConfigMatches(t *testing.T) {
 	b, err := os.ReadFile("../../packaging/wix/Benchwarmer.wxs")
 	if err != nil {
@@ -169,43 +170,70 @@ func TestWixServiceConfigMatches(t *testing.T) {
 	if err := xml.Unmarshal(b, &doc); err != nil {
 		t.Fatal(err)
 	}
-	var cfgs []wixNode
+	var installs []wixNode
 	for _, si := range doc.find("ServiceInstall") {
 		if si.attrs()["Name"] == "Benchwarmer" {
-			cfgs = append(cfgs, si.find("ServiceConfig")...)
+			installs = append(installs, si)
 		}
 	}
-	if len(cfgs) != 1 {
-		t.Fatalf("Benchwarmer ServiceInstall has %d ServiceConfig elements, want 1", len(cfgs))
+	if len(installs) != 1 {
+		t.Fatalf("%d Benchwarmer ServiceInstall elements, want 1", len(installs))
 	}
-	attr := cfgs[0].attrs()
-	want := map[string]string{
+	only := func(name string) wixNode {
+		n := installs[0].find(name)
+		if len(n) != 1 {
+			t.Fatalf("ServiceInstall has %d %s elements, want 1", len(n), name)
+		}
+		return n[0]
+	}
+
+	cfg := only("ServiceConfig").attrs()
+	for k, v := range map[string]string{
 		"DelayedAutoStart":   "yes",
 		"FailureActionsWhen": "failedToStopOrReturnedError",
-		"ResetPeriodInDays":  strconv.Itoa(int(RecoveryResetPeriod / (24 * time.Hour))),
 		"PreShutdownDelay":   strconv.Itoa(int(DefaultPreshutdownTimeout / time.Millisecond)),
 		"OnInstall":          "yes",
 		"OnReinstall":        "yes",
-	}
-	kinds := []string{"FirstFailureActionType", "SecondFailureActionType", "ThirdFailureActionType"}
-	plan := RecoveryPlan()
-	if len(plan) != len(kinds) {
-		t.Fatalf("plan has %d steps, ServiceConfig has %d", len(plan), len(kinds))
-	}
-	delay := plan[0].Delay
-	for i, s := range plan {
-		want[kinds[i]] = "none"
-		if s.Restart {
-			want[kinds[i]] = "restart"
-			if s.Delay != delay {
-				t.Fatalf("step %d delay %v differs from %v: ServiceConfig has one delay", i, s.Delay, delay)
-			}
+	} {
+		if cfg[k] != v {
+			t.Errorf("ServiceConfig %s = %q, want %q", k, cfg[k], v)
 		}
 	}
-	want["RestartServiceDelayInSeconds"] = strconv.Itoa(int(delay / time.Second))
-	for k, v := range want {
-		if attr[k] != v {
-			t.Errorf("ServiceConfig %s = %q, want %q", k, attr[k], v)
+
+	fa := only("ServiceConfigFailureActions")
+	faAttr := fa.attrs()
+	if want := strconv.Itoa(int(RecoveryResetPeriod / time.Second)); faAttr["ResetPeriod"] != want {
+		t.Errorf("ServiceConfigFailureActions ResetPeriod = %q, want %q", faAttr["ResetPeriod"], want)
+	}
+	for _, k := range []string{"OnInstall", "OnReinstall"} {
+		if faAttr[k] != "yes" {
+			t.Errorf("ServiceConfigFailureActions %s = %q, want yes", k, faAttr[k])
+		}
+	}
+	var got []RecoveryStep
+	for _, f := range fa.find("Failure") {
+		a := f.attrs()
+		ms, err := strconv.Atoi(a["Delay"])
+		if err != nil {
+			t.Fatalf("Failure Delay %q: %v", a["Delay"], err)
+		}
+		step := RecoveryStep{Delay: time.Duration(ms) * time.Millisecond}
+		switch a["Action"] {
+		case "restartService":
+			step.Restart = true
+		case "none":
+		default:
+			t.Fatalf("Failure Action %q", a["Action"])
+		}
+		got = append(got, step)
+	}
+	want := RecoveryPlan()
+	if len(got) != len(want) {
+		t.Fatalf("MSI plan %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("MSI plan step %d = %+v, want %+v", i, got[i], want[i])
 		}
 	}
 }

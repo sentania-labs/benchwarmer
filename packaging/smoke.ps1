@@ -75,7 +75,7 @@ function Assert-ServiceConfig([int] $DriftBefore) {
   if ($qc -notmatch 'AUTO_START\s+\(DELAYED\)') { Fail "sc qc does not show a delayed automatic start:`n$qc" }
   $qf = (& sc.exe qfailure $Name) -join "`n"
   if ($qf -notmatch 'RESET_PERIOD[^:]*:\s*86400\b') { Fail "sc qfailure reset period is not 86400 s:`n$qf" }
-  if ($qf -notmatch '(?s)RESTART -- Delay = 30000 milliseconds.*RESTART -- Delay = 30000 milliseconds') { Fail "sc qfailure does not show two 30 s restarts:`n$qf" }
+  if ($qf -notmatch '(?s)RESTART -- Delay = 30000 milliseconds.*RESTART -- Delay = 120000 milliseconds') { Fail "sc qfailure does not show 30 s then 2 min restarts:`n$qf" }
   $ff = (& sc.exe qfailureflag $Name) -join "`n"
   if ($ff -notmatch 'TRUE') { Fail "sc qfailureflag is not TRUE (no recovery on non-crash failures):`n$ff" }
   $pre = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$Name" -Name PreshutdownTimeout -ErrorAction SilentlyContinue).PreshutdownTimeout

@@ -72,10 +72,11 @@
         <!-- Must match cmd/benchwarmer `service install`: name, display name,
              description, LocalSystem (ADR 0006), automatic start, and
              service.ServiceArgs(C:\ProgramData\Benchwarmer). The ServiceConfig
-             below sets delayed start, recovery actions and the preshutdown
-             timeout to what the service would otherwise repair on its first
-             start; it must match winsvc.RecoveryPlan and
-             DefaultPreshutdownTimeout (TestWixServiceConfigMatches). The
+             and ServiceConfigFailureActions below set delayed start, recovery
+             actions and the preshutdown timeout to what the service would
+             otherwise repair on its first start; they must match
+             winsvc.RecoveryPlan and DefaultPreshutdownTimeout
+             (TestWixServiceConfigMatches). The
              startup repair stays as the backstop. -->
         <ServiceInstall
             Id="BenchwarmerService"
@@ -88,21 +89,24 @@
             Account="LocalSystem"
             Arguments="run --service --data &quot;[CommonAppDataFolder]Benchwarmer&quot;"
             Vital="yes">
-          <!-- Delayed automatic start; restart after 30 s on the first and
-               second failure, none on the third, count reset after a day;
-               also on a non-zero exit (failedToStopOrReturnedError); 30 s
-               preshutdown. WiX takes one restart delay for all actions. -->
+          <!-- Delayed automatic start, recovery actions also on a non-zero
+               exit (failedToStopOrReturnedError), 30 s preshutdown. -->
           <ServiceConfig
               DelayedAutoStart="yes"
               FailureActionsWhen="failedToStopOrReturnedError"
-              FirstFailureActionType="restart"
-              SecondFailureActionType="restart"
-              ThirdFailureActionType="none"
-              RestartServiceDelayInSeconds="30"
-              ResetPeriodInDays="1"
               PreShutdownDelay="30000"
               OnInstall="yes"
               OnReinstall="yes" />
+          <!-- Restart after 30 s, then after 2 min, then nothing; the failure
+               count resets after a day (86400 s). Delays are milliseconds. -->
+          <ServiceConfigFailureActions
+              ResetPeriod="86400"
+              OnInstall="yes"
+              OnReinstall="yes">
+            <Failure Action="restartService" Delay="30000" />
+            <Failure Action="restartService" Delay="120000" />
+            <Failure Action="none" Delay="0" />
+          </ServiceConfigFailureActions>
         </ServiceInstall>
         <!-- Stopping is waited on: the service drains and stops the runtime
              before its files are replaced or removed. Starting is not: a

@@ -58,7 +58,7 @@ function Get-Arp {
 }
 
 # The MSI sets delayed start, recovery actions and the preshutdown timeout
-# itself (ServiceConfig in Benchwarmer.wxs); the service's startup repair is
+# itself (ServiceConfig and SetServiceRecovery in Benchwarmer.wxs); the service's startup repair is
 # only the backstop. Must match winsvc.RecoveryPlan / DefaultPreshutdownTimeout.
 # The MSI starts the service during install, so the values alone could be the
 # service's own repair; the service log proves it had nothing to repair.

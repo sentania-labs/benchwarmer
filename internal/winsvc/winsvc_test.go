@@ -200,30 +200,52 @@ func TestWixServiceConfigMatches(t *testing.T) {
 		}
 	}
 
-	fa := only("ServiceConfigFailureActions")
-	faAttr := fa.attrs()
-	if want := strconv.Itoa(int(RecoveryResetPeriod / time.Second)); faAttr["ResetPeriod"] != want {
-		t.Errorf("ServiceConfigFailureActions ResetPeriod = %q, want %q", faAttr["ResetPeriod"], want)
-	}
-	for _, k := range []string{"OnInstall", "OnReinstall"} {
-		if faAttr[k] != "yes" {
-			t.Errorf("ServiceConfigFailureActions %s = %q, want yes", k, faAttr[k])
+	// Recovery actions are set by an sc.exe custom action:
+	//   sc.exe failure Benchwarmer reset= <s> actions= <type>/<ms>/...
+	var action wixNode
+	for _, ca := range doc.find("CustomAction") {
+		if ca.attrs()["Id"] == "SetServiceRecovery" {
+			action = ca
 		}
+	}
+	ca := action.attrs()
+	if ca["Execute"] != "deferred" || ca["Impersonate"] != "no" || ca["Return"] != "check" {
+		t.Errorf("SetServiceRecovery must be a checked deferred action run as SYSTEM: %v", ca)
+	}
+	scheduled := false
+	for _, c := range doc.find("Custom") {
+		if c.attrs()["Action"] == "SetServiceRecovery" {
+			scheduled = c.attrs()["After"] == "InstallServices"
+		}
+	}
+	if !scheduled {
+		t.Error("SetServiceRecovery is not scheduled after InstallServices")
+	}
+	args := strings.Fields(ca["ExeCommand"])
+	if len(args) != 7 || !strings.HasSuffix(args[0], `sc.exe"`) || args[1] != "failure" || args[2] != "Benchwarmer" ||
+		args[3] != "reset=" || args[5] != "actions=" {
+		t.Fatalf("SetServiceRecovery ExeCommand = %q", ca["ExeCommand"])
+	}
+	if want := strconv.Itoa(int(RecoveryResetPeriod / time.Second)); args[4] != want {
+		t.Errorf("sc failure reset = %q, want %q", args[4], want)
+	}
+	f := strings.Split(args[6], "/")
+	if len(f)%2 != 0 {
+		t.Fatalf("sc failure actions %q", args[6])
 	}
 	var got []RecoveryStep
-	for _, f := range fa.find("Failure") {
-		a := f.attrs()
-		ms, err := strconv.Atoi(a["Delay"])
+	for i := 0; i < len(f); i += 2 {
+		ms, err := strconv.Atoi(f[i+1])
 		if err != nil {
-			t.Fatalf("Failure Delay %q: %v", a["Delay"], err)
+			t.Fatalf("sc failure delay %q: %v", f[i+1], err)
 		}
 		step := RecoveryStep{Delay: time.Duration(ms) * time.Millisecond}
-		switch a["Action"] {
-		case "restartService":
+		switch f[i] {
+		case "restart":
 			step.Restart = true
 		case "none":
 		default:
-			t.Fatalf("Failure Action %q", a["Action"])
+			t.Fatalf("sc failure action %q", f[i])
 		}
 		got = append(got, step)
 	}

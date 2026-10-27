@@ -69,11 +69,13 @@ what lets them run.
 - Creates **no firewall rules** and changes no Defender settings: on managed
   PCs those are GPO settings (local rule merge is off), documented in
   `docs/deploy/`.
-- Has no custom actions of its own and no required properties. It registers
-  the service with its delayed automatic start, recovery actions and
-  preshutdown timeout already set (`ServiceConfig` and
-  `ServiceConfigFailureActions` in `Benchwarmer.wxs`), so a fresh install or
-  upgrade has them before the service first runs. It uses
+- Has no required properties. It registers the service with its delayed
+  automatic start, recovery actions and preshutdown timeout already set
+  (`ServiceConfig` in `Benchwarmer.wxs`, and a deferred `sc.exe failure`
+  action for the recovery delays, because Windows Installer's own
+  failure-actions step is refused with access denied during install and
+  `util:ServiceConfig` has one delay for every restart), so a fresh install
+  or upgrade has them before the service first runs. It uses
   WiX's standard CloseApplication to close a signed-in user's tray during an
   upgrade or uninstall, so no restart is needed. The service start is not
   waited on, so a start that policy blocks (an ASR exclusion not yet

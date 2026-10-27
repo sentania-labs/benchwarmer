@@ -695,3 +695,55 @@ func TestHealthInstanceIdentity(t *testing.T) {
 		t.Fatal("new service reused old identity")
 	}
 }
+
+func TestRequestLogLevel(t *testing.T) {
+	const loop = "127.0.0.1:50000"
+	cases := []struct {
+		name, method, path, peer string
+		status                   int
+		want                     slog.Level
+	}{
+		{"status poll", "GET", "/api/v1/status", loop, 200, slog.LevelDebug},
+		{"agent report", "POST", "/api/v1/agent/report", loop, 200, slog.LevelDebug},
+		{"ipv6 loopback poll", "GET", "/api/v1/status", "[::1]:50000", 200, slog.LevelDebug},
+		{"failed poll", "GET", "/api/v1/status", loop, 500, slog.LevelInfo},
+		{"unauthorized report", "POST", "/api/v1/agent/report", loop, 401, slog.LevelInfo},
+		{"config write", "PUT", "/api/v1/config", loop, 200, slog.LevelInfo},
+		{"restart", "POST", "/api/v1/service/restart", loop, 202, slog.LevelInfo},
+		{"mode change", "PUT", "/api/v1/mode", loop, 200, slog.LevelInfo},
+		{"remote read", "GET", "/api/v1/status", remote, 200, slog.LevelInfo},
+		{"remote agent report", "POST", "/api/v1/agent/report", remote, 200, slog.LevelInfo},
+		{"unparsable peer", "GET", "/api/v1/status", "pipe", 200, slog.LevelInfo},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest(c.method, c.path, nil)
+		r.RemoteAddr = c.peer
+		if got := requestLogLevel(r, c.status); got != c.want {
+			t.Errorf("%s: level %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestRoutinePollsStayOutOfInfoLog(t *testing.T) {
+	logs := &bytes.Buffer{}
+	h := New(Options{
+		Backend: newFake(),
+		Auth:    NewAuthenticator(secrets.Tokens{Management: mgmtTok, Agent: agentTok, Inference: infTok}),
+		Logger:  slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo})),
+	})
+	for _, p := range []string{"/api/v1/status", "/api/v1/status"} {
+		rec := httptest.NewRecorder()
+		hreq := httptest.NewRequest("GET", p, nil)
+		hreq.RemoteAddr = "127.0.0.1:50000"
+		hreq.Header.Set("Authorization", "Bearer "+agentTok)
+		h.ServeHTTP(rec, hreq)
+	}
+	rec := httptest.NewRecorder()
+	hreq := httptest.NewRequest("GET", "/api/v1/status", nil)
+	hreq.RemoteAddr = remote
+	hreq.Header.Set("Authorization", "Bearer "+agentTok)
+	h.ServeHTTP(rec, hreq)
+	if n := strings.Count(logs.String(), "management request"); n != 1 || !strings.Contains(logs.String(), "192.168.1.50") {
+		t.Fatalf("want only the remote request at INFO, got:\n%s", logs.String())
+	}
+}

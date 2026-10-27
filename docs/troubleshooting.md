@@ -22,6 +22,26 @@ Logs: `C:\ProgramData\Benchwarmer\logs\benchwarmer.log` (rotated, size
 bounded by `retention.log_max_mb` x `retention.log_files`). Logs never contain
 prompts, request bodies, or tokens.
 
+What the log records:
+
+- Management requests (`management request`) are logged at INFO only when
+  they fail (4xx/5xx), change state (config, mode, drain, reload, restart,
+  sign-in), or come from a non-loopback peer. Routine loopback reads and the
+  tray's `POST /api/v1/agent/report` are DEBUG (`logging.level: debug`), so
+  they no longer crowd out the events.
+- Each finished inference request writes one INFO line, `inference request`,
+  with `peer`, `method`, `path`, `status`, `outcome`, `streamed`, `model`,
+  `prompt_tokens`, `completion_tokens`, `ttft_ms` (time to the first response
+  byte; close to `duration_ms` when not streamed) and `duration_ms`. The model
+  and token counts come from the runtime's response (`usage`/`timings`) and are
+  omitted when it does not report them. A request cut by preemption or the
+  maximum duration logs `inference request cut` with the same fields. A
+  request refused while the worker yields logs `inference request rejected`
+  with `peer`, `path`, `condition` and `reason`.
+- The history database does not record inference requests. The only other
+  record is the `/metrics` request-duration histogram and rejected counter,
+  which have no peer, model or token detail.
+
 Development without a GPU: `benchwarmer run --data ./data --simulate-gpu
 --sim-control sim.json`; write `{"external_vram_mib": 4000}` to `sim.json` to
 simulate a competing workload.

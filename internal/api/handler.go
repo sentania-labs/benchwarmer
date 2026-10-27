@@ -107,9 +107,31 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	h.serve(rec, r)
 	if h.o.Logger != nil {
-		h.o.Logger.Info("management request", "method", r.Method, "path", r.URL.Path, "status", rec.status,
-			"peer", peerHost(r), "duration_ms", time.Since(start).Milliseconds())
+		h.o.Logger.Log(r.Context(), requestLogLevel(r, rec.status), "management request", "method", r.Method, "path", r.URL.Path,
+			"status", rec.status, "peer", peerHost(r), "duration_ms", time.Since(start).Milliseconds())
 	}
+}
+
+// requestLogLevel keeps routine loopback traffic (the tray polling status and
+// posting agent reports) out of the INFO log, which would otherwise be almost
+// entirely those lines. Errors, state-changing writes, and any non-loopback
+// peer stay at INFO.
+func requestLogLevel(r *http.Request, status int) slog.Level {
+	if status >= http.StatusBadRequest || !isLoopbackPeer(r) {
+		return slog.LevelInfo
+	}
+	switch {
+	case r.Method == http.MethodGet || r.Method == http.MethodHead:
+		return slog.LevelDebug
+	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/report":
+		return slog.LevelDebug
+	}
+	return slog.LevelInfo
+}
+
+func isLoopbackPeer(r *http.Request) bool {
+	ip := net.ParseIP(peerHost(r))
+	return ip != nil && ip.IsLoopback()
 }
 
 func (h *handler) serve(w http.ResponseWriter, r *http.Request) {

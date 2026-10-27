@@ -8,18 +8,25 @@ import "strings"
 
 // builtinID names a shipped rule by its matcher, so ids need no upkeep when
 // a rule is added and match what an older, id-less config already contains.
+// The matcher is normalized the way internal/classify matches (lower case,
+// / and \ alike), so a legacy rule written with the other separator is still
+// recognised.
 func builtinID(r AppRule) string {
 	switch {
 	case r.Exe != "":
-		return "exe:" + strings.ToLower(r.Exe)
+		return "exe:" + normMatcher(r.Exe)
 	case r.Path != "":
-		return "path:" + strings.ToLower(r.Path)
+		return "path:" + normMatcher(r.Path)
 	case r.PathPrefix != "":
-		return "path_prefix:" + strings.ToLower(r.PathPrefix)
+		return "path_prefix:" + normMatcher(r.PathPrefix)
 	case r.Glob != "":
-		return "glob:" + strings.ToLower(r.Glob)
+		return "glob:" + normMatcher(r.Glob)
 	}
 	return ""
+}
+
+func normMatcher(s string) string {
+	return strings.ToLower(strings.ReplaceAll(s, `\`, "/"))
 }
 
 // DefaultRuleIDs lists the ids of the shipped application rules.
@@ -36,7 +43,9 @@ func DefaultRuleIDs() []string {
 // reports whether it changed anything.
 //
 // A rule without an id (written before ids existed) whose matcher equals a
-// shipped rule's is taken to be that rule, so an edited class survives.
+// shipped rule's is taken to be that rule, so an edited class survives; if
+// the file already holds that id, or an earlier id-less rule took it, the
+// rule stays local.
 // Shipped rules not yet in BuiltinRulesSeen are inserted after the closest
 // preceding shipped rule present, since the first match wins; a config that
 // has never recorded what it was offered is treated as having seen only the
@@ -48,17 +57,24 @@ func mergeBuiltinRules(c *Config) bool {
 	for _, d := range shipped {
 		shippedIDs[d.ID] = true
 	}
+	// Reserve every id already in the file before adopting any, so an
+	// id-less rule that sits above the shipped rule it duplicates (a local
+	// override) cannot take the id and collide with it.
 	have := map[string]bool{}
+	for _, r := range c.Applications {
+		if r.ID != "" {
+			have[r.ID] = true
+		}
+	}
 	for i := range c.Applications {
 		r := &c.Applications[i]
-		if r.ID == "" {
-			if id := builtinID(*r); shippedIDs[id] && !have[id] {
-				r.ID, changed = id, true
-			} else {
-				continue
-			}
+		if r.ID != "" {
+			continue
 		}
-		have[r.ID] = true
+		if id := builtinID(*r); shippedIDs[id] && !have[id] {
+			r.ID, changed = id, true
+			have[id] = true
+		}
 	}
 	seen := map[string]bool{}
 	for _, id := range c.BuiltinRulesSeen {

@@ -180,3 +180,70 @@ func TestStoreLoadPersistsMergedRules(t *testing.T) {
 		t.Fatal("second load changed the rule list")
 	}
 }
+
+func TestLocalOverrideAboveShippedRuleKeepsIDsUnique(t *testing.T) {
+	// A post-merge file: the shipped steam.exe rule carries its id and a
+	// local id-less steam.exe override sits above it.
+	c := Default()
+	local := AppRule{Name: "My Steam", Exe: "steam.exe", Class: ClassGame}
+	c.Applications = append([]AppRule{local}, c.Applications...)
+	b, err := Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(b)
+	if err != nil {
+		t.Fatalf("valid config failed to load: %v", err)
+	}
+	if got.Applications[0].ID != "" || got.Applications[1].ID != "exe:steam.exe" {
+		t.Fatalf("ids moved: %q %q", got.Applications[0].ID, got.Applications[1].ID)
+	}
+}
+
+func TestLegacyDuplicateOfShippedRuleAdoptedOnce(t *testing.T) {
+	local := AppRule{Name: "My Steam", Exe: "steam.exe", Class: ClassGame}
+	var m map[string]any
+	if err := json.Unmarshal(v010Config(t, local), &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(mustJSON(t, m)); err != nil {
+		t.Fatalf("legacy config with a duplicate matcher failed: %v", err)
+	}
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestLegacyRulesMatchedAcrossSeparatorsAndCase(t *testing.T) {
+	var m map[string]any
+	if err := json.Unmarshal(v010Config(t), &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range m["applications"].([]any) {
+		r := a.(map[string]any)
+		switch r["name"] {
+		case "Steam library":
+			r["glob"] = "*/STEAMAPPS/common/*"
+		case "Epic library":
+			r["path_prefix"] = "c:/program files/epic games/"
+		}
+	}
+	c, err := Parse(mustJSON(t, m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(c.Applications); n != len(DefaultApplications()) {
+		t.Fatalf("legacy rules re-added as shipped duplicates: %d rules", n)
+	}
+	for _, r := range c.Applications {
+		if (r.Name == "Steam library" || r.Name == "Epic library") && r.ID == "" {
+			t.Fatalf("rule not recognised as shipped: %+v", r)
+		}
+	}
+}

@@ -448,7 +448,7 @@ func runtimeReply(t *testing.T) *httptest.Server {
 		for i := 0; i < 2000; i++ {
 			fmt.Fprintf(w, "data: {\"model\":\"small-q4.gguf\",\"choices\":[{\"delta\":{\"content\":\"tok%d\"}}]}\n\n", i)
 		}
-		fmt.Fprint(w, "data: {\"model\":\"small-q4.gguf\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2001},\"timings\":{\"prompt_n\":5,\"predicted_n\":2001}}\n\ndata: [DONE]\n\n")
+		fmt.Fprint(w, "data: {\"model\":\"small-q4.gguf\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2001},\"timings\":{\"prompt_n\":1,\"predicted_n\":1999}}\n\ndata: [DONE]\n\n")
 	}))
 	t.Cleanup(s.Close)
 	return s
@@ -549,5 +549,33 @@ func TestRejectedWhileYieldingIsLogged(t *testing.T) {
 	}
 	if strings.Contains(r.logText(), "top secret") {
 		t.Error("log leaks prompt")
+	}
+}
+
+func TestUsageAttrsPreferUsageOverTimings(t *testing.T) {
+	cases := []struct {
+		name, body string
+		want       []any
+	}{
+		{"usage wins over timings", `{"usage":{"prompt_tokens":900,"completion_tokens":7},"timings":{"prompt_n":3,"predicted_n":6}}`,
+			[]any{"prompt_tokens", 900, "completion_tokens", 7}},
+		{"timings alone", `{"timings":{"prompt_n":3,"predicted_n":6}}`,
+			[]any{"prompt_tokens", 3, "completion_tokens", 6}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			u := &usage{}
+			u.observe([]byte(c.body))
+			got := u.attrs()
+			var counts []any
+			for i := 0; i+1 < len(got); i += 2 {
+				if k := got[i]; k == "prompt_tokens" || k == "completion_tokens" {
+					counts = append(counts, k, got[i+1])
+				}
+			}
+			if fmt.Sprint(counts) != fmt.Sprint(c.want) {
+				t.Errorf("got %v, want %v", counts, c.want)
+			}
+		})
 	}
 }

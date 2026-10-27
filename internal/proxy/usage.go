@@ -24,8 +24,13 @@ const (
 
 var (
 	modelRe      = regexp.MustCompile(`"model":\s*"((?:[^"\\]|\\.)*)"`)
-	promptRe     = regexp.MustCompile(`"(?:prompt_tokens|prompt_n)":\s*(\d+)`)
-	completionRe = regexp.MustCompile(`"(?:completion_tokens|predicted_n)":\s*(\d+)`)
+	promptRe     = regexp.MustCompile(`"prompt_tokens":\s*(\d+)`)
+	completionRe = regexp.MustCompile(`"completion_tokens":\s*(\d+)`)
+
+	// timings.prompt_n leaves out prompt tokens reused from the cache, so it
+	// stands in only when the response carries no usage object.
+	promptTimingRe     = regexp.MustCompile(`"prompt_n":\s*(\d+)`)
+	completionTimingRe = regexp.MustCompile(`"predicted_n":\s*(\d+)`)
 )
 
 type usageKey struct{}
@@ -69,14 +74,17 @@ func (t tap) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// lastInt returns the last match of re in b.
-func lastInt(re *regexp.Regexp, b []byte) (int, bool) {
-	all := re.FindAllSubmatch(b, -1)
-	if len(all) == 0 {
-		return 0, false
+// lastInt returns the last match of the first of res that matches in b.
+func lastInt(b []byte, res ...*regexp.Regexp) (int, bool) {
+	for _, re := range res {
+		all := re.FindAllSubmatch(b, -1)
+		if len(all) == 0 {
+			continue
+		}
+		n, err := strconv.Atoi(string(all[len(all)-1][1]))
+		return n, err == nil
 	}
-	n, err := strconv.Atoi(string(all[len(all)-1][1]))
-	return n, err == nil
+	return 0, false
 }
 
 func (u *usage) tailBytes() []byte {
@@ -103,10 +111,10 @@ func (u *usage) attrs() []any {
 		}
 		a = append(a, "model", model)
 	}
-	if n, ok := lastInt(promptRe, tail); ok {
+	if n, ok := lastInt(tail, promptRe, promptTimingRe); ok {
 		a = append(a, "prompt_tokens", n)
 	}
-	if n, ok := lastInt(completionRe, tail); ok {
+	if n, ok := lastInt(tail, completionRe, completionTimingRe); ok {
 		a = append(a, "completion_tokens", n)
 	}
 	if !u.firstAt.IsZero() {

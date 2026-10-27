@@ -11,6 +11,7 @@ import (
 	"github.com/sentania-labs/benchwarmer/internal/controller"
 	"github.com/sentania-labs/benchwarmer/internal/observe"
 	"github.com/sentania-labs/benchwarmer/internal/policy"
+	"github.com/sentania-labs/benchwarmer/internal/winsvc"
 )
 
 // Facts adapts observe.Observer to controller.FactBuilder and holds the
@@ -21,6 +22,7 @@ type Facts struct {
 	mu      sync.Mutex
 	agent   *observe.AgentReport
 	agentAt time.Time
+	locked  map[uint32]bool
 }
 
 // NewFacts returns a fact builder.
@@ -37,6 +39,9 @@ func (f *Facts) Build(now time.Time, in controller.FactInput) (policy.GPUFacts, 
 	var agent *observe.AgentReport
 	if f.agent != nil {
 		a := *f.agent
+		if locked, known := f.locked[a.SessionID]; known {
+			a.Locked = locked
+		}
 		agent = &a
 	}
 	at := f.agentAt
@@ -65,4 +70,20 @@ func (f *Facts) AgentStatus(now time.Time, staleAfter time.Duration) api.AgentSt
 		return api.AgentStatus{}
 	}
 	return api.AgentStatus{Connected: now.Sub(f.agentAt) <= staleAfter, LastReport: f.agentAt, SessionID: f.agent.SessionID}
+}
+
+// SessionChange records authoritative WTS lock state for each session. Logon
+// and logoff discard old state because Windows can reuse a session ID.
+func (f *Facts) SessionChange(kind winsvc.SessionKind, sessionID uint32) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch kind {
+	case winsvc.SessionLock, winsvc.SessionUnlock:
+		if f.locked == nil {
+			f.locked = make(map[uint32]bool)
+		}
+		f.locked[sessionID] = kind == winsvc.SessionLock
+	case winsvc.SessionLogon, winsvc.SessionLogoff:
+		delete(f.locked, sessionID)
+	}
 }

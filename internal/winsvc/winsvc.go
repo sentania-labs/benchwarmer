@@ -279,14 +279,17 @@ type RecoveryStep struct {
 // its failure count.
 const RecoveryResetPeriod = 24 * time.Hour
 
-// RecoveryPlan is the failure-recovery sequence: restart after 30 s, then
-// after 2 min, then stop trying until the reset period passes. The service
-// has its own crash backoff for the runtime; this only covers the service
-// process itself failing.
+// RecoveryPlan is the failure-recovery sequence: restart after 30 s, restart
+// again after 30 s, then stop trying until the reset period passes. The delay
+// is the same for every restart because the MSI sets it with WiX's
+// ServiceConfig, which takes one delay for all actions; packaging/wix must
+// match this plan (TestWixServiceConfigMatches). The service has its own
+// crash backoff for the runtime; this only covers the service process itself
+// failing.
 func RecoveryPlan() []RecoveryStep {
 	return []RecoveryStep{
 		{Restart: true, Delay: 30 * time.Second},
-		{Restart: true, Delay: 2 * time.Minute},
+		{Restart: true, Delay: 30 * time.Second},
 		{Restart: false},
 	}
 }

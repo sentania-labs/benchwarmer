@@ -57,6 +57,22 @@ function Get-Arp {
       Where-Object { $_.DisplayName -eq 'Benchwarmer' })
 }
 
+# The MSI sets delayed start, recovery actions and the preshutdown timeout
+# itself (ServiceConfig in Benchwarmer.wxs); the service's startup repair is
+# only the backstop. Must match winsvc.RecoveryPlan / DefaultPreshutdownTimeout.
+function Assert-ServiceConfig {
+  Step 'Checking service start type, recovery actions and preshutdown timeout'
+  $qc = (& sc.exe qc $Name) -join "`n"
+  if ($qc -notmatch 'AUTO_START\s+\(DELAYED\)') { Fail "sc qc does not show a delayed automatic start:`n$qc" }
+  $qf = (& sc.exe qfailure $Name) -join "`n"
+  if ($qf -notmatch 'RESET_PERIOD[^:]*:\s*86400\b') { Fail "sc qfailure reset period is not 86400 s:`n$qf" }
+  if ($qf -notmatch '(?s)RESTART -- Delay = 30000 milliseconds.*RESTART -- Delay = 30000 milliseconds') { Fail "sc qfailure does not show two 30 s restarts:`n$qf" }
+  $ff = (& sc.exe qfailureflag $Name) -join "`n"
+  if ($ff -notmatch 'TRUE') { Fail "sc qfailureflag is not TRUE (no recovery on non-crash failures):`n$ff" }
+  $pre = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$Name" -Name PreshutdownTimeout -ErrorAction SilentlyContinue).PreshutdownTimeout
+  if ($pre -ne 30000) { Fail "PreshutdownTimeout is '$pre', want 30000" }
+}
+
 function Assert-Installed([string] $ExpectVersion) {
   Step 'Checking service registration'
   $svc = Get-CimInstance Win32_Service -Filter "Name='$Name'"
@@ -68,6 +84,7 @@ function Assert-Installed([string] $ExpectVersion) {
   if ($svc.StartMode -ne 'Auto') { Fail "service start mode is '$($svc.StartMode)', want Auto" }
   if ($svc.DisplayName -ne 'Benchwarmer') { Fail "service display name is '$($svc.DisplayName)'" }
   if ($svc.Description -ne $Description) { Fail "service description is '$($svc.Description)'" }
+  Assert-ServiceConfig
 
   Step "Waiting for $Health (60 s)"
   $deadline = (Get-Date).AddSeconds(60)

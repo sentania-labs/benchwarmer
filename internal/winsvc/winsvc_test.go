@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +72,7 @@ func TestStartName(t *testing.T) {
 
 func TestRecoveryPlan(t *testing.T) {
 	p := RecoveryPlan()
-	want := []RecoveryStep{{true, 30 * time.Second}, {true, 2 * time.Minute}, {false, 0}}
+	want := []RecoveryStep{{true, 30 * time.Second}, {true, 30 * time.Second}, {false, 0}}
 	if len(p) != len(want) {
 		t.Fatalf("plan %+v", p)
 	}
@@ -128,5 +130,49 @@ func TestConsoleForcedAndTimeout(t *testing.T) {
 	err := runConsole(Options{StopTimeout: 50 * time.Millisecond}, stuck, sigs, time.Now)
 	if err == nil || !strings.Contains(err.Error(), "did not stop") {
 		t.Fatalf("timeout: %v", err)
+	}
+}
+
+// TestWixServiceConfigMatches keeps the MSI's ServiceConfig in step with what
+// the service repairs at startup, so an install leaves nothing to repair.
+func TestWixServiceConfigMatches(t *testing.T) {
+	b, err := os.ReadFile("../../packaging/wix/Benchwarmer.wxs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?s)<ServiceConfig\b(.*?)/>`).FindSubmatch(b)
+	if m == nil {
+		t.Fatal("no ServiceConfig in Benchwarmer.wxs")
+	}
+	attr := map[string]string{}
+	for _, a := range regexp.MustCompile(`(\w+)="([^"]*)"`).FindAllStringSubmatch(string(m[1]), -1) {
+		attr[a[1]] = a[2]
+	}
+	want := map[string]string{
+		"DelayedAutoStart":   "yes",
+		"FailureActionsWhen": "failedToStopOrReturnedError",
+		"ResetPeriodInDays":  strconv.Itoa(int(RecoveryResetPeriod / (24 * time.Hour))),
+		"PreShutdownDelay":   strconv.Itoa(int(DefaultPreshutdownTimeout / time.Millisecond)),
+	}
+	kinds := []string{"FirstFailureActionType", "SecondFailureActionType", "ThirdFailureActionType"}
+	plan := RecoveryPlan()
+	if len(plan) != len(kinds) {
+		t.Fatalf("plan has %d steps, ServiceConfig has %d", len(plan), len(kinds))
+	}
+	delay := plan[0].Delay
+	for i, s := range plan {
+		want[kinds[i]] = "none"
+		if s.Restart {
+			want[kinds[i]] = "restart"
+			if s.Delay != delay {
+				t.Fatalf("step %d delay %v differs from %v: ServiceConfig has one delay", i, s.Delay, delay)
+			}
+		}
+	}
+	want["RestartServiceDelayInSeconds"] = strconv.Itoa(int(delay / time.Second))
+	for k, v := range want {
+		if attr[k] != v {
+			t.Errorf("ServiceConfig %s = %q, want %q", k, attr[k], v)
+		}
 	}
 }

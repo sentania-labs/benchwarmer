@@ -2,9 +2,9 @@ package winsvc
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -133,6 +133,31 @@ func TestConsoleForcedAndTimeout(t *testing.T) {
 	}
 }
 
+type wixNode struct {
+	XMLName xml.Name
+	Attrs   []xml.Attr `xml:",any,attr"`
+	Nodes   []wixNode  `xml:",any"`
+}
+
+func (n wixNode) attrs() map[string]string {
+	m := map[string]string{}
+	for _, a := range n.Attrs {
+		m[a.Name.Local] = a.Value
+	}
+	return m
+}
+
+func (n wixNode) find(name string) []wixNode {
+	var out []wixNode
+	for _, c := range n.Nodes {
+		if c.XMLName.Local == name {
+			out = append(out, c)
+		}
+		out = append(out, c.find(name)...)
+	}
+	return out
+}
+
 // TestWixServiceConfigMatches keeps the MSI's ServiceConfig in step with what
 // the service repairs at startup, so an install leaves nothing to repair.
 func TestWixServiceConfigMatches(t *testing.T) {
@@ -140,19 +165,27 @@ func TestWixServiceConfigMatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := regexp.MustCompile(`(?s)<ServiceConfig\b(.*?)/>`).FindSubmatch(b)
-	if m == nil {
-		t.Fatal("no ServiceConfig in Benchwarmer.wxs")
+	var doc wixNode
+	if err := xml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
 	}
-	attr := map[string]string{}
-	for _, a := range regexp.MustCompile(`(\w+)="([^"]*)"`).FindAllStringSubmatch(string(m[1]), -1) {
-		attr[a[1]] = a[2]
+	var cfgs []wixNode
+	for _, si := range doc.find("ServiceInstall") {
+		if si.attrs()["Name"] == "Benchwarmer" {
+			cfgs = append(cfgs, si.find("ServiceConfig")...)
+		}
 	}
+	if len(cfgs) != 1 {
+		t.Fatalf("Benchwarmer ServiceInstall has %d ServiceConfig elements, want 1", len(cfgs))
+	}
+	attr := cfgs[0].attrs()
 	want := map[string]string{
 		"DelayedAutoStart":   "yes",
 		"FailureActionsWhen": "failedToStopOrReturnedError",
 		"ResetPeriodInDays":  strconv.Itoa(int(RecoveryResetPeriod / (24 * time.Hour))),
 		"PreShutdownDelay":   strconv.Itoa(int(DefaultPreshutdownTimeout / time.Millisecond)),
+		"OnInstall":          "yes",
+		"OnReinstall":        "yes",
 	}
 	kinds := []string{"FirstFailureActionType", "SecondFailureActionType", "ThirdFailureActionType"}
 	plan := RecoveryPlan()

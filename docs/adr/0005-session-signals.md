@@ -17,6 +17,11 @@ signals and also requires the service to work with nobody logged in.
   interactive users and administrators.
 - The service treats these facts as optional. If no agent report is fresher
   than `signals.session_stale_after`, they are `unknown`.
+- Lock state is the exception: the service tracks it per session from its own
+  WTS lock/unlock notifications and prefers that over the agent's `locked`
+  flag, which it uses only until a notification arrives for that session. The
+  agent's check (`OpenInputDesktop`) misses the Windows 11 LockApp lock screen,
+  which runs on the normal desktop. Logon and logoff clear the tracked state.
 - Primary detection does not depend on them: process list and GPU telemetry
   are visible from session 0.
 - The service does not spawn processes into user sessions, which would

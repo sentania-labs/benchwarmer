@@ -38,11 +38,11 @@ New-Item -ItemType Directory -Force $LogDir | Out-Null
 $LogDir = (Resolve-Path $LogDir).Path
 if (-not $Model) {
   # The pinned tiny model, verified by SHA-256.
-  $pin = Get-Content $Pin -Raw | ConvertFrom-Json
+  $pinData = Get-Content $Pin -Raw | ConvertFrom-Json
   $Model = Join-Path $LogDir 'smoke-model.gguf'
-  Invoke-WebRequest $pin.smoke_model_url -OutFile $Model -MaximumRetryCount 3 -RetryIntervalSec 5
+  Invoke-WebRequest $pinData.smoke_model_url -OutFile $Model -MaximumRetryCount 3 -RetryIntervalSec 5
   $got = (Get-FileHash $Model -Algorithm SHA256).Hash.ToLowerInvariant()
-  if ($got -ne $pin.smoke_model_sha256) { throw "SHA-256 mismatch for the smoke model: want $($pin.smoke_model_sha256), got $got" }
+  if ($got -ne $pinData.smoke_model_sha256) { throw "SHA-256 mismatch for the smoke model: want $($pinData.smoke_model_sha256), got $got" }
 }
 $Model = (Resolve-Path $Model).Path
 $Exe = Join-Path $RuntimeDir 'llama-server.exe'

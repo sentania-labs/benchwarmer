@@ -1,8 +1,10 @@
 # Troubleshooting
 
-Start with the dashboard (`http://127.0.0.1:8481/`): the condition, the
-winning rule, its evidence, and "next load allowed at ... because ..." answer
-most questions. The Events page shows every decision in order.
+Start with the dashboard (`http://127.0.0.1:8481/`): the status line says in
+plain words whether AI is available, waiting, paused, or has a problem. Open
+"Details for troubleshooting" for the condition, the winning rule, its
+evidence, and "next load allowed at ... because ...", which answer most
+questions. The Events page shows every decision in order.
 
 | Symptom | Where to look | Usual cause |
 |---|---|---|

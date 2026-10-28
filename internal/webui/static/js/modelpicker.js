@@ -109,7 +109,8 @@ export function modelGroup(deps) {
       c.message || ""));
     const rows = proposalRows(r, ctx.draft);
     if (!rows.length) {
-      out.push(h("p", null, "No settings need to change for this model."));
+      out.push(h("p", null, h("strong", null, "No settings were proposed.")),
+        h("ul", { class: "notes" }, ((r.plan && r.plan.notes) || []).map((n) => h("li", null, n))));
     } else {
       out.push(h("h3", null, "Proposed settings"),
         h("p", { class: "help", id: "proposal-help" }, "Nothing has been changed yet. Untick a setting to leave it as it is, or edit the proposed value, then apply. You can still change everything afterwards, and nothing is saved until you press Save configuration."),
@@ -118,7 +119,7 @@ export function modelGroup(deps) {
           h("button", { type: "button", class: "primary", onclick: () => apply(rows) }, "Apply selected to draft"),
           h("button", { type: "button", onclick: decline }, "Keep my settings")));
     }
-    if (r.plan && r.plan.notes && r.plan.notes.length) {
+    if (rows.length && r.plan && r.plan.notes && r.plan.notes.length) {
       out.push(h("details", { class: "notes" }, h("summary", null, "What these estimates do not know"),
         h("ul", null, r.plan.notes.map((n) => h("li", null, n)))));
     }

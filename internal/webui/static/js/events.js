@@ -84,7 +84,7 @@ async function load(reset, background) {
   s.loading = true;
   // A different filter than the one the rows were fetched with starts over:
   // the old row count, expansions and focus belong to the old list.
-  const filterValue = s.filter.value;
+  const filterValue = reset ? s.filter.value : s.shown || "";
   const fresh = reset && filterValue !== s.shown;
   const keep = reset && !fresh;
   const focus = keep ? focusedId(s) : null;

@@ -391,3 +391,26 @@ test('Load older events clicked during a background fetch is not lost', async ()
   assert.equal(list.children.length, 2);
   mounted.unmount();
 });
+
+test('Load older events keeps the filter the visible rows were fetched with', async () => {
+  const calls = stubFetch((path) => (path.includes('before_id=')
+    ? { body: { events: [ev(1, { type: 'load_failed', severity: 'critical' })] } }
+    : path.includes('type=load_failed')
+      ? { body: { events: [ev(2, { type: 'load_failed', severity: 'critical' })], next_before_id: 2 } }
+      : { ok: false, status: 503, body: { error: 'down' } }));
+  const { main, mounted } = mountEvents();
+  await settle();
+  const select = findAll(main, 'select')[0];
+  select.value = 'load_failed';
+  mounted.visibility(true);
+  await settle();
+  const more = findAll(main, 'button').find((b) => b.children[0] === 'Load older events');
+  select.value = 'state_changed';
+  more.listeners.click();
+  await settle();
+  const older = calls.find((c) => c.includes('before_id='));
+  assert.ok(older, 'the older page was requested');
+  assert.match(older, /type=load_failed/);
+  assert.doesNotMatch(older, /type=state_changed/);
+  mounted.unmount();
+});

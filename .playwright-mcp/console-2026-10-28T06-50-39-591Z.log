@@ -1,0 +1,2 @@
+[   25005ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:28481/api/v1/events?limit=50&type=decision_changed:0
+[   30006ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:28481/api/v1/events?limit=50&type=decision_changed:0

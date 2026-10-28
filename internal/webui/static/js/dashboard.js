@@ -128,7 +128,7 @@ function dl(rows) {
 
 function render(st) {
   patch(els.head, [st.condition, st.summary, st.state], () => renderHead(st));
-  patch(els.notices, [st.config_source, st.config_problem, st.gpu.confidence, st.decision && st.decision.rule, st.decision && st.decision.reason], () => renderNotices(st));
+  patch(els.notices, [st.config_source, st.config_problem, st.gpu.confidence, !!(st.decision && st.decision.rule === "eligibility.setup_required")], () => renderNotices(st));
   patch(els.mode, [st.mode, st.profile], () => renderMode(st));
   patch(els.runtime, [st.runtime, st.state], () => renderRuntime(st.runtime, st.state));
   patch(els.gpu, st.gpu, () => renderGPU(st.gpu));

@@ -19,7 +19,7 @@ export function mount(main) {
   const more = h("button", { type: "button", hidden: true, onclick: () => load(false) }, "Load older events");
   const status = h("p", { class: "muted", role: "status" });
   state = {
-    filter, list, more, status, before: 0, shown: null, loading: false, timer: null,
+    filter, list, more, status, before: 0, shown: null, failure: null, loading: false, timer: null,
     rows: [], summaries: new Map(), // id -> summary element, for focus restore
   };
   replace(main,
@@ -29,7 +29,7 @@ export function mount(main) {
     status, list, more);
   load(true);
   start();
-  return { title: "Events", unmount, visibility: (v) => { if (v) { start(); load(true); } else stop(); } };
+  return { title: "Events", unmount, visibility: (v) => { if (v) { start(); load(true, true); } else stop(); } };
 }
 
 function unmount() {
@@ -41,7 +41,7 @@ function unmount() {
 // no work, and a returning tab is refreshed at once.
 function start() {
   if (!state || state.timer) return;
-  state.timer = setInterval(() => load(true), REFRESH_MS);
+  state.timer = setInterval(() => load(true, true), REFRESH_MS);
 }
 
 function stop() {
@@ -74,7 +74,7 @@ function openIds(s) {
   return open;
 }
 
-async function load(reset) {
+async function load(reset, background) {
   const s = state;
   if (!s || s.loading) return;
   s.loading = true;
@@ -88,7 +88,7 @@ async function load(reset) {
   const seen = keep ? s.rows.length : 0;
   // Only the first fill of a list announces: a polite live region that
   // repeats "Loading..." on every refresh is noise for a screen reader.
-  if (fresh) s.status.textContent = "Loading...";
+  if (fresh && !(background && s.failure)) s.status.textContent = "Loading...";
   // A refresh asks for at least the rows already on screen, so an automatic
   // refresh cannot shrink a list the reader has paged through.
   const limit = reset ? Math.max(PAGE, seen) : PAGE;
@@ -116,10 +116,15 @@ async function load(reset) {
     s.shown = filterValue;
     s.before = res.next_before_id || 0;
     s.more.hidden = !s.before;
+    s.failure = null;
     s.status.textContent = s.rows.length ? "" : "No events.";
     if (focus && s.summaries.has(focus)) s.summaries.get(focus).focus({ preventScroll: true });
   } catch (e) {
     if (state !== s) return;
+    const failure = e instanceof ApiError && e.status === 401 ? "unauthorized" : "failed: " + e.message;
+    const repeat = background && s.failure === failure;
+    s.failure = failure;
+    if (repeat) return;
     if (e instanceof ApiError && e.status === 401) {
       replace(s.status, "Reading events needs the management token. ",
         h("button", { type: "button", onclick: async () => { if (await signIn()) load(true); } }, "Enter token"));

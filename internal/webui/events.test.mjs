@@ -307,3 +307,34 @@ test('a filter changed while a fetch is in flight is reloaded fresh on the next 
   assert.equal(list.children.length, 1);
   mounted.unmount();
 });
+
+test('a repeating failure on background refresh leaves the status untouched', async () => {
+  stubFetch(() => ({ ok: false, status: 401, body: { error: 'unauthorized' } }));
+  const { main, mounted } = mountEvents();
+  await settle();
+  const status = findAll(main, 'p')[0];
+  const button = findAll(status, 'button')[0];
+  assert.ok(button, 'the sign-in prompt is shown');
+  const written = [];
+  Object.defineProperty(status, 'textContent', { get: () => '', set: (v) => written.push(v) });
+  mounted.visibility(true);
+  await settle();
+  assert.equal(findAll(status, 'button')[0], button, 'the prompt is not rebuilt on a background refresh');
+  assert.deepEqual(written, []);
+  mounted.unmount();
+});
+
+test('a repeating generic failure does not rewrite the status on every tick', async () => {
+  stubFetch(() => ({ ok: false, status: 503, body: { error: 'down' } }));
+  const { main, mounted } = mountEvents();
+  await settle();
+  const status = findAll(main, 'p')[0];
+  assert.match(status.textContent, /Could not load events: down/);
+  let writes = 0;
+  let text = status.textContent;
+  Object.defineProperty(status, 'textContent', { get: () => text, set: (v) => { writes++; text = v; } });
+  mounted.visibility(true);
+  await settle();
+  assert.equal(writes, 0);
+  mounted.unmount();
+});

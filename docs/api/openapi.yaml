@@ -747,6 +747,10 @@ components:
         own_vram_mib: { type: integer }
         external_vram_mib: { type: integer }
         temperature_c: { type: number, description: Absent when unknown. }
+        observed_gpu_users:
+          description: External GPU users in the latest process and GPU sample, including ignored and unclassified processes.
+          type: array
+          items: { $ref: "#/components/schemas/AppMatch" }
         top_external:
           type: array
           items: { $ref: "#/components/schemas/AppMatch" }

@@ -461,3 +461,15 @@ func TestReloadFootprintCannotHideMeasuredExternalVRAM(t *testing.T) {
 		t.Fatalf("previous footprint hides competing allocation during reload: %+v", g)
 	}
 }
+
+func TestObservedGPUUsersIncludesUnclassifiedAndIgnored(t *testing.T) {
+	in := input(sample(200, proc{60, 10, 100, ""}, proc{61, 5, 100, ""}), []signals.Process{{PID: 60, Name: "unknown.exe", Path: `C:\unknown.exe`}, {PID: 61, Name: "ignored.exe", Path: `C:\ignored.exe`}})
+	in.Config.Applications = append([]config.AppRule{{Exe: "ignored.exe", Class: config.ClassIgnore}}, in.Config.Applications...)
+	a := New().Observe(t0, in).Apps
+	if len(a.ObservedGPUUsers) != 2 || a.ObservedGPUUsers[0].Name != "unknown.exe" || a.ObservedGPUUsers[1].Class != config.ClassIgnore {
+		t.Fatalf("observed: %+v", a.ObservedGPUUsers)
+	}
+	if len(a.Games) != 0 || len(a.Ordinary) != 0 {
+		t.Fatalf("observation changed policy: %+v", a)
+	}
+}

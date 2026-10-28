@@ -130,8 +130,10 @@ type AppMatch struct {
 
 // AppFacts groups classified processes. Ignored processes are omitted.
 type AppFacts struct {
-	Games     []AppMatch `json:"games,omitempty"`
-	Launchers []AppMatch `json:"launchers,omitempty"`
+	// ObservedGPUUsers is a snapshot for the owner UI, independent of policy classifications.
+	ObservedGPUUsers []AppMatch `json:"observed_gpu_users,omitempty"`
+	Games            []AppMatch `json:"games,omitempty"`
+	Launchers        []AppMatch `json:"launchers,omitempty"`
 	// Ordinary holds classified non-game GPU users (OBS, browsers) with
 	// measurable GPU use.
 	Ordinary []AppMatch `json:"ordinary,omitempty"`

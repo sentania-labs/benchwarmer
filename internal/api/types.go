@@ -92,19 +92,20 @@ type RuntimeStatus struct {
 
 // GPUStatus is current telemetry.
 type GPUStatus struct {
-	Adapter         string            `json:"adapter"`
-	Confidence      policy.Confidence `json:"confidence"`
-	TotalUtilPct    float64           `json:"total_util_pct"`
-	OwnUtilPct      float64           `json:"own_util_pct"`
-	ExternalUtilPct float64           `json:"external_util_pct"`
-	VRAMTotalMiB    int               `json:"vram_total_mib"`
-	VRAMUsedMiB     int               `json:"vram_used_mib"`
-	VRAMFreeMiB     int               `json:"vram_free_mib"`
-	OwnVRAMMiB      int               `json:"own_vram_mib"`
-	ExternalVRAMMiB int               `json:"external_vram_mib"`
-	TemperatureC    *float64          `json:"temperature_c,omitempty"`
-	TopExternal     []policy.AppMatch `json:"top_external,omitempty"`
-	SampledAt       time.Time         `json:"sampled_at,omitzero"`
+	Adapter          string            `json:"adapter"`
+	Confidence       policy.Confidence `json:"confidence"`
+	TotalUtilPct     float64           `json:"total_util_pct"`
+	OwnUtilPct       float64           `json:"own_util_pct"`
+	ExternalUtilPct  float64           `json:"external_util_pct"`
+	VRAMTotalMiB     int               `json:"vram_total_mib"`
+	VRAMUsedMiB      int               `json:"vram_used_mib"`
+	VRAMFreeMiB      int               `json:"vram_free_mib"`
+	OwnVRAMMiB       int               `json:"own_vram_mib"`
+	ExternalVRAMMiB  int               `json:"external_vram_mib"`
+	TemperatureC     *float64          `json:"temperature_c,omitempty"`
+	ObservedGPUUsers []policy.AppMatch `json:"observed_gpu_users,omitempty"`
+	TopExternal      []policy.AppMatch `json:"top_external,omitempty"`
+	SampledAt        time.Time         `json:"sampled_at,omitzero"`
 }
 
 // TimerStatus holds deadlines relevant to the current state.

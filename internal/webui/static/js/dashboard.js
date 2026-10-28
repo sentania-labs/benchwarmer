@@ -377,10 +377,10 @@ function buildControls() {
       busy = false;
     }
   }
-  function quickGroup(mode, label, hint) {
+  function quickGroup(mode, label) {
     const choices = quickChoices(mode, quickOptions, untilTomorrowAt, new Date(serverNow()));
     return h("div", { class: "quick-group", role: "group", "aria-label": label },
-      h("p", { class: "quick-label" }, label, hint && h("span", { class: "muted small" }, " " + hint)),
+      h("p", { class: "quick-label" }, label),
       h("div", { class: "quick-buttons" },
         choices.map((c) => h("button", { type: "button", class: "quick-btn", onclick: () => quick(mode, c.duration) }, c.label))));
   }
@@ -394,7 +394,7 @@ function buildControls() {
     untilTomorrowAt = st.mode_options && st.mode_options.until_tomorrow_at;
     replace(quickRows,
       quickGroup("pause", "Pause AI"),
-      quickGroup("ai_priority", "AI first for", "(asks for the management token)"));
+      quickGroup("ai_priority", "AI first for"));
   }
   const radios = Object.entries(MODE_LABELS).map(([v, label]) =>
     h("label", { class: "seg-option" },

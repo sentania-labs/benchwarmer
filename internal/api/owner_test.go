@@ -42,6 +42,13 @@ func TestDeriveOwner(t *testing.T) {
 				}
 			}},
 		{"heavy gpu use", Status{State: state.Cooldown, Decision: rule(policy.RuleCriticalVRAMExt)}, OwnerWaiting, OwnerSeverityWait, "gpu_busy", nil},
+		{"heavy gpu use names only the app, not its metrics", Status{State: state.Cooldown,
+			Decision: rule(policy.RuleCriticalVRAMExt, ev("top_external_process", "chrome.exe (80%, 4096 MiB)"))},
+			OwnerWaiting, OwnerSeverityWait, "gpu_busy", func(t *testing.T, o OwnerStatus) {
+				if o.App != "chrome.exe" {
+					t.Errorf("app = %q, want chrome.exe", o.App)
+				}
+			}},
 		{"cooldown after a game", Status{State: state.Cooldown, Timers: TimerStatus{NextLoadAt: at(5)},
 			Decision: rule(policy.RuleCooldown, ev("last_competing_rule", policy.RuleGameConfirmed))},
 			OwnerWaiting, OwnerSeverityWait, "cooldown", func(t *testing.T, o OwnerStatus) {

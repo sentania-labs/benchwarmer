@@ -24,6 +24,12 @@ test('a game is a normal wait, not a fault, and promises no time', () => {
   assert.doesNotMatch(v.lines.join(' '), /around \d/);
 });
 
+test('heavy GPU use names the app plainly, without nesting', () => {
+  const v = view({ kind: 'waiting', severity: 'wait', cause: 'gpu_busy', app: 'chrome.exe', resume_delay_seconds: 300 });
+  assert.equal(v.headline, 'AI is off because chrome.exe is using the GPU heavily.');
+  assert.match(view({ kind: 'waiting', severity: 'wait', cause: 'gpu_busy' }).headline, /something else is using the GPU heavily/);
+});
+
 test('stepping aside reads differently from already off', () => {
   assert.match(view({ kind: 'waiting', severity: 'wait', cause: 'game', yielding: true }).headline, /stepping aside/);
 });

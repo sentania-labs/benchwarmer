@@ -120,7 +120,10 @@ func classify(s Status, cooldown time.Duration) OwnerStatus {
 		return o
 	case strings.HasPrefix(rule, "contention."), rule == policy.RuleSoftContention:
 		o.ResumeDelaySeconds = int(cooldown.Seconds())
-		o.App = evidenceValue(d, "process", "top_external_process")
+		o.App = evidenceValue(d, "process")
+		if o.App == "" {
+			o.App, _, _ = strings.Cut(evidenceValue(d, "top_external_process"), " (")
+		}
 		return wait("gpu_busy")
 	case strings.HasPrefix(rule, "gaming."), rule == policy.RuleFullscreenGPU, rule == policy.RuleGameProcess, rule == policy.RuleAmbiguous:
 		o.ResumeDelaySeconds = int(cooldown.Seconds())

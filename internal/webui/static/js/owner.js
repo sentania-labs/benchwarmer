@@ -82,7 +82,7 @@ function describe(o, st, at) {
     case "game":
       return { headline: stepping + "a game" + app + " is using the GPU.", lines: afterStops(o, "the game stops") };
     case "gpu_busy":
-      return { headline: stepping + "something else" + app + " is using the GPU heavily.", lines: afterStops(o, "that stops") };
+      return { headline: stepping + (o.app || "something else") + " is using the GPU heavily.", lines: afterStops(o, "that stops") };
     case "cooldown": {
       const why = { game: "A game was using the GPU", gpu_busy: "Something was using the GPU heavily", heat: "The GPU was too hot" }[o.after];
       return {

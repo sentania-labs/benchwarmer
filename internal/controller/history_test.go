@@ -76,7 +76,7 @@ func TestRestoreConflictValidationAndAudit(t *testing.T) {
 	if err = os.Remove(store.Path()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = r.c.RestoreConfig(context.Background(), preview.ID, preview.Revision, "test"); !errors.Is(err, config.ErrHistoryConflict) {
+	if _, err = r.c.RestoreConfig(context.Background(), preview.ID, preview.Revision, "test"); !errors.Is(err, config.ErrHistoryPrimaryUnusable) {
 		t.Fatalf("missing primary accepted: %v", err)
 	}
 }

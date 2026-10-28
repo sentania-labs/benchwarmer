@@ -16,6 +16,7 @@ const HistoryLimit = 20
 
 var ErrHistoryNotFound = errors.New("configuration version not found")
 var ErrHistoryConflict = errors.New("configuration changed since preview")
+var ErrHistoryPrimaryUnusable = errors.New("saved configuration file is missing or invalid")
 
 // HistoryEntry contains only values safe to show to a reader.
 type HistoryEntry struct {
@@ -154,16 +155,26 @@ func (s *Store) HistoryConfig(id string) (Config, error) {
 }
 
 // VerifyCurrent refuses restore if the primary file was changed externally,
-// removed, or became invalid since it was loaded.
+// removed, or became invalid since it was loaded. Both sides are compared in
+// normalized form, so a config that loading would adjust is not mistaken for
+// a concurrent change.
 func (s *Store) VerifyCurrent(current Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b, err := os.ReadFile(s.path)
 	if err != nil {
-		return ErrHistoryConflict
+		return ErrHistoryPrimaryUnusable
 	}
 	c, err := Parse(b)
-	if err != nil || !reflect.DeepEqual(c, current) {
+	if err != nil {
+		return ErrHistoryPrimaryUnusable
+	}
+	cb, err := Marshal(current)
+	if err != nil {
+		return err
+	}
+	want, err := Parse(cb)
+	if err != nil || !reflect.DeepEqual(c, want) {
 		return ErrHistoryConflict
 	}
 	return nil

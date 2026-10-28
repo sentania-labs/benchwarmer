@@ -254,6 +254,8 @@ func (h *handler) backendError(w http.ResponseWriter, r *http.Request, err error
 		writeError(w, http.StatusNotFound, CodeNotFound, "configuration version not found")
 	case errors.Is(err, config.ErrHistoryConflict):
 		writeError(w, http.StatusConflict, CodeRejected, "configuration changed since preview; preview again")
+	case errors.Is(err, config.ErrHistoryPrimaryUnusable):
+		writeError(w, http.StatusConflict, CodeRejected, "the saved configuration file is missing or invalid; save a configuration first, then restore")
 	case errors.As(err, &ve):
 		writeJSON(w, http.StatusBadRequest, Error{Error: "configuration is invalid", Code: CodeInvalidConfig, Details: ve.Errors})
 	case errors.As(err, &re):

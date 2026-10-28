@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -168,5 +169,34 @@ func TestHistoryRejectsInvalidSavedVersion(t *testing.T) {
 	c, err := Parse(current)
 	if err != nil || c.Runtime.ContextSize != r.Config.Runtime.ContextSize {
 		t.Fatal("primary changed")
+	}
+}
+
+func TestVerifyCurrentIgnoresNormalizationButReportsUnusablePrimary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	s := NewStore(path)
+	initial, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := Clone(initial.Config)
+	next.Listen.InferenceTLS.SelfSignedHosts = nil
+	next.Runtime.ContextSize++
+	if err = s.SaveVersion(initial.Config, next, "test", time.Unix(1, 0), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.VerifyCurrent(next); err != nil {
+		t.Fatalf("unnormalized current config reported as changed: %v", err)
+	}
+	other := Clone(next)
+	other.Runtime.ContextSize++
+	if err = s.VerifyCurrent(other); !errors.Is(err, ErrHistoryConflict) {
+		t.Fatalf("real difference: %v", err)
+	}
+	if err = os.WriteFile(path, []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.VerifyCurrent(next); !errors.Is(err, ErrHistoryPrimaryUnusable) {
+		t.Fatalf("invalid primary: %v", err)
 	}
 }

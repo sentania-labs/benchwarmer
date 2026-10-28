@@ -83,6 +83,9 @@ func Validate(c Config) error {
 	if s.GPUTempCriticalC < 60 || s.GPUTempCriticalC > 105 {
 		v.add("safety.gpu_temp_critical_c", "must be between 60 and 105 (got %g)", s.GPUTempCriticalC)
 	}
+	if s.GPUTempResumeC >= s.GPUTempCriticalC {
+		v.add("safety.gpu_temp_critical_c", "must be above gpu_temp_resume_c (%g)", s.GPUTempResumeC)
+	}
 	if s.GPUTempResumeC >= s.GPUTempCriticalC || s.GPUTempResumeC < 30 {
 		v.add("safety.gpu_temp_resume_c", "must be at least 30 and below gpu_temp_critical_c (got %g)", s.GPUTempResumeC)
 	}
@@ -220,6 +223,7 @@ func validateRuntime(v *validator, r Runtime) {
 	// graceful wait plus kill verification cannot exceed it.
 	if r.StopMode == StopGraceful && r.GracefulStopTimeout.D()+r.KillVerifyTimeout.D() > 18*time.Second {
 		v.add("runtime.graceful_stop_timeout", "graceful_stop_timeout plus kill_verify_timeout must not exceed 18s (the service stop budget)")
+		v.add("runtime.kill_verify_timeout", "graceful_stop_timeout plus kill_verify_timeout must not exceed 18s (the service stop budget)")
 	}
 	if r.RunAs != RunAsLocalService && r.RunAs != RunAsService {
 		v.add("runtime.run_as", "must be %q or %q (got %q)", RunAsLocalService, RunAsService, r.RunAs)
@@ -357,11 +361,13 @@ func validateProfile(v *validator, f string, p Profile, k Contention) {
 	v.pctRange(f+".external_util_soft_pct", p.ExternalUtilSoftPct)
 	if p.ExternalUtilSoftPct >= k.ExternalUtilCriticalPct {
 		v.add(f+".external_util_soft_pct", "must be below contention.external_util_critical_pct (%g)", k.ExternalUtilCriticalPct)
+		v.add("contention.external_util_critical_pct", "must be above %s.external_util_soft_pct (%g)", f, p.ExternalUtilSoftPct)
 	}
 	v.durRange(f+".soft_window", p.SoftWindow, 0, 10*time.Minute)
 	v.intRange(f+".external_vram_soft_mib", p.ExternalVRAMSoftMiB, 64, 65536)
 	if p.ExternalVRAMSoftMiB >= k.ExternalVRAMCriticalMiB {
 		v.add(f+".external_vram_soft_mib", "must be below contention.external_vram_critical_mib (%d)", k.ExternalVRAMCriticalMiB)
+		v.add("contention.external_vram_critical_mib", "must be above %s.external_vram_soft_mib (%d)", f, p.ExternalVRAMSoftMiB)
 	}
 	v.pctRange(f+".game_confirm_util_pct", p.GameConfirmUtilPct)
 	v.intRange(f+".game_confirm_vram_mib", p.GameConfirmVRAMMiB, 1, 65536)

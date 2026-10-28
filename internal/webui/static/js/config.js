@@ -24,6 +24,8 @@ let unmountHistory = null;
 const revision = validationGeneration();
 let validationPending = false;
 let validated = false;
+let validateTimer = null;
+const VALIDATE_DELAY_MS = 500;
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const dirty = () => st.draft && (JSON.stringify(st.draft) !== JSON.stringify(st.cfg) || st.jsonText != null);
@@ -61,6 +63,7 @@ export function mount(main, rest) {
       window.removeEventListener("beforeunload", beforeUnload);
       if (unmountHistory) unmountHistory();
       unmountHistory = null;
+      clearTimeout(validateTimer);
       els = null;
     },
   };
@@ -70,11 +73,15 @@ function invalidateValidation() {
   revision.next();
   validationPending = true;
   validated = false;
+  clearTimeout(validateTimer);
+  validateTimer = setTimeout(validateDraft, VALIDATE_DELAY_MS);
   syncSaveBar();
 }
 
 async function validateDraft() {
-  if (!st.draft || st.clientErrors.size) return;
+  clearTimeout(validateTimer);
+  if (!els || !st.draft || st.clientErrors.size) return;
+  if (validated && !validationPending) return;
   const requested = revision.next();
   validationPending = true;
   syncSaveBar();
@@ -735,6 +742,7 @@ function syncSaveBar() {
 function discard() {
   if (!window.confirm("Discard all unsaved changes?")) return;
   revision.next();
+  clearTimeout(validateTimer);
   validationPending = false;
   st.draft = clone(st.cfg);
   st.jsonText = null;

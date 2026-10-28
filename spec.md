@@ -60,7 +60,7 @@ This is a **single-machine GPU lifecycle controller**, not an inference gateway,
 - Retrying or resuming interrupted inference requests.
 - KV-cache checkpointing or live inference migration.
 - Waking a sleeping PC to provide capacity.
-- Downloading, selecting, benchmarking, or updating models.
+- Downloading, benchmarking, or updating models, and loading or running a model to evaluate it. Choosing a model from the discovered inventory and previewing proposed settings into the config draft is in scope.
 - General agent orchestration.
 - Supporting several simultaneous model runtimes.
 - Supporting Ollama, ComfyUI, Stable Diffusion, or non-LLM workloads in MVP.

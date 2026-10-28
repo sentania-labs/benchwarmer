@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -140,7 +142,11 @@ func (c *Controller) requestManual(kind, reason string) error {
 }
 
 // UpdateConfig validates, persists, applies, and audits a new config.
-func (c *Controller) UpdateConfig(_ context.Context, nc config.Config, actor string) (config.Impact, error) {
+func (c *Controller) UpdateConfig(ctx context.Context, nc config.Config, actor string) (config.Impact, error) {
+	return c.updateConfig(ctx, nc, actor, "", "")
+}
+
+func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, expected, restoreOf string) (config.Impact, error) {
 	// Only a changed model path is checked, so an unrelated save is not
 	// blocked by a model that has gone missing since. The stat can hang on
 	// an unreachable network path, so it runs before the controller lock.
@@ -149,11 +155,21 @@ func (c *Controller) UpdateConfig(_ context.Context, nc config.Config, actor str
 		c.mu.Lock()
 		changed := nc.Runtime.ModelPath != c.cfg.Runtime.ModelPath
 		c.mu.Unlock()
-		modelMissing = changed && !c.d.FileExists(nc.Runtime.ModelPath)
+		modelMissing = (changed || restoreOf != "") && !c.d.FileExists(nc.Runtime.ModelPath)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.d.Now()
+	if expected != "" && expected != c.revisionLocked() {
+		return config.Impact{}, config.ErrHistoryConflict
+	}
+	if restoreOf != "" {
+		if store, ok := c.d.ConfigStore.(historyStore); !ok {
+			return config.Impact{}, errors.New("configuration history unavailable")
+		} else if err := store.VerifyCurrent(c.cfg); err != nil {
+			return config.Impact{}, err
+		}
+	}
 	if err := config.ValidateChange(nc); err != nil {
 		c.emit(events.Event{Time: now, Type: events.ConfigRejected, Severity: policy.SeverityNotice,
 			Message: "Configuration change rejected: " + err.Error(), Data: map[string]any{"actor": actor}})
@@ -166,12 +182,20 @@ func (c *Controller) UpdateConfig(_ context.Context, nc config.Config, actor str
 		return config.Impact{}, err
 	}
 	if c.d.ConfigStore != nil {
-		if err := c.d.ConfigStore.Save(nc); err != nil {
+		var err error
+		if store, ok := c.d.ConfigStore.(historyStore); ok {
+			err = store.SaveVersion(c.cfg, nc, actor, now, restoreOf)
+		} else {
+			err = c.d.ConfigStore.Save(nc)
+		}
+		if err != nil {
 			return config.Impact{}, fmt.Errorf("persist config: %w", err)
 		}
 	}
 	im := config.Classify(c.cfg, nc)
+	changes := config.HistoryDiff(c.cfg, nc)
 	c.cfg, c.cfgSource, c.cfgProblem = nc, "primary", ""
+	c.configRevision = rand.Text()
 	c.schedCacheValid = false
 	c.lastSetupCheck, c.setupResult = time.Time{}, nil // re-check the runtime and model files now, ignoring a check of the old paths
 	if im.ServiceRestart {
@@ -187,9 +211,65 @@ func (c *Controller) UpdateConfig(_ context.Context, nc config.Config, actor str
 	}
 	c.emit(events.Event{Time: now, Type: events.ConfigChanged,
 		Message: fmt.Sprintf("Configuration updated by %s: %s", actor, strings.Join(im.Changed, ", ")),
-		Data:    map[string]any{"actor": actor, "changed": im.Changed, "runtime_reload": im.RuntimeReload, "service_restart": im.ServiceRestart}})
+		Data:    map[string]any{"actor": actor, "changed": im.Changed, "runtime_reload": im.RuntimeReload, "service_restart": im.ServiceRestart, "restore_of": restoreOf, "changes": changes}})
 	c.signalWake()
 	return im, nil
+}
+
+type historyStore interface {
+	SaveVersion(config.Config, config.Config, string, time.Time, string) error
+	History() ([]config.HistoryEntry, error)
+	HistoryConfig(string) (config.Config, error)
+	VerifyCurrent(config.Config) error
+}
+
+func configDigest(c config.Config) string {
+	b, _ := config.Marshal(c)
+	return fmt.Sprintf("%x", sha256.Sum256(b))
+}
+func (c *Controller) revisionLocked() string {
+	if c.configRevision == "" {
+		c.configRevision = rand.Text()
+	}
+	return c.configRevision
+}
+func (c *Controller) ConfigHistory() ([]config.HistoryEntry, error) {
+	store, ok := c.d.ConfigStore.(historyStore)
+	if !ok {
+		return nil, errors.New("configuration history unavailable")
+	}
+	return store.History()
+}
+func (c *Controller) PreviewConfigRestore(id string) (api.RestorePreview, error) {
+	store, ok := c.d.ConfigStore.(historyStore)
+	if !ok {
+		return api.RestorePreview{}, errors.New("configuration history unavailable")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	target, err := store.HistoryConfig(id)
+	if err != nil {
+		return api.RestorePreview{}, err
+	}
+	return api.RestorePreview{ID: id, Revision: c.revisionLocked() + ":" + configDigest(target), Changes: config.HistoryDiff(c.cfg, target), Impact: config.Classify(c.cfg, target)}, nil
+}
+func (c *Controller) RestoreConfig(ctx context.Context, id, revision, actor string) (config.Impact, error) {
+	if revision == "" {
+		return config.Impact{}, config.ErrHistoryConflict
+	}
+	store, ok := c.d.ConfigStore.(historyStore)
+	if !ok {
+		return config.Impact{}, errors.New("configuration history unavailable")
+	}
+	target, err := store.HistoryConfig(id)
+	if err != nil {
+		return config.Impact{}, err
+	}
+	parts := strings.Split(revision, ":")
+	if len(parts) != 2 || parts[1] != configDigest(target) {
+		return config.Impact{}, config.ErrHistoryConflict
+	}
+	return c.updateConfig(ctx, target, actor, parts[0], id)
 }
 
 // AgentReport accepts a session-agent report.

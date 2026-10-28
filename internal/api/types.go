@@ -189,3 +189,11 @@ type Error struct {
 	Reason     string          `json:"reason,omitempty"`
 	RetryAfter *time.Time      `json:"retry_after,omitempty"`
 }
+
+// RestorePreview describes the effect of restoring a saved configuration.
+type RestorePreview struct {
+	ID       string                 `json:"id"`
+	Revision string                 `json:"revision"`
+	Changes  []config.HistoryChange `json:"changes"`
+	Impact   config.Impact          `json:"impact"`
+}

@@ -165,10 +165,11 @@ type Controller struct {
 	mu sync.Mutex
 	d  Deps
 
-	cfg           config.Config
-	cfgSource     string
-	cfgProblem    string // why config.json was rejected; empty once a save replaces it
-	restartNeeded bool
+	configRevision string
+	cfg            config.Config
+	cfgSource      string
+	cfgProblem     string // why config.json was rejected; empty once a save replaces it
+	restartNeeded  bool
 
 	st         state.State
 	inst       runtime.Instance

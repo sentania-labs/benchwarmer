@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -84,7 +85,10 @@ func New(o Options) http.Handler {
 			"GET": {AccessRead, false, 0, h.getConfig},
 			"PUT": {AccessWrite, false, maxConfigBody, h.putConfig},
 		},
-		"/api/v1/events": {"GET": {AccessRead, false, 0, h.events}},
+		"/api/v1/events":                 {"GET": {AccessRead, false, 0, h.events}},
+		"/api/v1/config/history":         {"GET": {AccessRead, false, 0, h.configHistory}},
+		"/api/v1/config/restore-preview": {"GET": {AccessRead, false, 0, h.restorePreview}},
+		"/api/v1/config/restore":         {"POST": {AccessWrite, false, maxSmallBody, h.restoreConfig}},
 		"/api/v1/applications": {
 			"GET": {AccessRead, false, 0, h.getApplications},
 			"PUT": {AccessWrite, false, maxConfigBody, h.putApplications},
@@ -246,6 +250,10 @@ func (h *handler) backendError(w http.ResponseWriter, r *http.Request, err error
 	var re *RequestError
 	var ve *config.ValidationError
 	switch {
+	case errors.Is(err, config.ErrHistoryNotFound):
+		writeError(w, http.StatusNotFound, CodeNotFound, "configuration version not found")
+	case errors.Is(err, config.ErrHistoryConflict):
+		writeError(w, http.StatusConflict, CodeRejected, "configuration changed since preview; preview again")
 	case errors.As(err, &ve):
 		writeJSON(w, http.StatusBadRequest, Error{Error: "configuration is invalid", Code: CodeInvalidConfig, Details: ve.Errors})
 	case errors.As(err, &re):
@@ -317,6 +325,69 @@ func (h *handler) applyConfig(w http.ResponseWriter, r *http.Request, c config.C
 	}
 	nc, src := h.o.Backend.Config()
 	writeJSON(w, http.StatusOK, ConfigResponse{Config: config.Redact(nc), Source: src, Impact: &im})
+}
+
+type configHistoryBackend interface {
+	ConfigHistory() ([]config.HistoryEntry, error)
+	PreviewConfigRestore(string) (RestorePreview, error)
+	RestoreConfig(context.Context, string, string, string) (config.Impact, error)
+}
+
+func (h *handler) configHistory(w http.ResponseWriter, r *http.Request) {
+	b, ok := h.o.Backend.(configHistoryBackend)
+	if !ok {
+		writeError(w, http.StatusNotFound, CodeNotFound, "configuration history unavailable")
+		return
+	}
+	entries, err := b.ConfigHistory()
+	if err != nil {
+		h.backendError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"versions": entries})
+}
+func (h *handler) restorePreview(w http.ResponseWriter, r *http.Request) {
+	b, ok := h.o.Backend.(configHistoryBackend)
+	if !ok {
+		writeError(w, http.StatusNotFound, CodeNotFound, "configuration history unavailable")
+		return
+	}
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "id is required")
+		return
+	}
+	preview, err := b.PreviewConfigRestore(id)
+	if err != nil {
+		h.backendError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, preview)
+}
+func (h *handler) restoreConfig(w http.ResponseWriter, r *http.Request) {
+	b, ok := h.o.Backend.(configHistoryBackend)
+	if !ok {
+		writeError(w, http.StatusNotFound, CodeNotFound, "configuration history unavailable")
+		return
+	}
+	var in struct {
+		ID       string `json:"id"`
+		Revision string `json:"revision"`
+	}
+	if !decode(w, r, &in, true, false) {
+		return
+	}
+	if in.ID == "" || in.Revision == "" {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, "id and revision are required")
+		return
+	}
+	impact, err := b.RestoreConfig(r.Context(), in.ID, in.Revision, actor(r))
+	if err != nil {
+		h.backendError(w, r, err)
+		return
+	}
+	c, src := h.o.Backend.Config()
+	writeJSON(w, http.StatusOK, ConfigResponse{Config: config.Redact(c), Source: src, Impact: &impact})
 }
 
 func (h *handler) getApplications(w http.ResponseWriter, r *http.Request) {

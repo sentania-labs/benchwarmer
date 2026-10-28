@@ -28,7 +28,8 @@ export function mount(main) {
   replace(main,
     h("h1", null, "Events"),
     h("div", { class: "toolbar" },
-      h("div", { class: "field inline" }, h("label", { for: "event-type" }, "Type"), filter), refresh),
+      h("div", { class: "field inline" }, h("label", { for: "event-type" }, "Type"), filter), refresh,
+      h("a", { href: "#/config/history" }, "Saved configuration history")),
     status, list, more);
   load(true);
   start();

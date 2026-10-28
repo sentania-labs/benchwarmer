@@ -24,6 +24,7 @@ func TestOpenAPIMatchesWireTypes(t *testing.T) {
 	}
 	doc := strings.ReplaceAll(string(b), "\r\n", "\n") // Windows checkouts may use CRLF
 	schemas := map[string]any{
+		"HistoryChange": config.HistoryChange{}, "HistoryEntry": config.HistoryEntry{}, "RestorePreview": RestorePreview{},
 		"Error": Error{}, "FieldError": config.FieldError{}, "Health": Health{}, "Status": Status{},
 		"ModeStatus": ModeStatus{}, "ModeOptions": ModeOptions{}, "OwnerStatus": OwnerStatus{}, "ProfileStatus": ProfileStatus{}, "RuntimeStatus": RuntimeStatus{},
 		"GPUStatus": GPUStatus{}, "TimerStatus": TimerStatus{}, "AgentStatus": AgentStatus{},

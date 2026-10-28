@@ -115,26 +115,16 @@ func TestDeriveOwner(t *testing.T) {
 
 func TestDeriveOwnerPause(t *testing.T) {
 	now := time.Date(2026, 9, 24, 19, 46, 0, 0, time.UTC)
-	until, later := now.Add(time.Hour), now.Add(90*time.Minute)
+	until := now.Add(time.Hour)
 	pause := policy.Decision{Rule: policy.RulePause}
 
-	o := DeriveOwner(Status{State: state.Disabled, Decision: pause, Mode: ModeStatus{Mode: policy.ModePause, Until: &until}}, 0)
+	// A pause promises the return time the policy computed, whatever it is.
+	o := DeriveOwner(Status{State: state.Disabled, Decision: pause, Mode: ModeStatus{Mode: policy.ModePause, Until: &until}, Timers: TimerStatus{NextLoadAt: &until}}, 0)
 	if o.Kind != OwnerPaused || o.Severity != OwnerSeverityPaused || o.ReturnAt == nil || !o.ReturnAt.Equal(until) {
 		t.Errorf("timed pause: %+v", o)
 	}
-	// Another timer still holds the load past the pause end: the later time is the true one.
-	o = DeriveOwner(Status{State: state.Disabled, Decision: pause, Mode: ModeStatus{Mode: policy.ModePause, Until: &until}, Timers: TimerStatus{NextLoadAt: &later}}, 0)
-	if o.ReturnAt == nil || !o.ReturnAt.Equal(later) {
-		t.Errorf("pause behind a later timer: %+v", o)
-	}
-	// An earlier timer never pulls the return time before the pause end.
-	early := now.Add(10 * time.Minute)
-	o = DeriveOwner(Status{State: state.Disabled, Decision: pause, Mode: ModeStatus{Mode: policy.ModePause, Until: &until}, Timers: TimerStatus{NextLoadAt: &early}}, 0)
-	if o.ReturnAt == nil || !o.ReturnAt.Equal(until) {
-		t.Errorf("pause with an earlier timer: %+v", o)
-	}
-	// An open-ended pause promises no return.
-	o = DeriveOwner(Status{State: state.Disabled, Decision: pause, Mode: ModeStatus{Mode: policy.ModePause}, Timers: TimerStatus{NextLoadAt: &early}}, 0)
+	// No computed time means no promise: an open-ended pause has none.
+	o = DeriveOwner(Status{State: state.Disabled, Decision: pause, Mode: ModeStatus{Mode: policy.ModePause}}, 0)
 	if o.Kind != OwnerPaused || o.ReturnAt != nil {
 		t.Errorf("open-ended pause: %+v", o)
 	}

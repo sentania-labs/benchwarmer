@@ -116,7 +116,7 @@ func classify(s Status, cooldown time.Duration) OwnerStatus {
 		return o
 	case rule == policy.RulePause:
 		o.Kind, o.Severity, o.Cause = OwnerPaused, OwnerSeverityPaused, "paused"
-		o.ReturnAt = pauseReturn(s)
+		o.ReturnAt = s.Timers.NextLoadAt
 		return o
 	case strings.HasPrefix(rule, "contention."), rule == policy.RuleSoftContention:
 		o.ResumeDelaySeconds = int(cooldown.Seconds())
@@ -174,19 +174,6 @@ func recovery(o OwnerStatus, s Status, reason string) OwnerStatus {
 		o.Cause = "recovering"
 	}
 	return o
-}
-
-// pauseReturn is when a timed pause lets AI start again: the pause end, or
-// later if another timer still holds the load. An open-ended pause has none.
-func pauseReturn(s Status) *time.Time {
-	if s.Mode.Until == nil {
-		return nil
-	}
-	at := *s.Mode.Until
-	if n := s.Timers.NextLoadAt; n != nil && n.After(at) {
-		at = *n
-	}
-	return &at
 }
 
 // cooldownAfter says what a cooldown follows, from the rule that last made

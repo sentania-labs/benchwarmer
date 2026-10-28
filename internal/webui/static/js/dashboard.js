@@ -335,13 +335,14 @@ function buildControls() {
   const status = h("p", { class: "action-status", role: "status" });
   const radios = Object.entries(MODE_LABELS).map(([v, label]) =>
     h("label", { class: "seg-option" },
-      h("input", { type: "radio", name: "mode", value: v, onchange: () => { dirty = true; fillDurations(); } }), h("span", null, label)));
-  const durSel = h("select", { id: "mode-duration", onchange: () => { dirty = true; } });
+      h("input", { type: "radio", name: "mode", value: v, onchange: fillDurations }), h("span", null, label)));
+  const durSel = h("select", { id: "mode-duration" });
   const durWrap = h("div", { class: "field" }, h("label", { for: "mode-duration" }, "For"), durSel);
   const apply = h("button", { type: "submit", class: "primary" }, "Apply mode");
-  // dirty: the visitor has changed the form since it last followed the
-  // service. Polling then leaves the form alone instead of overwriting it.
-  let dirty = false;
+  // baseline is the form as it last followed the service (or was applied).
+  // The form is dirty only while it differs from that, so an abandoned or
+  // reverted edit lets polling take over again.
+  let baseline;
   let options = { pause: [], ai_priority: [] };
   let syncedMode = null;
   const form = h("form", { class: "mode-form", onsubmit: onApply },
@@ -352,6 +353,10 @@ function buildControls() {
     const r = form.querySelector("input[name=mode]:checked");
     return r ? r.value : "auto";
   }
+  const formState = () => {
+    const m = selected();
+    return m === "auto" ? m : m + "|" + durSel.value;
+  };
   function fillDurations() {
     const m = selected();
     durWrap.hidden = m === "auto";
@@ -369,7 +374,7 @@ function buildControls() {
     status.textContent = "Applying...";
     try {
       await put("api/v1/mode", body);
-      dirty = false;
+      baseline = formState();
       status.textContent = MODE_LABELS[mode] + " applied" + (mode !== "auto" ? " (" + describeDurationChoice(body.duration).toLowerCase() + ")" : "") + ".";
       poll();
     } catch (err) {
@@ -391,6 +396,7 @@ function buildControls() {
     }
   }
   fillDurations();
+  baseline = formState();
   const el = h("section", { class: "card controls" }, h("h2", null, "Controls"), form,
     h("div", { class: "row-actions" },
       h("button", { type: "button", onclick: () => action("api/v1/drain",
@@ -410,13 +416,16 @@ function buildControls() {
     if (optionsChanged) options = next;
     const m = st.mode || {};
     const key = modeKey(m);
+    const dirty = formState() !== baseline;
     if (followsServer(dirty, syncedMode, key)) {
       const r = form.querySelector("input[value=" + (MODE_LABELS[m.mode] ? m.mode : "auto") + "]");
       if (r) r.checked = true;
       syncedMode = key;
       fillDurations();
+      baseline = formState();
     } else if (optionsChanged) {
       fillDurations();
+      if (!dirty) baseline = formState();
     }
   };
   return el;

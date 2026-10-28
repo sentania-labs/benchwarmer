@@ -46,7 +46,7 @@ function runtime() {
       { path: "runtime.gpu_layers", label: "GPU layers", type: "int", min: 0, max: 9999, help: "Layers to offload to the GPU. 999 means all." },
     ] },
     { title: "Custom model and arguments", advanced: true, fields: [
-      { path: "runtime.model_path", id: "custom-model-path", label: "Custom model path", help: "Enter an absolute path to a .gguf model." },
+      { path: "runtime.model_path", id: "custom-model-path", noError: true, label: "Custom model path", help: "Enter an absolute path to a .gguf model." },
       { path: "runtime.args", label: "Extra arguments", type: "argv",
         help: "Passed to llama-server in this order. Put a flag such as -np in the first box and its value, if it takes one, in the second. Benchwarmer sets -m, --host, --port, -c and -ngl itself, so leave those out. Values shown as <redacted> are secrets: leave them unchanged to keep the stored value." },
     ] },

@@ -89,17 +89,17 @@ export function field(ctx, def) {
   const id = def.id || idFor(path);
   const value = getPath(ctx.draft, path);
   const helpId = def.help ? id + "-help" : null;
-  const errId = id + "-err";
+  const errId = def.noError ? null : id + "-err";
   const describedBy = [helpId, errId].filter(Boolean).join(" ");
   const wrap = h("div", { class: "field", dataset: { path } });
-  const err = errorSlot(ctx, path);
-  if (!err.hidden) wrap.classList.add("invalid");
+  const err = def.noError ? null : errorSlot(ctx, path);
+  if (err && !err.hidden) wrap.classList.add("invalid");
   const set = (v) => {
     setPath(ctx.draft, path, v);
     ctx.changed();
   };
   let control;
-  const common = { id, "aria-describedby": describedBy, name: path };
+  const common = { id, "aria-describedby": describedBy, name: def.id || path };
 
   switch (def.type) {
     case "bool": {
@@ -241,7 +241,7 @@ export function field(ctx, def) {
     wrap.append(label, control);
   }
   if (def.help) wrap.append(h("p", { class: "help", id: helpId }, def.help));
-  wrap.append(err);
+  if (err) wrap.append(err);
   return wrap;
 }
 

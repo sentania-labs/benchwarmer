@@ -10,7 +10,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -94,6 +96,8 @@ func (f *fakeBackend) Config() (config.Config, string) {
 	defer f.mu.Unlock()
 	return config.Clone(f.cfg), f.source
 }
+
+func (f *fakeBackend) ValidateConfig(c config.Config) error { return config.ValidateChange(c) }
 
 func (f *fakeBackend) UpdateConfig(_ context.Context, c config.Config, actor string) (config.Impact, error) {
 	f.mu.Lock()
@@ -436,6 +440,32 @@ func TestConfigValidationErrorShape(t *testing.T) {
 	}
 	if len(hr.be.updates) != 0 {
 		t.Fatal("invalid config reached UpdateConfig")
+	}
+}
+
+func TestValidateConfigMatchesSaveAndDoesNotUpdate(t *testing.T) {
+	hr := newHarness(t)
+	c := config.Default()
+	c.Listen.Management = "127.0.0.1:" + strconv.Itoa(c.Runtime.Port)
+	body, _ := json.Marshal(c)
+	validate := hr.do(req{method: "POST", path: "/api/v1/config/validate", body: string(body)})
+	save := hr.do(req{method: "PUT", path: "/api/v1/config", body: string(body), token: mgmtTok})
+	if validate.Code != 400 || save.Code != 400 {
+		t.Fatalf("validate=%d save=%d", validate.Code, save.Code)
+	}
+	got, want := decodeErr(t, validate), decodeErr(t, save)
+	if !reflect.DeepEqual(got.Details, want.Details) {
+		t.Fatalf("validate=%+v save=%+v", got.Details, want.Details)
+	}
+	fields := map[string]bool{}
+	for _, d := range got.Details {
+		fields[d.Field] = true
+	}
+	if !fields["runtime.port"] || !fields["listen.management"] {
+		t.Fatalf("missing conflict fields: %+v", got.Details)
+	}
+	if len(hr.be.updates) != 0 {
+		t.Fatal("validation changed configuration")
 	}
 }
 

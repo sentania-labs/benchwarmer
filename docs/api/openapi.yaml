@@ -227,6 +227,24 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Rejected" }
 
+  /api/v1/config/validate:
+    post:
+      tags: [config]
+      operationId: validateConfig
+      summary: Check a proposed configuration without saving it.
+      description: Loopback trust or management token. Uses the same rules as saving.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Config" }
+      responses:
+        "200": { description: Configuration is valid. }
+        "400": { $ref: "#/components/responses/InvalidConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+
   /api/v1/events:
     get:
       tags: [status]
@@ -801,6 +819,9 @@ components:
         config_problem:
           type: string
           description: Which field of config.json was rejected and why. Present only when the file was found but could not be used.
+        config_problem_fields:
+          type: array
+          items: { $ref: "#/components/schemas/FieldError" }
         mode_options: { $ref: "#/components/schemas/ModeOptions" }
         owner: { $ref: "#/components/schemas/OwnerStatus" }
     OwnerStatus:
@@ -1154,6 +1175,10 @@ components:
       properties:
         config: { $ref: "#/components/schemas/Config" }
         source: { type: string, enum: [primary, last_good, default] }
+        problem: { type: string }
+        problem_fields:
+          type: array
+          items: { $ref: "#/components/schemas/FieldError" }
         impact: { $ref: "#/components/schemas/Impact" }
     Impact:
       type: object

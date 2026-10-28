@@ -1245,7 +1245,14 @@ func TestDrainAndReloadWhileStoppedReportNotRunning(t *testing.T) {
 
 func TestUpdateConfigRefusesMissingModelFile(t *testing.T) {
 	present := map[string]bool{}
-	r := newRigWith(t, nil, func(d *Deps) { d.FileExists = func(p string) bool { return present[p] } })
+	r := newRigWith(t, nil, func(d *Deps) {
+		d.CheckModelFile = func(p string) error {
+			if present[p] {
+				return nil
+			}
+			return errors.New("no file exists at this path")
+		}
+	})
 	nc := config.Clone(r.cfg)
 	nc.Runtime.ModelPath = `D:\models\nope.gguf`
 	_, err := r.c.UpdateConfig(context.Background(), nc, "test")
@@ -1271,6 +1278,21 @@ func TestUpdateConfigRefusesMissingModelFile(t *testing.T) {
 	nc2.Runtime.ContextSize = 8192
 	if _, err := r.c.UpdateConfig(context.Background(), nc2, "test"); err != nil {
 		t.Fatalf("unrelated change blocked: %v", err)
+	}
+}
+
+func TestValidationAndSaveShareModelCheck(t *testing.T) {
+	for _, message := range []string{"no file exists at this path", "the service cannot access this file", "could not determine whether this file is available"} {
+		t.Run(message, func(t *testing.T) {
+			r := newRigWith(t, nil, func(d *Deps) { d.CheckModelFile = func(string) error { return errors.New(message) } })
+			nc := config.Clone(r.cfg)
+			nc.Runtime.ModelPath = `D:\models\new.gguf`
+			preview := r.c.ValidateConfig(nc)
+			_, save := r.c.UpdateConfig(context.Background(), nc, "test")
+			if preview == nil || save == nil || preview.Error() != save.Error() || !strings.Contains(preview.Error(), message) {
+				t.Fatalf("preview=%v save=%v", preview, save)
+			}
+		})
 	}
 }
 

@@ -115,21 +115,21 @@ type Deps struct {
 	ConfigSource string // "primary", "last_good", "default"
 	// ConfigProblem says why config.json was rejected, when it was found
 	// but a fallback is running instead.
-	ConfigProblem string
-	// FileExists reports whether a model file is there, so a config change
-	// pointing at a missing one is refused. Nil skips the check.
-	FileExists  func(path string) bool
-	ConfigStore ConfigStore
-	Adapter     runtime.Adapter
-	Telemetry   TelemetrySource // optional
-	Processes   func() ([]signals.Process, error)
-	Facts       FactBuilder
-	Gate        *proxy.Gate
-	Events      events.Sink
-	EventReader EventReader // optional
-	Persist     Persist     // optional
-	Metrics     Metrics     // optional
-	Now         func() time.Time
+	ConfigProblem       string
+	ConfigProblemFields []config.FieldError
+	// CheckModelFile checks a changed model path. Nil means the check is unavailable.
+	CheckModelFile func(path string) error
+	ConfigStore    ConfigStore
+	Adapter        runtime.Adapter
+	Telemetry      TelemetrySource // optional
+	Processes      func() ([]signals.Process, error)
+	Facts          FactBuilder
+	Gate           *proxy.Gate
+	Events         events.Sink
+	EventReader    EventReader // optional
+	Persist        Persist     // optional
+	Metrics        Metrics     // optional
+	Now            func() time.Time
 	// GPUResets reports GPU driver resets detected since the last call
 	// (optional). Any reset stops the runtime at once (ADR 0011).
 	GPUResets func() []gpureset.Reset
@@ -165,11 +165,12 @@ type Controller struct {
 	mu sync.Mutex
 	d  Deps
 
-	configRevision string
-	cfg            config.Config
-	cfgSource      string
-	cfgProblem     string // why config.json was rejected; empty once a save replaces it
-	restartNeeded  bool
+	configRevision   string
+	cfg              config.Config
+	cfgSource        string
+	cfgProblem       string // why config.json was rejected; empty once a save replaces it
+	cfgProblemFields []config.FieldError
+	restartNeeded    bool
 
 	st         state.State
 	inst       runtime.Instance
@@ -256,7 +257,7 @@ func New(d Deps) *Controller {
 		d.Events = events.SinkFunc(func(events.Event) {})
 	}
 	c := &Controller{
-		d: d, cfg: d.Config, cfgSource: d.ConfigSource, cfgProblem: d.ConfigProblem, st: state.Stopped,
+		d: d, cfg: d.Config, cfgSource: d.ConfigSource, cfgProblem: d.ConfigProblem, cfgProblemFields: d.ConfigProblemFields, st: state.Stopped,
 		readyCh: make(chan loadResult, 1), stopCh: make(chan stopResult, 4), wake: make(chan struct{}, 1),
 		mode: policy.ModeFacts{Mode: policy.ModeAuto},
 	}

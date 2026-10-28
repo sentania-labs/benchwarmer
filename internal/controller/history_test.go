@@ -15,7 +15,7 @@ import (
 
 func TestRestoreConflictValidationAndAudit(t *testing.T) {
 	store := config.NewStore(filepath.Join(t.TempDir(), "config.json"))
-	r := newRigWith(t, nil, func(d *Deps) { d.ConfigStore = store; d.FileExists = func(string) bool { return true } })
+	r := newRigWith(t, nil, func(d *Deps) { d.ConfigStore = store; d.CheckModelFile = func(string) error { return nil } })
 	b, _ := config.Marshal(r.cfg)
 	if err := config.WriteFileAtomic(store.Path(), b, 0600); err != nil {
 		t.Fatal(err)
@@ -53,11 +53,11 @@ func TestRestoreConflictValidationAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.c.d.FileExists = func(string) bool { return false }
+	r.c.d.CheckModelFile = func(string) error { return errors.New("no file exists at this path") }
 	if _, err = r.c.RestoreConfig(context.Background(), preview.ID, preview.Revision, "test"); err == nil {
 		t.Fatal("missing model accepted")
 	}
-	r.c.d.FileExists = func(string) bool { return true }
+	r.c.d.CheckModelFile = func(string) error { return nil }
 	if _, err = r.c.RestoreConfig(context.Background(), preview.ID, preview.Revision, "test"); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestRestoreConflictValidationAndAudit(t *testing.T) {
 
 func TestUnreadableHistoryDoesNotBlockSaveAndWarns(t *testing.T) {
 	store := config.NewStore(filepath.Join(t.TempDir(), "config.json"))
-	r := newRigWith(t, nil, func(d *Deps) { d.ConfigStore = store; d.FileExists = func(string) bool { return true } })
+	r := newRigWith(t, nil, func(d *Deps) { d.ConfigStore = store; d.CheckModelFile = func(string) error { return nil } })
 	b, _ := config.Marshal(r.cfg)
 	if err := config.WriteFileAtomic(store.Path(), b, 0600); err != nil {
 		t.Fatal(err)

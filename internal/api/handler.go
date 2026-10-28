@@ -92,6 +92,7 @@ func New(o Options) http.Handler {
 		"/api/v1/config/history":         {"GET": {AccessRead, false, 0, h.configHistory}},
 		"/api/v1/config/restore-preview": {"GET": {AccessRead, false, 0, h.restorePreview}},
 		"/api/v1/config/restore":         {"POST": {AccessWrite, false, maxSmallBody, h.restoreConfig}},
+		"/api/v1/config/validate":        {"POST": {AccessRead, false, maxConfigBody, h.validateConfig}},
 		"/api/v1/applications": {
 			"GET": {AccessRead, false, 0, h.getApplications},
 			"PUT": {AccessWrite, false, maxConfigBody, h.putApplications},
@@ -302,7 +303,8 @@ func (h *handler) status(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) getConfig(w http.ResponseWriter, r *http.Request) {
 	c, src := h.o.Backend.Config()
-	writeJSON(w, http.StatusOK, ConfigResponse{Config: config.Redact(c), Source: src})
+	status := h.o.Backend.Status()
+	writeJSON(w, http.StatusOK, ConfigResponse{Config: config.Redact(c), Source: src, Problem: status.ConfigProblem, ProblemFields: status.ConfigProblemFields})
 }
 
 func (h *handler) putConfig(w http.ResponseWriter, r *http.Request) {
@@ -317,10 +319,27 @@ func (h *handler) putConfig(w http.ResponseWriter, r *http.Request) {
 	h.applyConfig(w, r, config.RestoreRedacted(in, cur))
 }
 
+// validateConfig checks a draft without changing the active configuration.
+func (h *handler) validateConfig(w http.ResponseWriter, r *http.Request) {
+	var in config.Config
+	if !decode(w, r, &in, true, false) {
+		return
+	}
+	cur, _ := h.o.Backend.Config()
+	if in.BuiltinRulesSeen == nil {
+		in.BuiltinRulesSeen = cur.BuiltinRulesSeen
+	}
+	if err := h.o.Backend.ValidateConfig(config.RestoreRedacted(in, cur)); err != nil {
+		h.backendError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"valid": true})
+}
+
 func (h *handler) applyConfig(w http.ResponseWriter, r *http.Request, c config.Config) {
 	// The Backend validates too; checking here guarantees the 400 shape
 	// whatever the Backend returns.
-	if err := config.ValidateChange(c); err != nil {
+	if err := h.o.Backend.ValidateConfig(c); err != nil {
 		h.backendError(w, r, err)
 		return
 	}
@@ -417,7 +436,7 @@ func (h *handler) putApplications(w http.ResponseWriter, r *http.Request) {
 	c, _ := h.o.Backend.Config()
 	c = config.Clone(c)
 	c.Applications = in.Applications
-	if err := config.ValidateChange(c); err != nil {
+	if err := h.o.Backend.ValidateConfig(c); err != nil {
 		h.backendError(w, r, err)
 		return
 	}

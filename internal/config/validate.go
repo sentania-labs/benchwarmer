@@ -254,6 +254,7 @@ func validateListen(v *validator, c Config) {
 		}
 		if other, dup := ports[port]; dup {
 			v.add(field, "port %s is already used by %s", port, other)
+			v.add(other, "port %s is already used by %s", port, field)
 		}
 		ports[port] = field
 	}

@@ -144,22 +144,41 @@ func (c *Controller) requestManual(kind, reason string) error {
 	return nil
 }
 
+// ValidateConfig checks a proposed change without applying it.
+func (c *Controller) ValidateConfig(nc config.Config) error {
+	return c.validateConfig(nc, false)
+}
+
+// validateConfig checks a change. The model file is checked only when its
+// path changed (or checkModel is set), so an unrelated save is not blocked by
+// a model that has gone missing since.
+func (c *Controller) validateConfig(nc config.Config, checkModel bool) error {
+	if err := config.ValidateChange(nc); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	changed := checkModel || nc.Runtime.ModelPath != c.cfg.Runtime.ModelPath
+	c.mu.Unlock()
+	if changed {
+		if c.d.CheckModelFile == nil {
+			return &config.ValidationError{Errors: []config.FieldError{{Field: "runtime.model_path", Message: "could not check whether this file is available"}}}
+		}
+		if err := c.d.CheckModelFile(nc.Runtime.ModelPath); err != nil {
+			return &config.ValidationError{Errors: []config.FieldError{{Field: "runtime.model_path", Message: err.Error()}}}
+		}
+	}
+	return nil
+}
+
 // UpdateConfig validates, persists, applies, and audits a new config.
 func (c *Controller) UpdateConfig(ctx context.Context, nc config.Config, actor string) (config.Impact, error) {
 	return c.updateConfig(ctx, nc, actor, "", "")
 }
 
 func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, expected, restoreOf string) (config.Impact, error) {
-	// Only a changed model path is checked, so an unrelated save is not
-	// blocked by a model that has gone missing since. The stat can hang on
-	// an unreachable network path, so it runs before the controller lock.
-	modelMissing := false
-	if c.d.FileExists != nil {
-		c.mu.Lock()
-		changed := nc.Runtime.ModelPath != c.cfg.Runtime.ModelPath
-		c.mu.Unlock()
-		modelMissing = (changed || restoreOf != "") && !c.d.FileExists(nc.Runtime.ModelPath)
-	}
+	// The model stat can hang on an unreachable network path, so validation
+	// runs before the controller lock.
+	verr := c.validateConfig(nc, restoreOf != "")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.d.Now()
@@ -173,16 +192,10 @@ func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, ex
 			return config.Impact{}, err
 		}
 	}
-	if err := config.ValidateChange(nc); err != nil {
+	if verr != nil {
 		c.emit(events.Event{Time: now, Type: events.ConfigRejected, Severity: policy.SeverityNotice,
-			Message: "Configuration change rejected: " + err.Error(), Data: map[string]any{"actor": actor}})
-		return config.Impact{}, err
-	}
-	if modelMissing {
-		err := &config.ValidationError{Errors: []config.FieldError{{Field: "runtime.model_path", Message: "no file exists at this path"}}}
-		c.emit(events.Event{Time: now, Type: events.ConfigRejected, Severity: policy.SeverityNotice,
-			Message: "Configuration change rejected: " + err.Error(), Data: map[string]any{"actor": actor}})
-		return config.Impact{}, err
+			Message: "Configuration change rejected: " + verr.Error(), Data: map[string]any{"actor": actor}})
+		return config.Impact{}, verr
 	}
 	if c.d.ConfigStore != nil {
 		var err error
@@ -203,7 +216,7 @@ func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, ex
 	}
 	im := config.Classify(c.cfg, nc)
 	changes := config.HistoryDiff(c.cfg, nc)
-	c.cfg, c.cfgSource, c.cfgProblem = nc, "primary", ""
+	c.cfg, c.cfgSource, c.cfgProblem, c.cfgProblemFields = nc, "primary", "", nil
 	c.configRevision = rand.Text()
 	c.schedCacheValid = false
 	c.lastSetupCheck, c.setupResult = time.Time{}, nil // re-check the runtime and model files now, ignoring a check of the old paths
@@ -316,7 +329,7 @@ func (c *Controller) Status() api.Status {
 		Time: now, Version: c.d.Version, Condition: c.st.Condition(), State: c.st,
 		Mode:         api.ModeStatus{Mode: c.mode.Mode, Until: c.mode.Until, SetBy: c.mode.SetBy, SetAt: c.modeSetAt},
 		Decision:     d,
-		ConfigSource: c.cfgSource, ConfigProblem: c.cfgProblem,
+		ConfigSource: c.cfgSource, ConfigProblem: c.cfgProblem, ConfigProblemFields: slices.Clone(c.cfgProblemFields),
 		ModeOptions: api.ModeOptions{PauseDurations: slices.Clone(c.cfg.Modes.PauseDurations), AIPriorityDurations: slices.Clone(c.cfg.Modes.AIPriorityDurations),
 			UntilTomorrowAt: nextLocalMorning(now, c.cfg.Timezone)},
 		RecentErrors: append([]events.Event(nil), c.recentErrors...),

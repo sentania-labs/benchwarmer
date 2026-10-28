@@ -2,11 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { proposedRule, sameMatcher, snapshotFresh, searchableValues } from './static/js/applications.js';
 
-test('staging uses exact paths and refuses a generic Java rule', () => {
+test('staging uses exact paths and never makes a name-only javaw.exe rule', () => {
   assert.deepEqual(proposedRule({name:'game.exe', path:'C:\\Games\\game.exe'}, 'game'), {path:'C:\\Games\\game.exe', class:'game'});
   assert.deepEqual(proposedRule({name:'game.exe'}, 'ignore'), {exe:'game.exe', class:'ignore'});
   assert.equal(proposedRule({name:'javaw.exe'}, 'game'), null);
-  assert.equal(proposedRule({name:'javaw.exe', path:'C:\\Java\\javaw.exe'}, 'game'), null);
+  assert.equal(proposedRule({name:'javaw.exe'}, 'ignore'), null);
+  assert.deepEqual(proposedRule({name:'javaw.exe', path:'C:\\Java\\javaw.exe'}, 'game'), {path:'C:\\Java\\javaw.exe', class:'game'});
+  assert.deepEqual(proposedRule({name:'JAVAW.EXE', path:'C:\\Java\\javaw.exe'}, 'ignore'), {path:'C:\\Java\\javaw.exe', class:'ignore'});
   assert.equal(proposedRule({name:'x.exe'}, 'launcher'), null);
 });
 test('duplicates ignore case and separator differences', () => {

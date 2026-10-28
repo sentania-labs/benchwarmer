@@ -2,9 +2,8 @@
 export function proposedRule(process, classification) {
   if (!process || !['game', 'ignore'].includes(classification)) return null;
   const name = (process.name || '').toLowerCase();
-  if (name === 'javaw.exe') return null;
   if (process.path) return { path: process.path, class: classification };
-  if (process.name) return { exe: process.name, class: classification };
+  if (process.name && name !== 'javaw.exe') return { exe: process.name, class: classification };
   return null;
 }
 export function sameMatcher(a, b) {

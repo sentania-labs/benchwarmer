@@ -510,11 +510,11 @@ function applicationsSection() {
             const duplicates = list.filter(r => sameMatcher(r, rule)).length;
             const consequence = cls === "game" ? "Benchwarmer will yield when this game is confirmed." : "Benchwarmer will ignore this process for application classification; GPU pressure may still affect policy.";
             const target = rule.path || rule.exe;
-            if (!window.confirm("Stage " + label.toLowerCase() + " for " + target + "? " + consequence + " The new rule will be first and take precedence over matching rules." + (duplicates ? " " + duplicates + " existing rule(s) have the same matcher and will remain below it." : "") + " This only changes the draft; save with authorization to apply it.")) return;
+            if (!window.confirm("Stage " + label.toLowerCase() + " for " + target + "? " + consequence + (java ? " Other Java programs also use javaw.exe; this rule matches only this exact path." : "") + " The new rule will be first and take precedence over matching rules." + (duplicates ? " " + duplicates + " existing rule(s) have the same matcher and will remain below it." : "") + " This only changes the draft; save with authorization to apply it.")) return;
             structural(() => list.unshift(rule), idFor("applications[0]." + (rule.path ? "path" : "exe")));
           } }, label);
           return h("div", { class: "rule", dataset: { processSearch: searchableValues(proc) } }, h("strong", null, proc.name || "Unknown process"), h("p", null, "Executable: " + (proc.path || proc.name || "unavailable") + " · PID " + proc.pid + " · class " + (proc.class || "unclassified") + (proc.rule ? " · rule " + proc.rule : "")),
-            java && h("p", { class: "help" }, "Minecraft Java may use javaw.exe, but other Java programs do too. Check the executable path; this does not identify Minecraft."),
+            java && h("p", { class: "help" }, "Minecraft Java may use javaw.exe, but other Java programs do too. " + (proc.path ? "A rule here matches only this exact executable path; it does not identify Minecraft." : "The full executable path is unknown, so no rule can be staged.")),
             action("game", "Treat as game"), " ", action("ignore", "Ignore"));
         }), h("button", { type: "button", onclick: refreshSnapshot }, "Refresh GPU users"));
       applyQuery();

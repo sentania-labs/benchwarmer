@@ -24,8 +24,9 @@ type Backend interface {
 	// Config returns the active config (unredacted; the API redacts) and
 	// its source.
 	Config() (config.Config, string)
-	// ValidateConfig checks a proposed change without applying it.
-	ValidateConfig(c config.Config) error
+	// ValidateConfig checks a proposed change without applying it. The
+	// warnings are problems that do not block saving.
+	ValidateConfig(c config.Config) ([]config.FieldError, error)
 	// UpdateConfig validates, persists atomically, applies, and audits a
 	// new config, returning what the change requires.
 	UpdateConfig(ctx context.Context, c config.Config, actor string) (config.Impact, error)

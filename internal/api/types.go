@@ -159,7 +159,14 @@ type ConfigResponse struct {
 	Source        string              `json:"source"`
 	Problem       string              `json:"problem,omitempty"`
 	ProblemFields []config.FieldError `json:"problem_fields,omitempty"`
+	Warnings      []config.FieldError `json:"warnings,omitempty"`
 	Impact        *config.Impact      `json:"impact,omitempty"`
+}
+
+// ValidateResponse is the success body of POST /api/v1/config/validate.
+type ValidateResponse struct {
+	Valid    bool                `json:"valid"`
+	Warnings []config.FieldError `json:"warnings,omitempty"`
 }
 
 // ApplicationsBody is GET/PUT /api/v1/applications.

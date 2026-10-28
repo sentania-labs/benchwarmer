@@ -329,17 +329,19 @@ func (h *handler) validateConfig(w http.ResponseWriter, r *http.Request) {
 	if in.BuiltinRulesSeen == nil {
 		in.BuiltinRulesSeen = cur.BuiltinRulesSeen
 	}
-	if err := h.o.Backend.ValidateConfig(config.RestoreRedacted(in, cur)); err != nil {
+	warnings, err := h.o.Backend.ValidateConfig(config.RestoreRedacted(in, cur))
+	if err != nil {
 		h.backendError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"valid": true})
+	writeJSON(w, http.StatusOK, ValidateResponse{Valid: true, Warnings: warnings})
 }
 
 func (h *handler) applyConfig(w http.ResponseWriter, r *http.Request, c config.Config) {
 	// The Backend validates too; checking here guarantees the 400 shape
 	// whatever the Backend returns.
-	if err := h.o.Backend.ValidateConfig(c); err != nil {
+	warnings, err := h.o.Backend.ValidateConfig(c)
+	if err != nil {
 		h.backendError(w, r, err)
 		return
 	}
@@ -349,7 +351,7 @@ func (h *handler) applyConfig(w http.ResponseWriter, r *http.Request, c config.C
 		return
 	}
 	nc, src := h.o.Backend.Config()
-	writeJSON(w, http.StatusOK, ConfigResponse{Config: config.Redact(nc), Source: src, Impact: &im})
+	writeJSON(w, http.StatusOK, ConfigResponse{Config: config.Redact(nc), Source: src, Warnings: warnings, Impact: &im})
 }
 
 type configHistoryBackend interface {
@@ -436,7 +438,7 @@ func (h *handler) putApplications(w http.ResponseWriter, r *http.Request) {
 	c, _ := h.o.Backend.Config()
 	c = config.Clone(c)
 	c.Applications = in.Applications
-	if err := h.o.Backend.ValidateConfig(c); err != nil {
+	if _, err := h.o.Backend.ValidateConfig(c); err != nil {
 		h.backendError(w, r, err)
 		return
 	}

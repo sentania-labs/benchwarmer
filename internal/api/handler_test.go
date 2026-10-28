@@ -97,7 +97,9 @@ func (f *fakeBackend) Config() (config.Config, string) {
 	return config.Clone(f.cfg), f.source
 }
 
-func (f *fakeBackend) ValidateConfig(c config.Config) error { return config.ValidateChange(c) }
+func (f *fakeBackend) ValidateConfig(c config.Config) ([]config.FieldError, error) {
+	return nil, config.ValidateChange(c)
+}
 
 func (f *fakeBackend) UpdateConfig(_ context.Context, c config.Config, actor string) (config.Impact, error) {
 	f.mu.Lock()

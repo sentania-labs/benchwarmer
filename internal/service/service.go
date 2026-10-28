@@ -557,7 +557,7 @@ func checkModelFile(path string) error {
 	case errors.Is(err, os.ErrPermission):
 		return errors.New("the service cannot access this file")
 	case err != nil:
-		return errors.New("could not determine whether this file is available")
+		return config.ErrFileUnknown
 	case !fi.Mode().IsRegular():
 		return errors.New("this path is not a regular file")
 	default:

@@ -16,7 +16,7 @@ import { modelGroup, resetModelPicker } from "./modelpicker.js";
 // Kept across page visits so unsaved edits survive a trip to the dashboard.
 const st = {
   cfg: null, draft: null, source: "", problem: "", problemFields: [], section: "runtime",
-  errors: new Map(), clientErrors: new Map(), impact: null, message: null, loading: false, saving: false, setup: null,
+  errors: new Map(), clientErrors: new Map(), warnings: [], impact: null, message: null, loading: false, saving: false, setup: null,
 };
 let picker = null;
 let els = null;
@@ -86,8 +86,10 @@ async function validateDraft() {
   validationPending = true;
   syncSaveBar();
   let details = [];
+  let warnings = [];
   try {
-    await post("api/v1/config/validate", clone(st.draft), { interactive: false });
+    const res = await post("api/v1/config/validate", clone(st.draft), { interactive: false });
+    warnings = (res && res.warnings) || [];
   } catch (e) {
     if (e instanceof ApiError && e.status === 400 && e.body.details) details = e.body.details;
     else {
@@ -97,6 +99,7 @@ async function validateDraft() {
   }
   if (!revision.isCurrent(requested)) return;
   st.message = null;
+  st.warnings = warnings;
   validationPending = false;
   validated = details.length === 0;
   st.errors.clear();
@@ -204,6 +207,12 @@ function renderTop() {
       h("ul", null, all.map(([path, msg]) => h("li", null,
         h("a", { href: "#/config/" + sectionFor(path), onclick: (e) => { e.preventDefault(); jumpTo(path); } }, path),
         ": " + msg)))));
+  }
+  if (st.warnings.length) {
+    parts.push(h("div", { class: "notice", role: "status" }, warnIcon(),
+      h("ul", null, st.warnings.map((d) => h("li", null,
+        h("a", { href: "#/config/" + sectionFor(d.field), onclick: (e) => { e.preventDefault(); jumpTo(d.field); } }, d.field),
+        ": " + d.message)))));
   }
   if (st.impact) parts.push(renderImpact(st.impact));
   if (st.message) parts.push(h("p", { class: "field-error", role: "alert", tabindex: "-1", id: all.length ? null : "error-summary" }, st.message));
@@ -750,6 +759,7 @@ function discard() {
   st.clientErrors.clear();
   st.message = null;
   resetModelPicker();
+  st.warnings = [];
   renderAll();
 }
 
@@ -775,6 +785,7 @@ async function save() {
     }
     st.source = res.source || st.source;
     st.errors.clear();
+    st.warnings = res.warnings || [];
     st.impact = { ...(res.impact || { changed: [] }), at: new Date() };
   } catch (e) {
     st.impact = null;

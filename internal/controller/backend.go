@@ -144,30 +144,66 @@ func (c *Controller) requestManual(kind, reason string) error {
 	return nil
 }
 
-// ValidateConfig checks a proposed change without applying it.
-func (c *Controller) ValidateConfig(nc config.Config) error {
+// modelCheckTimeout bounds the model file check: a stat on an unreachable
+// network path can hang.
+var modelCheckTimeout = 2 * time.Second
+
+// checkModelFile runs CheckModelFile with a deadline. A check that cannot
+// answer in time reports the file's availability as unknown.
+func (c *Controller) checkModelFile(path string) error {
+	if c.d.CheckModelFile == nil {
+		return config.ErrFileUnknown
+	}
+	ch := make(chan error, 1)
+	go func() { ch <- c.d.CheckModelFile(path) }()
+	select {
+	case err := <-ch:
+		return err
+	case <-time.After(modelCheckTimeout):
+		return config.ErrFileUnknown
+	}
+}
+
+// ValidateConfig checks a proposed change without applying it. Every field
+// problem is reported together. A model file that is definitely missing or
+// unusable is an error; one whose availability cannot be determined is a
+// warning, so the save is allowed.
+func (c *Controller) ValidateConfig(nc config.Config) ([]config.FieldError, error) {
 	return c.validateConfig(nc, false)
 }
 
-// validateConfig checks a change. The model file is checked only when its
-// path changed (or checkModel is set), so an unrelated save is not blocked by
-// a model that has gone missing since.
-func (c *Controller) validateConfig(nc config.Config, checkModel bool) error {
+// validateConfig is ValidateConfig with the model file also checked when
+// checkModel is set. Otherwise only a changed path is checked, so an
+// unrelated save is not blocked by a model that has gone missing since.
+func (c *Controller) validateConfig(nc config.Config, checkModel bool) ([]config.FieldError, error) {
+	var errs, warnings []config.FieldError
 	if err := config.ValidateChange(nc); err != nil {
-		return err
+		var ve *config.ValidationError
+		if !errors.As(err, &ve) {
+			return nil, err
+		}
+		errs = ve.Errors
 	}
 	c.mu.Lock()
 	changed := checkModel || nc.Runtime.ModelPath != c.cfg.Runtime.ModelPath
 	c.mu.Unlock()
-	if changed {
-		if c.d.CheckModelFile == nil {
-			return &config.ValidationError{Errors: []config.FieldError{{Field: "runtime.model_path", Message: "could not check whether this file is available"}}}
-		}
-		if err := c.d.CheckModelFile(nc.Runtime.ModelPath); err != nil {
-			return &config.ValidationError{Errors: []config.FieldError{{Field: "runtime.model_path", Message: err.Error()}}}
+	reported := false
+	for _, e := range errs {
+		reported = reported || e.Field == "runtime.model_path"
+	}
+	if changed && !reported {
+		switch err := c.checkModelFile(nc.Runtime.ModelPath); {
+		case err == nil:
+		case errors.Is(err, config.ErrFileUnknown):
+			warnings = append(warnings, config.FieldError{Field: "runtime.model_path", Message: err.Error() + "; the model may not load until it is reachable"})
+		default:
+			errs = append(errs, config.FieldError{Field: "runtime.model_path", Message: err.Error()})
 		}
 	}
-	return nil
+	if len(errs) > 0 {
+		return warnings, &config.ValidationError{Errors: errs}
+	}
+	return warnings, nil
 }
 
 // UpdateConfig validates, persists, applies, and audits a new config.
@@ -178,7 +214,7 @@ func (c *Controller) UpdateConfig(ctx context.Context, nc config.Config, actor s
 func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, expected, restoreOf string) (config.Impact, error) {
 	// The model stat can hang on an unreachable network path, so validation
 	// runs before the controller lock.
-	verr := c.validateConfig(nc, restoreOf != "")
+	_, verr := c.validateConfig(nc, restoreOf != "")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.d.Now()

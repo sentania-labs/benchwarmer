@@ -239,7 +239,18 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/Config" }
       responses:
-        "200": { description: Configuration is valid. }
+        "200":
+          description: Configuration is valid. `warnings` lists problems that do not block saving.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [valid]
+                properties:
+                  valid: { type: boolean }
+                  warnings:
+                    type: array
+                    items: { $ref: "#/components/schemas/FieldError" }
         "400": { $ref: "#/components/responses/InvalidConfig" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -1178,6 +1189,10 @@ components:
         problem: { type: string }
         problem_fields:
           type: array
+          items: { $ref: "#/components/schemas/FieldError" }
+        warnings:
+          type: array
+          description: Problems that did not block saving, such as a model file whose availability could not be determined.
           items: { $ref: "#/components/schemas/FieldError" }
         impact: { $ref: "#/components/schemas/Impact" }
     Impact:

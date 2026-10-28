@@ -1282,17 +1282,70 @@ func TestUpdateConfigRefusesMissingModelFile(t *testing.T) {
 }
 
 func TestValidationAndSaveShareModelCheck(t *testing.T) {
-	for _, message := range []string{"no file exists at this path", "the service cannot access this file", "could not determine whether this file is available"} {
+	for _, message := range []string{"no file exists at this path", "the service cannot access this file", "this path is not a regular file"} {
 		t.Run(message, func(t *testing.T) {
 			r := newRigWith(t, nil, func(d *Deps) { d.CheckModelFile = func(string) error { return errors.New(message) } })
 			nc := config.Clone(r.cfg)
 			nc.Runtime.ModelPath = `D:\models\new.gguf`
-			preview := r.c.ValidateConfig(nc)
+			_, preview := r.c.ValidateConfig(nc)
 			_, save := r.c.UpdateConfig(context.Background(), nc, "test")
 			if preview == nil || save == nil || preview.Error() != save.Error() || !strings.Contains(preview.Error(), message) {
 				t.Fatalf("preview=%v save=%v", preview, save)
 			}
 		})
+	}
+}
+
+func TestUnknownModelAvailabilityWarnsAndSaves(t *testing.T) {
+	r := newRigWith(t, nil, func(d *Deps) { d.CheckModelFile = func(string) error { return config.ErrFileUnknown } })
+	nc := config.Clone(r.cfg)
+	nc.Runtime.ModelPath = `D:\models\new.gguf`
+	warnings, err := r.c.ValidateConfig(nc)
+	if err != nil || len(warnings) != 1 || warnings[0].Field != "runtime.model_path" {
+		t.Fatalf("warnings=%+v err=%v", warnings, err)
+	}
+	if _, err := r.c.UpdateConfig(context.Background(), nc, "test"); err != nil {
+		t.Fatalf("unknown availability blocked the save: %v", err)
+	}
+	if got, _ := r.c.Config(); got.Runtime.ModelPath != nc.Runtime.ModelPath {
+		t.Fatal("save with a warning was not applied")
+	}
+}
+
+func TestModelCheckIsBoundedAndReportsUnknown(t *testing.T) {
+	old := modelCheckTimeout
+	modelCheckTimeout = 20 * time.Millisecond
+	defer func() { modelCheckTimeout = old }()
+	release := make(chan struct{})
+	defer close(release)
+	r := newRigWith(t, nil, func(d *Deps) { d.CheckModelFile = func(string) error { <-release; return nil } })
+	nc := config.Clone(r.cfg)
+	nc.Runtime.ModelPath = `D:\models\slow.gguf`
+	warnings, err := r.c.ValidateConfig(nc)
+	if err != nil || len(warnings) != 1 || !strings.Contains(warnings[0].Message, config.ErrFileUnknown.Error()) {
+		t.Fatalf("warnings=%+v err=%v", warnings, err)
+	}
+}
+
+func TestModelFileErrorIsReportedWithOtherFieldErrors(t *testing.T) {
+	r := newRigWith(t, nil, func(d *Deps) {
+		d.CheckModelFile = func(string) error { return errors.New("no file exists at this path") }
+	})
+	nc := config.Clone(r.cfg)
+	nc.Runtime.ModelPath = `D:\models\nope.gguf`
+	nc.Safety.GPUTempCriticalC = 65
+	nc.Safety.GPUTempResumeC = 70
+	_, err := r.c.ValidateConfig(nc)
+	var ve *config.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want ValidationError, got %v", err)
+	}
+	fields := map[string]bool{}
+	for _, e := range ve.Errors {
+		fields[e.Field] = true
+	}
+	if !fields["runtime.model_path"] || !fields["safety.gpu_temp_resume_c"] {
+		t.Fatalf("errors not reported together: %+v", ve.Errors)
 	}
 }
 

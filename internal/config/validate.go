@@ -14,6 +14,10 @@ import (
 	_ "time/tzdata"
 )
 
+// ErrFileUnknown reports that a file's availability could not be determined,
+// as opposed to the file being missing or unusable.
+var ErrFileUnknown = errors.New("could not determine whether this file is available")
+
 // FieldError is one validation failure.
 type FieldError struct {
 	Field   string `json:"field"`

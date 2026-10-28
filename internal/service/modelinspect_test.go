@@ -131,6 +131,35 @@ func TestInspectModelFileOnlyReadsAllowedPaths(t *testing.T) {
 	}
 }
 
+func TestInspectModelFileDotDotThroughSymlinkIsNotRead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks needs privileges on Windows")
+	}
+	gpu := modelplan.GPU{TotalMiB: 24576, Reliable: true}
+	models := t.TempDir()
+	sep := string(filepath.Separator)
+	allowed := filepath.Join(models, "small.gguf")
+	// The target of the symlink holds a different, readable model that sits in
+	// the parent of the symlink target, so "link/../x.gguf" cleans to an
+	// allowed path but the OS resolves it to this one.
+	outer := t.TempDir()
+	secret := filepath.Join(outer, "small.gguf")
+	if err := os.Rename(ggufFixture(t, 1<<20), secret); err != nil {
+		t.Fatal(err)
+	}
+	inner := filepath.Join(outer, "inner")
+	if err := os.Mkdir(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(inner, filepath.Join(models, "link")); err != nil {
+		t.Fatal(err)
+	}
+	got := inspectModelFile(models+sep+"link"+sep+".."+sep+"small.gguf", 0, gpu, []string{allowed})
+	if got.Metadata != nil || got.Plan != nil || got.SizeBytes != 0 {
+		t.Fatalf("a path through a symlink must not read the file it resolves to: %+v", got)
+	}
+}
+
 func TestWithDeadlineReleasesAStuckRead(t *testing.T) {
 	block := make(chan struct{})
 	defer close(block)

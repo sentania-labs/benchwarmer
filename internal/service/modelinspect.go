@@ -88,7 +88,10 @@ func inspectModelFile(path string, currentContext int, gpu modelplan.GPU, allowe
 	if !known {
 		return fail(api.InspectNotAvailable, "This path can be checked after the configuration is saved with it, or if the file is in the models folder.")
 	}
-	return withDeadline(inspectDeadline, func() api.ModelInspection { return readModel(path, currentContext, gpu, base, fail) },
+	// Read the cleaned path that matched the allow-list, not the caller's
+	// spelling: the OS resolves "link/../x" through the link, Clean does not.
+	clean := filepath.Clean(path)
+	return withDeadline(inspectDeadline, func() api.ModelInspection { return readModel(clean, currentContext, gpu, base, fail) },
 		func() api.ModelInspection {
 			return fail(api.InspectUnreadable, "Reading this file took too long, so it was skipped. Check that the path is a local file.")
 		})

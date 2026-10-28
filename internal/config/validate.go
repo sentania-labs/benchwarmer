@@ -122,8 +122,13 @@ func Validate(c Config) error {
 		}
 		seen[sc.Name] = true
 	}
+	ruleIDs := map[string]bool{}
 	for i, r := range c.Applications {
 		validateAppRule(v, fmt.Sprintf("applications[%d]", i), r)
+		if r.ID != "" && ruleIDs[r.ID] {
+			v.add(fmt.Sprintf("applications[%d].id", i), "duplicate rule id %q", r.ID)
+		}
+		ruleIDs[r.ID] = true
 	}
 
 	a := c.AntiThrash

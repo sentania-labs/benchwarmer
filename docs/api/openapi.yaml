@@ -987,6 +987,14 @@ components:
         applications:
           type: array
           items: { $ref: "#/components/schemas/AppRule" }
+        builtin_rules_seen:
+          type: array
+          description: >-
+            Ids of the shipped application rules this config has been offered.
+            Shipped rules missing from this list are added to `applications`
+            when the config loads; listed ones that are absent from
+            `applications` were deleted and stay deleted. Keep it as read.
+          items: { type: string }
         anti_thrash: { $ref: "#/components/schemas/AntiThrashConfig" }
         recovery: { $ref: "#/components/schemas/RecoveryConfig" }
         modes: { $ref: "#/components/schemas/ModesConfig" }
@@ -1099,9 +1107,12 @@ components:
     AppRule:
       type: object
       additionalProperties: false
-      description: Exactly one of exe, path, path_prefix, glob must be set.
+      description: >-
+        Exactly one of exe, path, path_prefix, glob must be set. `id` marks a
+        shipped (built-in) rule and is empty on local rules.
       required: [class]
       properties:
+        id: { type: string }
         name: { type: string }
         exe: { type: string }
         path: { type: string }

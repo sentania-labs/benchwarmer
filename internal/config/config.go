@@ -38,15 +38,20 @@ type Config struct {
 	// daylight-saving transitions follow the zone's rules.
 	Timezone string `json:"timezone"`
 
-	Applications []AppRule  `json:"applications"`
-	AntiThrash   AntiThrash `json:"anti_thrash"`
-	Recovery     Recovery   `json:"recovery"`
-	Modes        Modes      `json:"modes"`
-	Signals      Signals    `json:"signals"`
-	Security     Security   `json:"security"`
-	Retention    Retention  `json:"retention"`
-	Metrics      Metrics    `json:"metrics"`
-	Logging      Logging    `json:"logging"`
+	Applications []AppRule `json:"applications"`
+	// BuiltinRulesSeen lists the ids of shipped application rules this
+	// config has already been offered. A shipped rule whose id is absent is
+	// added on load; one that is listed but missing from Applications was
+	// deleted on purpose and stays deleted.
+	BuiltinRulesSeen []string   `json:"builtin_rules_seen"`
+	AntiThrash       AntiThrash `json:"anti_thrash"`
+	Recovery         Recovery   `json:"recovery"`
+	Modes            Modes      `json:"modes"`
+	Signals          Signals    `json:"signals"`
+	Security         Security   `json:"security"`
+	Retention        Retention  `json:"retention"`
+	Metrics          Metrics    `json:"metrics"`
+	Logging          Logging    `json:"logging"`
 }
 
 // Runtime configures the managed llama-server.
@@ -216,6 +221,9 @@ const (
 // * matches any run of characters (including separators) and ? matches one.
 // Rules are evaluated in order; the first match wins.
 type AppRule struct {
+	// ID is set on shipped rules (and kept when one is edited) and empty on
+	// rules added locally. See BuiltinRulesSeen.
+	ID         string `json:"id,omitempty"`
 	Name       string `json:"name,omitempty"`
 	Exe        string `json:"exe,omitempty"`
 	Path       string `json:"path,omitempty"`

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,7 +38,7 @@ type OwnerStatus struct {
 	// Cause says why: ready, busy, loading, starting, game, gpu_busy,
 	// cooldown, startup, resume, drained, recovering, suppressed, low_vram,
 	// stopping, sleeping, paused, too_hot, setup, crash, gpu_fault,
-	// no_gpu_readings, no_process_list, or unknown.
+	// no_gpu_readings, no_process_list, vram_too_small, or unknown.
 	Cause string `json:"cause"`
 	// After names what a cooldown follows: game, gpu_busy, heat, or other.
 	After string `json:"after,omitempty"`
@@ -131,6 +132,11 @@ func classify(s Status, cooldown time.Duration) OwnerStatus {
 		o.After = cooldownAfter(evidenceValue(d, "last_competing_rule"))
 		return timed("cooldown")
 	case rule == policy.RuleVRAMInsufficient:
+		// Memory another program holds comes back; memory the GPU never
+		// had does not, so that is a setting to fix, not a wait.
+		if need := evidenceThreshold(d, "vram_free_mib"); need > 0 && s.GPU.VRAMTotalMiB > 0 && need > s.GPU.VRAMTotalMiB {
+			return bad("vram_too_small")
+		}
 		return wait("low_vram")
 	case rule == policy.RuleRecovery:
 		return recovery(o, s, evidenceValue(d, "recovery_reason"))
@@ -195,6 +201,18 @@ func cooldownAfter(rule string) string {
 		return "heat"
 	}
 	return "other"
+}
+
+// evidenceThreshold is the numeric threshold of the first evidence named
+// name, or 0 when absent or not a number.
+func evidenceThreshold(d policy.Decision, name string) int {
+	for _, e := range d.Evidence {
+		if e.Name == name {
+			n, _ := strconv.Atoi(e.Threshold)
+			return n
+		}
+	}
+	return 0
 }
 
 // evidenceValue is the first evidence value whose name is one of names.

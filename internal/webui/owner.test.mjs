@@ -145,3 +145,10 @@ test('confirmation text repeats what was chosen', () => {
   assert.equal(appliedText('pause', '1h0m0s'), 'AI paused for 1 h.');
   assert.equal(appliedText('pause', ''), 'AI paused until you turn it back on.');
 });
+
+test('memory the card never had is a problem with a way forward, not a wait', () => {
+  const v = view({ kind: 'problem', severity: 'problem', cause: 'vram_too_small' });
+  assert.equal(v.severity, 'problem');
+  assert.match(v.headline, /can never load/);
+  assert.equal(v.action.href, '#/config/runtime');
+});

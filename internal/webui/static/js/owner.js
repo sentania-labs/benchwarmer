@@ -105,6 +105,12 @@ function describe(o, st, at) {
       };
     case "low_vram":
       return { headline: "There is not enough free GPU memory to load AI right now.", lines: ["It loads on its own when another program frees some up."] };
+    case "vram_too_small":
+      return {
+        headline: "This GPU does not have enough memory for the AI model as configured, so AI can never load.",
+        lines: ["Lower the required free memory or choose a smaller model."],
+        action: { label: "Open runtime settings", href: "#/config/runtime" },
+      };
     case "stopping":
       return { headline: "Benchwarmer is shutting down." };
     case "sleeping":

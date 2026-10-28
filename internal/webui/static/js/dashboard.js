@@ -1,5 +1,5 @@
-import { sectionFor } from "./configdefs.js";
 // Dashboard: polls GET api/v1/status every 2 seconds while visible.
+import { sectionFor } from "./configdefs.js";
 import { h, replace, toneIcon, warnIcon } from "./dom.js";
 import { get, put, post, signIn, modeTokenReason, ApiError } from "./api.js";
 import { setBanner, clearBanner } from "./banners.js";

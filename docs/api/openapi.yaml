@@ -837,6 +837,7 @@ components:
           description: Which field of config.json was rejected and why. Present only when the file was found but could not be used.
         config_problem_fields:
           type: array
+          description: The individual field errors behind `config_problem`, when the file failed validation.
           items: { $ref: "#/components/schemas/FieldError" }
         mode_options: { $ref: "#/components/schemas/ModeOptions" }
         owner: { $ref: "#/components/schemas/OwnerStatus" }
@@ -1191,9 +1192,10 @@ components:
       properties:
         config: { $ref: "#/components/schemas/Config" }
         source: { type: string, enum: [primary, last_good, default] }
-        problem: { type: string }
+        problem: { type: string, description: Why `config.json` was rejected, when a fallback is running instead. }
         problem_fields:
           type: array
+          description: The individual field errors behind `problem`, when the file failed validation.
           items: { $ref: "#/components/schemas/FieldError" }
         warnings:
           type: array

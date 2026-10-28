@@ -22,6 +22,7 @@ import (
 	"github.com/sentania-labs/benchwarmer/internal/policy"
 	"github.com/sentania-labs/benchwarmer/internal/proxy"
 	"github.com/sentania-labs/benchwarmer/internal/runtime"
+	"github.com/sentania-labs/benchwarmer/internal/signals"
 	"github.com/sentania-labs/benchwarmer/internal/state"
 )
 
@@ -1296,5 +1297,35 @@ func TestStatusModeOptionsFollowConfig(t *testing.T) {
 	if len(o.PauseDurations) != 2 || o.PauseDurations[0].D() != 15*time.Minute || o.PauseDurations[1].D() != 90*time.Minute ||
 		len(o.AIPriorityDurations) != 1 || o.AIPriorityDurations[0].D() != 45*time.Minute {
 		t.Fatalf("mode options %+v", o)
+	}
+}
+
+func TestStatusReportsProcessScanAgeFromServiceClock(t *testing.T) {
+	fail := false
+	r := newRigWith(t, nil, func(d *Deps) {
+		d.Processes = func() ([]signals.Process, error) {
+			if fail {
+				return nil, errors.New("snapshot failed")
+			}
+			return []signals.Process{{PID: 1, Name: "a.exe"}}, nil
+		}
+	})
+	if g := r.c.Status().GPU; g.ProcessScanAgeMS != nil || !g.ProcessScannedAt.IsZero() {
+		t.Fatalf("scan reported before any scan: %+v", g)
+	}
+	r.c.Step(true)
+	scanned := r.clk.Now()
+	if g := r.c.Status().GPU; g.ProcessScanAgeMS == nil || *g.ProcessScanAgeMS != 0 || !g.ProcessScannedAt.Equal(scanned) {
+		t.Fatalf("fresh scan: %+v", g)
+	}
+	r.clk.Advance(time.Second)
+	if g := r.c.Status().GPU; g.ProcessScanAgeMS == nil || *g.ProcessScanAgeMS != 1000 {
+		t.Fatalf("age after 1s: %+v", g.ProcessScanAgeMS)
+	}
+	fail = true
+	r.clk.Advance(time.Hour)
+	r.c.Step(true)
+	if g := r.c.Status().GPU; g.ProcessScanAgeMS != nil || !g.ProcessScannedAt.IsZero() {
+		t.Fatalf("failed scan still reported: %+v", g)
 	}
 }

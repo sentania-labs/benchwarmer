@@ -13,9 +13,11 @@ test('duplicates ignore case and separator differences', () => {
   assert.equal(sameMatcher({path:'C:\\Games\\x.exe'}, {path:'c:/games/X.exe'}), true);
   assert.equal(sameMatcher({exe:'x.exe'}, {path:'c:/games/x.exe'}), false);
 });
-test('old or unavailable GPU samples cannot be acted on', () => {
-  const now = Date.parse('2025-01-01T00:00:10Z');
-  assert.equal(snapshotFresh({sampled_at:'2025-01-01T00:00:05Z', confidence:'high'}, now), true);
-  assert.equal(snapshotFresh({sampled_at:'2025-01-01T00:00:00Z', confidence:'none'}, now), false);
-  assert.equal(snapshotFresh({sampled_at:'2024-12-31T23:59:59Z', confidence:'high'}, now), false);
+test('freshness comes from the server-computed process scan age', () => {
+  assert.equal(snapshotFresh({process_scan_age_ms: 5000, confidence: 'high'}), true);
+  assert.equal(snapshotFresh({process_scan_age_ms: 5000, confidence: 'high'}, 6000), false);
+  assert.equal(snapshotFresh({process_scan_age_ms: 11000, confidence: 'high'}), false);
+  assert.equal(snapshotFresh({process_scan_age_ms: 0, confidence: 'none'}), false);
+  assert.equal(snapshotFresh({sampled_at: new Date().toISOString(), confidence: 'high'}), false);
+  assert.equal(snapshotFresh({}), false);
 });

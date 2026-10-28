@@ -419,7 +419,7 @@ function clearErrorsUnder(prefix) {
   renderNav();
 }
 
-const appView = { query: "", gpu: null };
+const appView = { query: "", gpu: null, at: 0 };
 
 function applicationsSection() {
   const list = st.draft.applications || (st.draft.applications = []);
@@ -487,14 +487,16 @@ function applicationsSection() {
     try {
       const status = await get("api/v1/status", { interactive: false });
       appView.gpu = status.gpu || {};
+      appView.at = performance.now();
       showSnapshot(appView.gpu);
     } catch (e) { replace(snapshot, h("p", null, "Could not load GPU users: " + e.message), h("button", { type: "button", onclick: refreshSnapshot }, "Retry")); }
   }
   function showSnapshot(gpu) {
     {
       const users = gpu.observed_gpu_users || [];
-      const fresh = snapshotFresh(gpu);
-      const ageNotice = h("p", null, gpu.sampled_at ? "Snapshot taken " + clockTime(new Date(gpu.sampled_at), null, { seconds: true }) + (fresh ? ". Processes may have exited since this sample." : ". This snapshot is stale; refresh before choosing an action.") : "No GPU sample available.");
+      const elapsed = performance.now() - appView.at;
+      const fresh = snapshotFresh(gpu, elapsed);
+      const ageNotice = h("p", null, Number.isFinite(gpu.process_scan_age_ms) ? "Process list scanned " + Math.round((gpu.process_scan_age_ms + elapsed) / 1000) + "s ago" + (fresh ? ". Processes may have exited since this scan." : ". This snapshot is stale; refresh before choosing an action.") : "No process scan available; refresh before choosing an action.");
       replace(snapshot, ageNotice,
         !users.length && h("p", null, "No external GPU users observed in this snapshot."),
         users.map(proc => {
@@ -520,7 +522,7 @@ function applicationsSection() {
         if (!ageNotice.isConnected) return;
         ageNotice.textContent = "This snapshot is stale; refresh before choosing an action.";
         for (const button of snapshot.querySelectorAll(".rule button")) button.disabled = true;
-      }, Math.max(0, 10000 - (Date.now() - Date.parse(gpu.sampled_at))));
+      }, Math.max(0, 10000 - gpu.process_scan_age_ms - elapsed));
     }
   }
   if (appView.gpu) showSnapshot(appView.gpu); else refreshSnapshot();

@@ -11,7 +11,7 @@ export function sameMatcher(a, b) {
   const norm = s => (s || '').toLowerCase().replaceAll('\\', '/');
   return ['path', 'exe'].some(k => a[k] && b[k] && norm(a[k]) === norm(b[k]));
 }
-export function snapshotFresh(gpu, now = Date.now()) {
-  const sampled = Date.parse(gpu?.sampled_at);
-  return Number.isFinite(sampled) && now - sampled >= -5000 && now - sampled <= 10000 && gpu.confidence !== 'none';
+export function snapshotFresh(gpu, elapsedMs = 0) {
+  const age = gpu?.process_scan_age_ms;
+  return Number.isFinite(age) && age + elapsedMs <= 10000 && gpu.confidence !== 'none';
 }

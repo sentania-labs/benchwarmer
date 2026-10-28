@@ -81,6 +81,14 @@ function invalidateValidation() {
   syncSaveBar();
 }
 
+function addErrors(details) {
+  for (const d of details) {
+    const field = d.field || "(config)";
+    const prior = st.errors.get(field);
+    st.errors.set(field, prior ? prior + "; " + d.message : d.message);
+  }
+}
+
 function retryValidation() {
   validationPending = true;
   validateDraft(true);
@@ -111,7 +119,7 @@ async function validateDraft(interactive = false) {
   validationPending = false;
   validated = details.length === 0;
   st.errors.clear();
-  for (const d of details) st.errors.set(d.field || "(config)", d.message);
+  addErrors(details);
   if (!els) return;
   for (const wrap of els.body.querySelectorAll(".field[data-path]")) {
     const path = wrap.dataset.path;
@@ -730,11 +738,14 @@ function applyJSON() {
   try {
     const v = JSON.parse(ta.value);
     if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("the top level must be an object");
-    st.draft = v;
+    const same = JSON.stringify(v) === JSON.stringify(st.draft);
     st.jsonText = null;
     st.clientErrors.delete("json");
     err.hidden = true;
-    ctx.changed();
+    if (!same) {
+      st.draft = v;
+      ctx.changed();
+    }
     return true;
   } catch (e) {
     err.textContent = "Not valid JSON: " + e.message;
@@ -804,7 +815,7 @@ async function save() {
     st.impact = null;
     st.errors.clear();
     if (e instanceof ApiError && e.status === 400 && e.body.details && e.body.details.length) {
-      for (const d of e.body.details) st.errors.set(d.field || "(config)", d.message);
+      addErrors(e.body.details);
     } else {
       st.message = "Save failed: " + e.message;
     }

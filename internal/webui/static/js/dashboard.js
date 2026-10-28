@@ -446,7 +446,8 @@ function buildControls() {
     apply.disabled = true;
     status.textContent = "Applying...";
     try {
-      await put("api/v1/mode", body);
+      // Pause AI and Back to normal need no token from this PC; AI first does.
+      await put("api/v1/mode", body, { reason: "AI first needs the management token. Pause AI and Back to normal do not." });
       baseline = formState();
       status.textContent = appliedText(mode, body.duration, untilTomorrowAt);
       poll();

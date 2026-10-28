@@ -145,6 +145,10 @@ type ModeRequest struct {
 	Mode     policy.Mode `json:"mode"`
 	Duration string      `json:"duration,omitempty"`
 	SetBy    string      `json:"set_by,omitempty"`
+	// Principal is who authenticated the request: "management", "agent",
+	// "session", or "local" (no token, from this PC). The handler sets it;
+	// it is never read from the request body.
+	Principal string `json:"-"`
 }
 
 // ConfigResponse is GET /api/v1/config (secrets redacted) and the success

@@ -89,7 +89,7 @@ func New(o Options) http.Handler {
 			"GET": {AccessRead, false, 0, h.getApplications},
 			"PUT": {AccessWrite, false, maxConfigBody, h.putApplications},
 		},
-		"/api/v1/mode":            {"PUT": {AccessWrite, true, maxSmallBody, h.putMode}},
+		"/api/v1/mode":            {"PUT": {AccessModeWrite, true, maxSmallBody, h.putMode}},
 		"/api/v1/drain":           {"POST": {AccessWrite, false, maxSmallBody, h.drain}},
 		"/api/v1/reload":          {"POST": {AccessWrite, false, maxSmallBody, h.reload}},
 		"/api/v1/agent/report":    {"POST": {AccessWrite, true, maxSmallBody, h.agentReport}},
@@ -457,6 +457,20 @@ func (h *handler) putMode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, CodeInvalidMode, "set_by must be at most 64 characters")
 		return
 	}
+	// The route admits a request with no token only as the person at this PC
+	// (see AccessModeWrite). That path covers Pause AI and Auto; AI Priority
+	// still needs a token. The audit record names the principal itself, and
+	// a tokenless caller cannot claim to be the tray or anyone else.
+	p := h.o.Auth.Identify(r)
+	if p == PrincipalNone {
+		if in.Mode == policy.ModeAIPriority {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="benchwarmer"`)
+			writeError(w, http.StatusUnauthorized, CodeUnauthorized, "AI Priority needs the management or agent token; Pause AI and Auto do not")
+			return
+		}
+		in.SetBy = p.String()
+	}
+	in.Principal = p.String()
 	ms, err := h.o.Backend.SetMode(in)
 	if err != nil {
 		h.backendError(w, r, err)

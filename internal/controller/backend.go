@@ -79,6 +79,9 @@ func (c *Controller) SetMode(req api.ModeRequest) (api.ModeStatus, error) {
 		msg += " until reboot"
 	}
 	data := map[string]any{"previous": prev, "set_by": req.SetBy}
+	if req.Principal != "" {
+		data["principal"] = req.Principal
+	}
 	if m.Until != nil {
 		data["until"] = m.Until.Format(time.RFC3339)
 	}

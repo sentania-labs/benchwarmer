@@ -184,6 +184,9 @@ type req struct {
 	method, path, body, token string
 	peer, host                string
 	json                      bool // send Content-Type: application/json
+	ctype                     string
+	headers                   map[string]string
+	addHeaders                map[string]string // sent as an additional value
 }
 
 func (hr *harness) do(r req) *httptest.ResponseRecorder {
@@ -206,6 +209,15 @@ func (hr *harness) do(r req) *httptest.ResponseRecorder {
 	}
 	if r.json {
 		hreq.Header.Set("Content-Type", "application/json")
+	}
+	if r.ctype != "" {
+		hreq.Header.Set("Content-Type", r.ctype)
+	}
+	for k, v := range r.headers {
+		hreq.Header.Set(k, v)
+	}
+	for k, v := range r.addHeaders {
+		hreq.Header.Add(k, v)
 	}
 	rec := httptest.NewRecorder()
 	hr.h.ServeHTTP(rec, hreq)
@@ -242,8 +254,10 @@ func TestAuthMatrix(t *testing.T) {
 		{"GET", "/api/v1/events", "", [6]int{200, 401, 401, 200, 403, 403}},
 		{"GET", "/api/v1/applications", "", [6]int{200, 401, 401, 200, 403, 403}},
 		{"GET", "/metrics", "", [6]int{200, 401, 401, 200, 403, 403}},
-		// Mode and agent reports: agent or management token, never tokenless.
-		{"PUT", "/api/v1/mode", `{"mode":"auto"}`, [6]int{401, 401, 401, 200, 200, 403}},
+		// Mode: agent or management token, or nothing at all from this PC
+		// (TestTokenlessModeBarrier covers that path). Agent reports never
+		// go tokenless.
+		{"PUT", "/api/v1/mode", `{"mode":"auto"}`, [6]int{403, 401, 401, 200, 200, 403}},
 		{"POST", "/api/v1/agent/report", report, [6]int{401, 401, 401, 204, 204, 403}},
 		// Other writes: management token only, whatever the source.
 		{"PUT", "/api/v1/config", cfgBody, [6]int{401, 401, 401, 200, 403, 403}},

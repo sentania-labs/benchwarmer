@@ -81,6 +81,9 @@ func Validate(c Config) error {
 	t := c.Telemetry
 	v.durRange("telemetry.sample_interval", t.SampleInterval, 250*time.Millisecond, 10*time.Second)
 	v.durRange("telemetry.loss_grace", t.LossGrace, t.SampleInterval.D(), 5*time.Minute)
+	if t.LossGrace.D() < t.SampleInterval.D() {
+		v.add("telemetry.sample_interval", "must not exceed telemetry.loss_grace (%s)", t.LossGrace.D())
+	}
 	v.intRange("telemetry.degraded_margin_pct", t.DegradedMarginPct, 0, 90)
 
 	s := c.Safety

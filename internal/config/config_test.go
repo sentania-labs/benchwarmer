@@ -51,6 +51,10 @@ func TestValidationFlagsBothSidesOfCrossFieldConflicts(t *testing.T) {
 	}{
 		{"resume above critical", func(c *Config) { c.Safety.GPUTempCriticalC = 65; c.Safety.GPUTempResumeC = 70 },
 			[]string{"safety.gpu_temp_critical_c", "safety.gpu_temp_resume_c"}},
+		{"loss grace below sample interval", func(c *Config) {
+			c.Telemetry.SampleInterval = Duration(5 * time.Second)
+			c.Telemetry.LossGrace = Duration(2 * time.Second)
+		}, []string{"telemetry.sample_interval", "telemetry.loss_grace"}},
 		{"stop budget", func(c *Config) {
 			c.Runtime.StopMode = StopGraceful
 			c.Runtime.GracefulStopTimeout = Duration(15 * time.Second)

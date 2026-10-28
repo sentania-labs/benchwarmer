@@ -370,7 +370,7 @@ function buildControls() {
     try {
       const body = { mode, set_by: "ui" };
       if (mode !== "auto") body.duration = duration;
-      await put("api/v1/mode", body);
+      await put("api/v1/mode", body, { reason: modeTokenReason(mode) });
       status.textContent = appliedText(mode, duration, untilTomorrowAt);
       poll();
     } catch (err) {

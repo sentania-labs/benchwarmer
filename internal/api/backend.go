@@ -28,8 +28,9 @@ type Backend interface {
 	// warnings are problems that do not block saving.
 	ValidateConfig(c config.Config) ([]config.FieldError, error)
 	// UpdateConfig validates, persists atomically, applies, and audits a
-	// new config, returning what the change requires.
-	UpdateConfig(ctx context.Context, c config.Config, actor string) (config.Impact, error)
+	// new config, returning what the change requires and any warnings.
+	// A rejected change is audited with the actor.
+	UpdateConfig(ctx context.Context, c config.Config, actor string) (config.Impact, []config.FieldError, error)
 	AgentReport(r AgentReport)
 	Events(q EventQuery) ([]events.Event, error)
 }

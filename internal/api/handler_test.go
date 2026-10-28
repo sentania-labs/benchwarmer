@@ -101,17 +101,17 @@ func (f *fakeBackend) ValidateConfig(c config.Config) ([]config.FieldError, erro
 	return nil, config.ValidateChange(c)
 }
 
-func (f *fakeBackend) UpdateConfig(_ context.Context, c config.Config, actor string) (config.Impact, error) {
+func (f *fakeBackend) UpdateConfig(_ context.Context, c config.Config, actor string) (config.Impact, []config.FieldError, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := config.Validate(c); err != nil {
-		return config.Impact{}, err
+	if err := config.ValidateChange(c); err != nil {
+		return config.Impact{}, nil, err
 	}
 	im := config.Classify(f.cfg, c)
 	f.cfg = c
 	f.updates = append(f.updates, c)
 	f.actors = append(f.actors, actor)
-	return im, nil
+	return im, nil, nil
 }
 
 func (f *fakeBackend) AgentReport(r AgentReport) {

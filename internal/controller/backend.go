@@ -207,31 +207,31 @@ func (c *Controller) validateConfig(nc config.Config, checkModel bool) ([]config
 }
 
 // UpdateConfig validates, persists, applies, and audits a new config.
-func (c *Controller) UpdateConfig(ctx context.Context, nc config.Config, actor string) (config.Impact, error) {
+func (c *Controller) UpdateConfig(ctx context.Context, nc config.Config, actor string) (config.Impact, []config.FieldError, error) {
 	return c.updateConfig(ctx, nc, actor, "", "")
 }
 
-func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, expected, restoreOf string) (config.Impact, error) {
+func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, expected, restoreOf string) (config.Impact, []config.FieldError, error) {
 	// The model stat can hang on an unreachable network path, so validation
 	// runs before the controller lock.
-	_, verr := c.validateConfig(nc, restoreOf != "")
+	warnings, verr := c.validateConfig(nc, restoreOf != "")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.d.Now()
 	if restoreOf != "" && (expected == "" || expected != c.revisionLocked()) {
-		return config.Impact{}, config.ErrHistoryConflict
+		return config.Impact{}, nil, config.ErrHistoryConflict
 	}
 	if restoreOf != "" {
 		if store, ok := c.d.ConfigStore.(historyStore); !ok {
-			return config.Impact{}, errors.New("configuration history unavailable")
+			return config.Impact{}, nil, errors.New("configuration history unavailable")
 		} else if err := store.VerifyCurrent(c.cfg); err != nil {
-			return config.Impact{}, err
+			return config.Impact{}, nil, err
 		}
 	}
 	if verr != nil {
 		c.emit(events.Event{Time: now, Type: events.ConfigRejected, Severity: policy.SeverityNotice,
 			Message: "Configuration change rejected: " + verr.Error(), Data: map[string]any{"actor": actor}})
-		return config.Impact{}, verr
+		return config.Impact{}, nil, verr
 	}
 	if c.d.ConfigStore != nil {
 		var err error
@@ -247,7 +247,7 @@ func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, ex
 			err = c.d.ConfigStore.Save(nc)
 		}
 		if err != nil {
-			return config.Impact{}, fmt.Errorf("persist config: %w", err)
+			return config.Impact{}, nil, fmt.Errorf("persist config: %w", err)
 		}
 	}
 	im := config.Classify(c.cfg, nc)
@@ -271,7 +271,7 @@ func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, ex
 		Message: fmt.Sprintf("Configuration updated by %s: %s", actor, strings.Join(im.Changed, ", ")),
 		Data:    map[string]any{"actor": actor, "changed": im.Changed, "runtime_reload": im.RuntimeReload, "service_restart": im.ServiceRestart, "restore_of": restoreOf, "changes": changes}})
 	c.signalWake()
-	return im, nil
+	return im, warnings, nil
 }
 
 type historyStore interface {
@@ -327,7 +327,8 @@ func (c *Controller) RestoreConfig(ctx context.Context, id, revision, actor stri
 	if len(parts) != 2 || parts[0] == "" || parts[1] != configDigest(target) {
 		return config.Impact{}, config.ErrHistoryConflict
 	}
-	return c.updateConfig(ctx, target, actor, parts[0], id)
+	im, _, err := c.updateConfig(ctx, target, actor, parts[0], id)
+	return im, err
 }
 
 // AgentReport accepts a session-agent report.

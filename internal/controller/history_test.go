@@ -23,7 +23,7 @@ func TestRestoreConflictValidationAndAudit(t *testing.T) {
 	first := config.Clone(r.cfg)
 	first.Runtime.ContextSize = 4096
 	first.Runtime.Args = []string{"--api-key", "test-secret-value"}
-	if _, err := r.c.UpdateConfig(context.Background(), first, "test"); err != nil {
+	if _, _, err := r.c.UpdateConfig(context.Background(), first, "test"); err != nil {
 		t.Fatal(err)
 	}
 	versions, err := r.c.ConfigHistory()
@@ -36,7 +36,7 @@ func TestRestoreConflictValidationAndAudit(t *testing.T) {
 	}
 	other := config.Clone(first)
 	other.Runtime.ContextSize = 8192
-	if _, err = r.c.UpdateConfig(context.Background(), other, "test"); err != nil {
+	if _, _, err = r.c.UpdateConfig(context.Background(), other, "test"); err != nil {
 		t.Fatal(err)
 	}
 	_, digest, _ := strings.Cut(preview.Revision, ":")
@@ -100,7 +100,7 @@ func TestUnreadableHistoryDoesNotBlockSaveAndWarns(t *testing.T) {
 	}
 	next := config.Clone(r.cfg)
 	next.Runtime.ContextSize = 4096
-	if _, err := r.c.UpdateConfig(context.Background(), next, "test"); err != nil {
+	if _, _, err := r.c.UpdateConfig(context.Background(), next, "test"); err != nil {
 		t.Fatalf("save blocked by unreadable history: %v", err)
 	}
 	moved, err := filepath.Glob(store.Path() + ".history.corrupt-*")

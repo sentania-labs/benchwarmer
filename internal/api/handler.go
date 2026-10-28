@@ -338,14 +338,7 @@ func (h *handler) validateConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) applyConfig(w http.ResponseWriter, r *http.Request, c config.Config) {
-	// The Backend validates too; checking here guarantees the 400 shape
-	// whatever the Backend returns.
-	warnings, err := h.o.Backend.ValidateConfig(c)
-	if err != nil {
-		h.backendError(w, r, err)
-		return
-	}
-	im, err := h.o.Backend.UpdateConfig(r.Context(), c, actor(r))
+	im, warnings, err := h.o.Backend.UpdateConfig(r.Context(), c, actor(r))
 	if err != nil {
 		h.backendError(w, r, err)
 		return
@@ -438,11 +431,7 @@ func (h *handler) putApplications(w http.ResponseWriter, r *http.Request) {
 	c, _ := h.o.Backend.Config()
 	c = config.Clone(c)
 	c.Applications = in.Applications
-	if _, err := h.o.Backend.ValidateConfig(c); err != nil {
-		h.backendError(w, r, err)
-		return
-	}
-	if _, err := h.o.Backend.UpdateConfig(r.Context(), c, actor(r)); err != nil {
+	if _, _, err := h.o.Backend.UpdateConfig(r.Context(), c, actor(r)); err != nil {
 		h.backendError(w, r, err)
 		return
 	}

@@ -33,6 +33,7 @@ export function mount(main, rest) {
   appView.query = "";
   appView.gpu = null;
   st.section = SECTIONS.some((s) => s.key === rest[0]) ? rest[0] : st.section;
+  if (st.section !== "json") st.jsonText = null;
   els = {
     top: h("div", { class: "config-top" }),
     nav: h("nav", { class: "subnav", "aria-label": "Configuration sections" }),

@@ -49,7 +49,15 @@ test('a new argument row that was never typed into emits no token', () => {
   added.value = '--new'; added.fire('input');
   assert.deepEqual(ctx.draft.runtime.args, ['--flag', '', '--new']);
   added.value = ''; added.fire('input');
-  assert.deepEqual(ctx.draft.runtime.args, ['--flag', '', '']);
+  assert.deepEqual(ctx.draft.runtime.args, ['--flag', '']);
+});
+
+test('ticking Has value on a blank new row does not emit blank tokens', () => {
+  const { ctx, widget, addButton } = argvWidget(['--flag']);
+  addButton().fire('click');
+  const checkbox = widget.walk().filter(e => e.tagName === 'input' && e.type === 'checkbox')[1];
+  checkbox.checked = true; checkbox.fire('change');
+  assert.deepEqual(ctx.draft.runtime.args, ['--flag']);
 });
 
 test('argument editor focus follows the row that changed', () => {

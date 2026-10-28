@@ -172,15 +172,15 @@ export function field(ctx, def) {
       // would change arbitrary argv. A row can explicitly add a value token.
       const rows = (value || []).map((token) => ({ token, hasValue: false, value: "", fresh: false }));
       const list = h("div", { class: "argv-rows" });
-      const update = () => set(rows.filter((r) => !r.fresh).flatMap((r) => r.hasValue ? [r.token, r.value] : [r.token]));
+      const update = () => set(rows.filter((r) => !(r.fresh && r.token === "" && r.value === "")).flatMap((r) => r.hasValue ? [r.token, r.value] : [r.token]));
       const render = (focusRow, focusValue) => {
         const refs = [];
         list.replaceChildren(...rows.map((r, i) => {
-          const token = h("input", { id: i === 0 ? id : null, type: "text", value: r.token, "aria-label": "Argument " + (i + 1), oninput: (e) => { r.fresh = false; r.token = e.target.value; update(); } });
-          const val = h("input", { type: "text", value: r.value, "aria-label": "Value for argument " + (i + 1), oninput: (e) => { r.fresh = false; r.value = e.target.value; update(); } });
+          const token = h("input", { id: i === 0 ? id : null, type: "text", value: r.token, "aria-label": "Argument " + (i + 1), oninput: (e) => { r.token = e.target.value; update(); } });
+          const val = h("input", { type: "text", value: r.value, "aria-label": "Value for argument " + (i + 1), oninput: (e) => { r.value = e.target.value; update(); } });
           refs.push({ token, val });
           return h("div", { class: "argv-row" }, token,
-            h("label", null, h("input", { type: "checkbox", checked: r.hasValue, onchange: (e) => { r.fresh = false; r.hasValue = e.target.checked; update(); render(i, r.hasValue); } }), " Has value"),
+            h("label", null, h("input", { type: "checkbox", checked: r.hasValue, onchange: (e) => { r.hasValue = e.target.checked; update(); render(i, r.hasValue); } }), " Has value"),
             r.hasValue && val,
             h("button", { type: "button", onclick: () => { rows.splice(i, 1); update(); render(Math.min(i, rows.length - 1)); } }, "Remove"));
         }));

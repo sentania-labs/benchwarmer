@@ -402,6 +402,9 @@ func (o *Observer) apps(now time.Time, in Input, own map[uint32]bool, perPID map
 			continue
 		}
 		c := byPID[p.PID]
+		if u, ok := perPID[p.PID]; ok && (u.MaxUtil() > 0 || u.DedicatedBytes > 0) {
+			a.ObservedGPUUsers = append(a.ObservedGPUUsers, build(c))
+		}
 		switch c.class {
 		case config.ClassGame:
 			a.Games = append(a.Games, build(c))
@@ -430,7 +433,7 @@ func (o *Observer) apps(now time.Time, in Input, own map[uint32]bool, perPID map
 			a.LauncherChildren = append(a.LauncherChildren, m)
 		}
 	}
-	for _, l := range [][]policy.AppMatch{a.Games, a.Launchers, a.Ordinary, a.LauncherChildren} {
+	for _, l := range [][]policy.AppMatch{a.Games, a.Launchers, a.Ordinary, a.LauncherChildren, a.ObservedGPUUsers} {
 		slices.SortStableFunc(l, byDemand)
 	}
 	return a

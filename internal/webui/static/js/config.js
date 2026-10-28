@@ -1,6 +1,7 @@
 // Configuration pages: GET api/v1/config into a draft, edit it through
 // structured forms or raw JSON, and PUT the whole object back. Values shown
 // as "<redacted>" are left untouched so the server restores them.
+import { proposedRule, sameMatcher, snapshotFresh, searchableValues } from "./applications.js";
 import { waitForRestart } from "./restart.js";
 import { compatibilityMessage } from "./compatibility.js";
 import { h, replace, warnIcon } from "./dom.js";
@@ -27,6 +28,8 @@ const ctx = {
 };
 
 export function mount(main, rest) {
+  appView.query = "";
+  appView.gpu = null;
   st.section = SECTIONS.some((s) => s.key === rest[0]) ? rest[0] : st.section;
   els = {
     top: h("div", { class: "config-top" }),
@@ -221,6 +224,8 @@ function switchSection(key) {
     return;
   }
   st.section = key;
+  appView.query = "";
+  appView.gpu = null;
   renderNav();
   renderSection();
 }
@@ -230,6 +235,8 @@ function jumpTo(path) {
   if (sec !== st.section) {
     if (st.section === "json" && !applyJSON()) return;
     st.section = sec;
+    appView.query = "";
+    appView.gpu = null;
     history.replaceState(null, "", "#/config/" + sec);
     renderNav();
     renderSection();
@@ -427,6 +434,8 @@ function clearErrorsUnder(prefix) {
   renderNav();
 }
 
+const appView = { query: "", gpu: null, at: 0 };
+
 function applicationsSection() {
   const list = st.draft.applications || (st.draft.applications = []);
   const structural = (fn, focusId) => {
@@ -449,19 +458,24 @@ function applicationsSection() {
       structural(() => {}, kindId);
     } }, MATCHERS.map(([k, l]) => h("option", { value: k, selected: k === kind }, l)));
     const move = (d, label, id) => h("button", {
-      type: "button", id, "aria-label": label + " rule " + (i + 1), disabled: i + d < 0 || i + d >= list.length,
+      type: "button", id, "aria-label": label + ": rule " + (i + 1), disabled: i + d < 0 || i + d >= list.length,
       onclick: () => structural(() => {
         const [x] = list.splice(i, 1);
         list.splice(i + d, 0, x);
       }, idFor("applications[" + (i + d) + "]") + (d < 0 ? "-up" : "-down")),
     }, label);
-    return h("li", { class: "rule", dataset: { path: p } },
+    const classField = field(ctx, { path: p + ".class", label: "Class", type: "select", options: CLASSES });
+    const consequence = h("p", { class: "help" });
+    const explain = () => { consequence.textContent = ({ game: "A confirmed game makes AI yield the GPU.", launcher: "A GPU-using child may be treated as a game.", ordinary: "GPU use contributes to ordinary contention.", ignore: "Ignored for application classification; GPU pressure may still affect policy." })[r.class] || "Choose a class."; };
+    classField.querySelector("select").addEventListener("change", () => structural(() => {}, idFor(p + ".class")));
+    explain();
+    return h("li", { class: "rule", dataset: { path: p, ruleClass: r.class || "ordinary" } },
       h("div", { class: "rule-head" }, h("span", { class: "rule-num" }, "#" + (i + 1)),
         h("span", { class: "rule-origin " + (r.id ? "builtin" : "local"),
           title: r.id ? "Shipped with Benchwarmer. Edits stay; deleting it keeps it deleted." : "Added on this PC." },
           r.id ? "Built-in" : "Local"),
         h("span", { class: "rule-actions" },
-          move(-1, "Up", idFor(p) + "-up"), move(1, "Down", idFor(p) + "-down"),
+          move(-1, "Earlier in rule order", idFor(p) + "-up"), move(1, "Later in rule order", idFor(p) + "-down"),
           h("button", { type: "button", class: "danger", "aria-label": "Remove rule " + (i + 1),
             onclick: () => structural(() => list.splice(i, 1), "add-rule") }, "Remove"))),
       errorSlot(ctx, p),
@@ -469,12 +483,71 @@ function applicationsSection() {
         field(ctx, { path: p + ".name", label: "Name", placeholder: "optional" }),
         h("div", { class: "field" }, h("label", { for: kindId }, "Matcher type"), kindSel),
         valueField,
-        field(ctx, { path: p + ".class", label: "Class", type: "select", options: CLASSES })));
+        classField), consequence);
   });
+  const search = h("input", { id: "app-search", type: "search", placeholder: "Search rules", value: appView.query });
+  const groups = ["game", "launcher", "ignore", "ordinary"].map(cls => {
+    const members = rows.filter((_, i) => (list[i].class || "ordinary") === cls);
+    return h("section", { class: "app-group" }, h("h3", null, ({game:"Games", launcher:"Launchers", ignore:"Ignored", ordinary:"Ordinary"})[cls]), h("ol", { class: "rules" }, members));
+  });
+  const applyQuery = () => {
+    const query = search.value.toLowerCase().trim();
+    appView.query = search.value;
+    rows.forEach((row, i) => { row.hidden = !searchableValues(list[i]).includes(query); });
+    snapshot.querySelectorAll("[data-process-search]").forEach(row => { row.hidden = !row.dataset.processSearch.includes(query); });
+  };
+  search.addEventListener("input", applyQuery);
+  const snapshot = h("div", null, h("p", null, "Loading GPU users..."));
+  async function refreshSnapshot() {
+    try {
+      const status = await get("api/v1/status", { interactive: false });
+      appView.gpu = status.gpu || {};
+      appView.at = performance.now();
+      showSnapshot(appView.gpu);
+    } catch (e) { replace(snapshot, h("p", null, "Could not load GPU users: " + e.message), h("button", { type: "button", onclick: refreshSnapshot }, "Retry")); }
+  }
+  function showSnapshot(gpu) {
+    {
+      const users = gpu.observed_gpu_users || [];
+      const elapsed = performance.now() - appView.at;
+      const fresh = snapshotFresh(gpu, elapsed);
+      const ageNotice = h("p", null, Number.isFinite(gpu.process_scan_age_ms) ? "Process list scanned " + Math.round((gpu.process_scan_age_ms + elapsed) / 1000) + "s ago" + (fresh ? ". Processes may have exited since this scan." : ". This snapshot is stale; refresh before choosing an action.") : "No process scan available; refresh before choosing an action.");
+      replace(snapshot, ageNotice,
+        !users.length && h("p", null, "No external GPU users observed in this snapshot."),
+        users.map(proc => {
+          const java = (proc.name || "").toLowerCase() === "javaw.exe";
+          const action = (cls, label) => h("button", { type: "button", disabled: !fresh || !proposedRule(proc, cls), onclick: async () => {
+            let latest;
+            try { latest = await get("api/v1/status", { interactive: false }); } catch (e) { window.alert("Could not verify the process: " + e.message); return; }
+            const current = (latest.gpu?.observed_gpu_users || []).find(x => x.pid === proc.pid && x.name === proc.name && x.path === proc.path);
+            if (!snapshotFresh(latest.gpu) || !current) { window.alert("This process has vanished or the snapshot is stale. Refresh and choose again."); await refreshSnapshot(); return; }
+            const rule = proposedRule(current, cls);
+            const duplicates = list.filter(r => sameMatcher(r, rule)).length;
+            const consequence = cls === "game" ? "Benchwarmer will yield when this game is confirmed." : "Benchwarmer will ignore this process for application classification; GPU pressure may still affect policy.";
+            const target = rule.path || rule.exe;
+            if (!window.confirm("Stage " + label.toLowerCase() + " for " + target + "? " + consequence + (java ? " Other Java programs also use javaw.exe; this rule matches only this exact path." : "") + " The new rule will be first and take precedence over matching rules." + (duplicates ? " " + duplicates + " existing rule(s) have the same matcher and will remain below it." : "") + " This only changes the draft; save with authorization to apply it.")) return;
+            structural(() => list.unshift(rule), idFor("applications[0]." + (rule.path ? "path" : "exe")));
+          } }, label);
+          return h("div", { class: "rule", dataset: { processSearch: searchableValues(proc) } }, h("strong", null, proc.name || "Unknown process"), h("p", null, "Executable: " + (proc.path || proc.name || "unavailable") + " · PID " + proc.pid + " · class " + (proc.class || "unclassified") + (proc.rule ? " · rule " + proc.rule : "")),
+            java && h("p", { class: "help" }, "Minecraft Java may use javaw.exe, but other Java programs do too. " + (proc.path ? "A rule here matches only this exact executable path; it does not identify Minecraft." : "The full executable path is unknown, so no rule can be staged.")),
+            action("game", "Treat as game"), " ", action("ignore", "Ignore"));
+        }), h("button", { type: "button", onclick: refreshSnapshot }, "Refresh GPU users"));
+      applyQuery();
+      if (fresh) setTimeout(() => {
+        if (!ageNotice.isConnected) return;
+        ageNotice.textContent = "This snapshot is stale; refresh before choosing an action.";
+        for (const button of snapshot.querySelectorAll(".rule button")) button.disabled = true;
+      }, Math.max(0, 10000 - gpu.process_scan_age_ms - elapsed));
+    }
+  }
+  if (appView.gpu) showSnapshot(appView.gpu); else refreshSnapshot();
   return [
+    h("div", { class: "field" }, h("label", { for: "app-search" }, "Search processes and application rules"), search),
+    h("section", { class: "group" }, h("h3", null, "Running GPU users"), snapshot),
     h("div", { class: "notice info" }, h("span", null,
-      "Built-in rules ship with Benchwarmer; rules added in a newer version appear here after an upgrade, and one you delete stays deleted. Local rules were added on this PC. Rules are checked top to bottom and the first match wins. Put specific rules (a launcher's own executable) above broad ones (a whole library folder). Matching ignores case and treats / and \\ alike.")),
-    h("ol", { class: "rules" }, rows),
+      "Built-in rules ship with Benchwarmer; rules added in a newer version appear here after an upgrade, and one you delete stays deleted. Local rules were added on this PC. Rule numbers show evaluation order across groups: the lowest number wins. Put specific rules (a launcher's own executable) above broad ones (a whole library folder). Matching ignores case and treats / and \\ alike.")),
+    h("p", { class: "help" }, "Rules apply in number order across all groups, so moving a rule changes its number, not only its place inside a group."),
+    groups,
     h("button", { type: "button", id: "add-rule", onclick: () => structural(() => list.push({ exe: "", class: "game" }),
       idFor("applications[" + list.length + "].exe")) }, "Add rule at the end"),
   ];

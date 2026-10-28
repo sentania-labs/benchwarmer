@@ -244,6 +244,7 @@ function renderGPU(g) {
       ["Telemetry confidence", h("span", { class: "conf conf-" + conf }, conf === "high" ? "High" : conf === "degraded" ? "Degraded" : "None")],
       g.sampled_at && ["Sampled", clockTime(parseTime(g.sampled_at), null, { seconds: true })],
     ]),
+    h("p", null, h("a", { href: "#/config/applications" }, "Review running GPU users and application rules")),
     top.length > 0 && h("div", { class: "table-wrap" }, h("table", null,
       h("caption", null, "Top external GPU users"),
       h("thead", null, h("tr", null, h("th", null, "Process"), h("th", null, "Class"), h("th", null, "GPU"), h("th", null, "VRAM"))),

@@ -235,6 +235,11 @@ func (c *Controller) Status() api.Status {
 		ExternalUtilPct: g.ExternalUtilPct, VRAMTotalMiB: g.VRAMTotalMiB, VRAMUsedMiB: g.VRAMUsedMiB, VRAMFreeMiB: g.VRAMFreeMiB,
 		OwnVRAMMiB: g.OwnVRAMMiB, ExternalVRAMMiB: g.ExternalVRAMMiB, TemperatureC: g.TemperatureC, SampledAt: c.sample.Time}
 	s.GPU.TopExternal = topExternal(c.apps)
+	s.GPU.ObservedGPUUsers = c.apps.ObservedGPUUsers
+	if c.procsOK && !c.lastProcScan.IsZero() {
+		age := max(now.Sub(c.lastProcScan).Milliseconds(), 0)
+		s.GPU.ProcessScannedAt, s.GPU.ProcessScanAgeMS = c.lastProcScan, &age
+	}
 	s.Trigger = trigger(d)
 	s.Timers = c.timerStatus(now, d)
 	if c.d.Facts != nil {

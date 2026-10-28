@@ -747,10 +747,22 @@ components:
         own_vram_mib: { type: integer }
         external_vram_mib: { type: integer }
         temperature_c: { type: number, description: Absent when unknown. }
+        observed_gpu_users:
+          description: External GPU users in the latest process and GPU sample, including ignored and unclassified processes.
+          type: array
+          items: { $ref: "#/components/schemas/AppMatch" }
         top_external:
           type: array
           items: { $ref: "#/components/schemas/AppMatch" }
         sampled_at: { type: string, format: date-time }
+        process_scanned_at:
+          type: string
+          format: date-time
+          description: When the process list behind observed_gpu_users was last enumerated. Absent when the last enumeration failed or has not run.
+        process_scan_age_ms:
+          type: integer
+          format: int64
+          description: Age of that process scan on the service clock, in milliseconds. Clients should judge snapshot freshness from this value, not from their own clock. Absent with process_scanned_at.
     TimerStatus:
       type: object
       properties:

@@ -7,14 +7,15 @@
 
   StageDir is the release file set produced by `make stage`. The package:
   - installs it to C:\Program Files\Benchwarmer;
-  - registers the Benchwarmer service natively (no custom actions), with the
-    same name, description, account and command line as
-    `benchwarmer.exe service install`;
+  - registers the Benchwarmer service natively, with the same name,
+    description, account, command line, delayed start, recovery actions and
+    preshutdown timeout as `benchwarmer.exe service install`;
   - adds bwtray.exe to HKLM Run;
   - never touches C:\ProgramData\Benchwarmer: the service provisions that
     folder itself, and uninstall leaves it in place.
   No firewall rules, no Defender changes, no required properties. The only
-  custom action is WiX's standard CloseApplication for the tray. The service
+  custom actions are WiX's standard CloseApplication for the tray and the
+  sc.exe call that sets the service's recovery actions. The service
   start is not waited on, so a start blocked by policy (for example an ASR
   exclusion that has not arrived yet) does not roll the install back; the
   service's recovery actions retry it.
@@ -39,6 +40,24 @@
         DowngradeErrorMessage="A newer version of Benchwarmer is already installed." />
 
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Recovery actions: restart after 30 s, then after 2 min, then nothing;
+         the failure count resets after a day (86400 s). Delays are
+         milliseconds. Windows Installer's own failure-actions configuration
+         (ServiceConfigFailureActions) is refused with access denied when run
+         from the install, and util:ServiceConfig takes one delay for every
+         restart, so sc.exe sets them. It runs as SYSTEM after the service
+         exists, and a failure rolls the install back. -->
+    <CustomAction
+        Id="SetServiceRecovery"
+        Directory="System64Folder"
+        ExeCommand="&quot;[System64Folder]sc.exe&quot; failure Benchwarmer reset= 86400 actions= restart/30000/restart/120000/none/0"
+        Execute="deferred"
+        Impersonate="no"
+        Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="SetServiceRecovery" After="InstallServices" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
 
     <!-- A signed-in user's tray keeps bwtray.exe open, which would make an
          upgrade or uninstall wait for a restart. WiX's standard
@@ -71,8 +90,13 @@
         <File Id="BenchwarmerExe" Source="$(var.StageDir)\benchwarmer.exe" KeyPath="yes" />
         <!-- Must match cmd/benchwarmer `service install`: name, display name,
              description, LocalSystem (ADR 0006), automatic start, and
-             service.ServiceArgs(C:\ProgramData\Benchwarmer). The service sets
-             its own delayed start and recovery actions when it starts. -->
+             service.ServiceArgs(C:\ProgramData\Benchwarmer). The ServiceConfig
+             below and the SetServiceRecovery action set delayed start,
+             recovery actions and the preshutdown timeout to what the service
+             would otherwise repair on its first start; they must match
+             winsvc.RecoveryPlan and DefaultPreshutdownTimeout
+             (TestWixServiceConfigMatches). The startup repair stays as the
+             backstop. -->
         <ServiceInstall
             Id="BenchwarmerService"
             Name="Benchwarmer"
@@ -83,7 +107,16 @@
             ErrorControl="normal"
             Account="LocalSystem"
             Arguments="run --service --data &quot;[CommonAppDataFolder]Benchwarmer&quot;"
-            Vital="yes" />
+            Vital="yes">
+          <!-- Delayed automatic start, recovery actions also on a non-zero
+               exit (failedToStopOrReturnedError), 30 s preshutdown. -->
+          <ServiceConfig
+              DelayedAutoStart="yes"
+              FailureActionsWhen="failedToStopOrReturnedError"
+              PreShutdownDelay="30000"
+              OnInstall="yes"
+              OnReinstall="yes" />
+        </ServiceInstall>
         <!-- Stopping is waited on: the service drains and stops the runtime
              before its files are replaced or removed. Starting is not: a
              start that policy blocks (an ASR exclusion not yet applied)

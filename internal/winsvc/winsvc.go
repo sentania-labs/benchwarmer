@@ -282,7 +282,8 @@ const RecoveryResetPeriod = 24 * time.Hour
 // RecoveryPlan is the failure-recovery sequence: restart after 30 s, then
 // after 2 min, then stop trying until the reset period passes. The service
 // has its own crash backoff for the runtime; this only covers the service
-// process itself failing.
+// process itself failing. packaging/wix/Benchwarmer.wxs sets the same plan
+// (TestWixServiceConfigMatches).
 func RecoveryPlan() []RecoveryStep {
 	return []RecoveryStep{
 		{Restart: true, Delay: 30 * time.Second},

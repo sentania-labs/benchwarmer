@@ -72,7 +72,13 @@ exclusion is still what lets the files run.
 - Creates **no firewall rules** and changes no Defender settings: on managed
   PCs those are GPO settings (local rule merge is off), documented in
   `docs/deploy/`.
-- Has no custom actions of its own and no required properties. It uses
+- Has no required properties. It registers the service with its delayed
+  automatic start, recovery actions and preshutdown timeout already set
+  (`ServiceConfig` in `Benchwarmer.wxs`, and a deferred `sc.exe failure`
+  action for the recovery delays, because Windows Installer's own
+  failure-actions step is refused with access denied during install and
+  `util:ServiceConfig` has one delay for every restart), so a fresh install
+  or upgrade has them before the service first runs. It uses
   WiX's standard CloseApplication to close a signed-in user's tray during an
   upgrade or uninstall, so no restart is needed. The service start is not
   waited on, so a start that policy blocks (an ASR exclusion not yet
@@ -96,7 +102,9 @@ same state, the service provisions itself at start, idempotently:
 - Writes the default configuration if there is none. A `config.json` placed
   in the data folder before first start (for example by a GPO file
   preference) is used as-is, which is how a fleet can be pre-configured.
-- Sets its own service recovery actions and delayed automatic start.
+- Backstop: repairs the service's recovery actions, delayed automatic start
+  and preshutdown timeout if they drift from what the MSI sets (a hand
+  install, or a change made outside Benchwarmer).
 
 If provisioning fails the service still starts. It reports the problem in
 status and events, and does not load a model while secrets could be exposed.

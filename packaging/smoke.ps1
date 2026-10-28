@@ -57,6 +57,31 @@ function Get-Arp {
       Where-Object { $_.DisplayName -eq 'Benchwarmer' })
 }
 
+# The MSI sets delayed start, recovery actions and the preshutdown timeout
+# itself (ServiceConfig and SetServiceRecovery in Benchwarmer.wxs); the service's startup repair is
+# only the backstop. Must match winsvc.RecoveryPlan / DefaultPreshutdownTimeout.
+# The MSI starts the service during install, so the values alone could be the
+# service's own repair; the service log proves it had nothing to repair.
+function Get-ServiceDriftCount {
+  $log = Join-Path $Data 'logs\benchwarmer.log'
+  if (-not (Test-Path $log)) { return 0 }
+  @(Select-String -Path $log -Pattern 'repaired drift.*what="?service ').Count
+}
+
+function Assert-ServiceConfig([int] $DriftBefore) {
+  Step 'Checking service start type, recovery actions and preshutdown timeout'
+  if ((Get-ServiceDriftCount) -gt $DriftBefore) { Fail 'the service repaired its own settings at start; the MSI left them for it' }
+  $qc = (& sc.exe qc $Name) -join "`n"
+  if ($qc -notmatch 'AUTO_START\s+\(DELAYED\)') { Fail "sc qc does not show a delayed automatic start:`n$qc" }
+  $qf = (& sc.exe qfailure $Name) -join "`n"
+  if ($qf -notmatch 'RESET_PERIOD[^:]*:\s*86400\b') { Fail "sc qfailure reset period is not 86400 s:`n$qf" }
+  if ($qf -notmatch '(?s)RESTART -- Delay = 30000 milliseconds.*RESTART -- Delay = 120000 milliseconds') { Fail "sc qfailure does not show 30 s then 2 min restarts:`n$qf" }
+  $ff = (& sc.exe qfailureflag $Name) -join "`n"
+  if ($ff -notmatch 'TRUE') { Fail "sc qfailureflag is not TRUE (no recovery on non-crash failures):`n$ff" }
+  $pre = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$Name" -Name PreshutdownTimeout -ErrorAction SilentlyContinue).PreshutdownTimeout
+  if ($pre -ne 30000) { Fail "PreshutdownTimeout is '$pre', want 30000" }
+}
+
 function Assert-Installed([string] $ExpectVersion) {
   Step 'Checking service registration'
   $svc = Get-CimInstance Win32_Service -Filter "Name='$Name'"
@@ -68,7 +93,6 @@ function Assert-Installed([string] $ExpectVersion) {
   if ($svc.StartMode -ne 'Auto') { Fail "service start mode is '$($svc.StartMode)', want Auto" }
   if ($svc.DisplayName -ne 'Benchwarmer') { Fail "service display name is '$($svc.DisplayName)'" }
   if ($svc.Description -ne $Description) { Fail "service description is '$($svc.Description)'" }
-
   Step "Waiting for $Health (60 s)"
   $deadline = (Get-Date).AddSeconds(60)
   $h = $null
@@ -150,9 +174,11 @@ if ($Mode -eq 'msi') {
     Start-Sleep -Seconds 3
     if ($tray.HasExited) { Write-Host "tray exited on its own here (exit $($tray.ExitCode)); in-use upgrade not exercised" } else { Step 'Tray running during upgrade' }
   }
+  $drift = Get-ServiceDriftCount
   Invoke-Msiexec '/i' $Path (Join-Path $LogDir 'msi-install.log')
   if ($UpgradeFrom -and -not $tray.HasExited) { Fail 'the tray from the old version is still running after the upgrade' }
   Assert-Installed (Get-MsiVersion $Path)
+  Assert-ServiceConfig $drift
   Invoke-Msiexec '/x' $Path (Join-Path $LogDir 'msi-uninstall.log')
   Assert-Removed
 } else {

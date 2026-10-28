@@ -2,8 +2,10 @@ package winsvc
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -128,5 +130,132 @@ func TestConsoleForcedAndTimeout(t *testing.T) {
 	err := runConsole(Options{StopTimeout: 50 * time.Millisecond}, stuck, sigs, time.Now)
 	if err == nil || !strings.Contains(err.Error(), "did not stop") {
 		t.Fatalf("timeout: %v", err)
+	}
+}
+
+type wixNode struct {
+	XMLName xml.Name
+	Attrs   []xml.Attr `xml:",any,attr"`
+	Nodes   []wixNode  `xml:",any"`
+}
+
+func (n wixNode) attrs() map[string]string {
+	m := map[string]string{}
+	for _, a := range n.Attrs {
+		m[a.Name.Local] = a.Value
+	}
+	return m
+}
+
+func (n wixNode) find(name string) []wixNode {
+	var out []wixNode
+	for _, c := range n.Nodes {
+		if c.XMLName.Local == name {
+			out = append(out, c)
+		}
+		out = append(out, c.find(name)...)
+	}
+	return out
+}
+
+// TestWixServiceConfigMatches keeps the MSI's service configuration in step
+// with what the service repairs at startup, so an install leaves nothing to
+// repair.
+func TestWixServiceConfigMatches(t *testing.T) {
+	b, err := os.ReadFile("../../packaging/wix/Benchwarmer.wxs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc wixNode
+	if err := xml.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var installs []wixNode
+	for _, si := range doc.find("ServiceInstall") {
+		if si.attrs()["Name"] == "Benchwarmer" {
+			installs = append(installs, si)
+		}
+	}
+	if len(installs) != 1 {
+		t.Fatalf("%d Benchwarmer ServiceInstall elements, want 1", len(installs))
+	}
+	only := func(name string) wixNode {
+		n := installs[0].find(name)
+		if len(n) != 1 {
+			t.Fatalf("ServiceInstall has %d %s elements, want 1", len(n), name)
+		}
+		return n[0]
+	}
+
+	cfg := only("ServiceConfig").attrs()
+	for k, v := range map[string]string{
+		"DelayedAutoStart":   "yes",
+		"FailureActionsWhen": "failedToStopOrReturnedError",
+		"PreShutdownDelay":   strconv.Itoa(int(DefaultPreshutdownTimeout / time.Millisecond)),
+		"OnInstall":          "yes",
+		"OnReinstall":        "yes",
+	} {
+		if cfg[k] != v {
+			t.Errorf("ServiceConfig %s = %q, want %q", k, cfg[k], v)
+		}
+	}
+
+	// Recovery actions are set by an sc.exe custom action:
+	//   sc.exe failure Benchwarmer reset= <s> actions= <type>/<ms>/...
+	var action wixNode
+	for _, ca := range doc.find("CustomAction") {
+		if ca.attrs()["Id"] == "SetServiceRecovery" {
+			action = ca
+		}
+	}
+	ca := action.attrs()
+	if ca["Execute"] != "deferred" || ca["Impersonate"] != "no" || ca["Return"] != "check" {
+		t.Errorf("SetServiceRecovery must be a checked deferred action run as SYSTEM: %v", ca)
+	}
+	scheduled := false
+	for _, c := range doc.find("Custom") {
+		if c.attrs()["Action"] == "SetServiceRecovery" {
+			scheduled = c.attrs()["After"] == "InstallServices"
+		}
+	}
+	if !scheduled {
+		t.Error("SetServiceRecovery is not scheduled after InstallServices")
+	}
+	args := strings.Fields(ca["ExeCommand"])
+	if len(args) != 7 || !strings.HasSuffix(args[0], `sc.exe"`) || args[1] != "failure" || args[2] != "Benchwarmer" ||
+		args[3] != "reset=" || args[5] != "actions=" {
+		t.Fatalf("SetServiceRecovery ExeCommand = %q", ca["ExeCommand"])
+	}
+	if want := strconv.Itoa(int(RecoveryResetPeriod / time.Second)); args[4] != want {
+		t.Errorf("sc failure reset = %q, want %q", args[4], want)
+	}
+	f := strings.Split(args[6], "/")
+	if len(f)%2 != 0 {
+		t.Fatalf("sc failure actions %q", args[6])
+	}
+	var got []RecoveryStep
+	for i := 0; i < len(f); i += 2 {
+		ms, err := strconv.Atoi(f[i+1])
+		if err != nil {
+			t.Fatalf("sc failure delay %q: %v", f[i+1], err)
+		}
+		step := RecoveryStep{Delay: time.Duration(ms) * time.Millisecond}
+		switch f[i] {
+		case "restart":
+			step.Restart = true
+		case "none":
+		default:
+			t.Fatalf("sc failure action %q", f[i])
+		}
+		got = append(got, step)
+	}
+	want := RecoveryPlan()
+	if len(got) != len(want) {
+		t.Fatalf("MSI plan %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("MSI plan step %d = %+v, want %+v", i, got[i], want[i])
+		}
 	}
 }

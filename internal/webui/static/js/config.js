@@ -1,7 +1,7 @@
 // Configuration pages: GET api/v1/config into a draft, edit it through
 // structured forms or raw JSON, and PUT the whole object back. Values shown
 // as "<redacted>" are left untouched so the server restores them.
-import { proposedRule, sameMatcher, snapshotFresh } from "./applications.js";
+import { proposedRule, sameMatcher, snapshotFresh, searchableValues } from "./applications.js";
 import { waitForRestart } from "./restart.js";
 import { h, replace, warnIcon } from "./dom.js";
 import { get, put, post, signIn, ApiError } from "./api.js";
@@ -478,7 +478,7 @@ function applicationsSection() {
   const applyQuery = () => {
     const query = search.value.toLowerCase().trim();
     appView.query = search.value;
-    rows.forEach((row, i) => { row.hidden = !JSON.stringify(list[i]).toLowerCase().includes(query); });
+    rows.forEach((row, i) => { row.hidden = !searchableValues(list[i]).includes(query); });
     snapshot.querySelectorAll("[data-process-search]").forEach(row => { row.hidden = !row.dataset.processSearch.includes(query); });
   };
   search.addEventListener("input", applyQuery);
@@ -513,7 +513,7 @@ function applicationsSection() {
             if (!window.confirm("Stage " + label.toLowerCase() + " for " + target + "? " + consequence + " The new rule will be first and take precedence over matching rules." + (duplicates ? " " + duplicates + " existing rule(s) have the same matcher and will remain below it." : "") + " This only changes the draft; save with authorization to apply it.")) return;
             structural(() => list.unshift(rule), idFor("applications[0]." + (rule.path ? "path" : "exe")));
           } }, label);
-          return h("div", { class: "rule", dataset: { processSearch: JSON.stringify(proc).toLowerCase() } }, h("strong", null, proc.name || "Unknown process"), h("p", null, "Executable: " + (proc.path || proc.name || "unavailable") + " · PID " + proc.pid + " · class " + (proc.class || "unclassified") + (proc.rule ? " · rule " + proc.rule : "")),
+          return h("div", { class: "rule", dataset: { processSearch: searchableValues(proc) } }, h("strong", null, proc.name || "Unknown process"), h("p", null, "Executable: " + (proc.path || proc.name || "unavailable") + " · PID " + proc.pid + " · class " + (proc.class || "unclassified") + (proc.rule ? " · rule " + proc.rule : "")),
             java && h("p", { class: "help" }, "Minecraft Java may use javaw.exe, but other Java programs do too. Check the executable path; this does not identify Minecraft."),
             action("game", "Treat as game"), " ", action("ignore", "Ignore"));
         }), h("button", { type: "button", onclick: refreshSnapshot }, "Refresh GPU users"));

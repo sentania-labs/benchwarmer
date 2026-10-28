@@ -152,14 +152,16 @@ settings.
    status but cannot change settings; typing an administrator's password
    into a standard user's prompt is refused.
 4. **Choose the model.** On **Configuration > Runtime**, the model field
-   suggests the files in `models\` and the runtime field suggests the
-   bundled llama.cpp build, so no paths need typing. Save. Setup required
-   clears within a few seconds and the service loads the model when the GPU
-   is free.
+   lists the files in `models\` and the runtime field suggests the
+   bundled llama.cpp build, so no paths need typing. A model stored
+   elsewhere can be entered under **Advanced settings** on the same page.
+   Save. Setup required clears within a few seconds and the service loads
+   the model when the GPU is free.
 5. **LAN access (optional).** On **Configuration > Network and security**:
-   set the inference listener to `0.0.0.0:8480`, turn on **Serve inference
-   over HTTPS**, and pick the certificate (the name and thumbprint fields
-   suggest the usable certificates in `LocalMachine\My`). Save, then choose
+   set the inference listener to `0.0.0.0:8480`, then under **Advanced
+   settings** turn on **Serve inference over HTTPS**, and pick the
+   certificate (the name and thumbprint fields suggest the usable
+   certificates in `LocalMachine\My`). Save, then choose
    **Restart service now**: listener and certificate changes take effect
    after a service restart, which the dashboard does for you. Clients call
    `https://<pc-name>:8480/v1` with the inference token from

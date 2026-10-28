@@ -60,6 +60,17 @@ export function errorSlot(ctx, path) {
   return el;
 }
 
+export function refreshErrors(ctx, root) {
+  for (const el of root.querySelectorAll("[data-path]")) {
+    const slot = el.querySelector(":scope > .field-error");
+    if (!slot) continue;
+    const msgs = errorsFor(ctx, el.dataset.path);
+    slot.textContent = msgs.join("; ");
+    slot.hidden = !msgs.length;
+    if (el.classList.contains("field")) el.classList.toggle("invalid", msgs.length > 0);
+  }
+}
+
 function setClientError(ctx, path, wrap, msg) {
   if (msg) ctx.clientErrors.set(path, msg);
   else ctx.clientErrors.delete(path);
@@ -75,20 +86,20 @@ function setClientError(ctx, path, wrap, msg) {
 //     unit, help, min, max, step, options: [[value,label]], placeholder, list }
 export function field(ctx, def) {
   const path = def.path;
-  const id = idFor(path);
+  const id = def.id || idFor(path);
   const value = getPath(ctx.draft, path);
   const helpId = def.help ? id + "-help" : null;
-  const errId = id + "-err";
+  const errId = def.noError ? null : id + "-err";
   const describedBy = [helpId, errId].filter(Boolean).join(" ");
   const wrap = h("div", { class: "field", dataset: { path } });
-  const err = errorSlot(ctx, path);
-  if (!err.hidden) wrap.classList.add("invalid");
+  const err = def.noError ? null : errorSlot(ctx, path);
+  if (err && !err.hidden) wrap.classList.add("invalid");
   const set = (v) => {
     setPath(ctx.draft, path, v);
     ctx.changed();
   };
   let control;
-  const common = { id, "aria-describedby": describedBy, name: path };
+  const common = { id, "aria-describedby": describedBy, name: def.id || path };
 
   switch (def.type) {
     case "bool": {
@@ -140,11 +151,44 @@ export function field(ctx, def) {
       control = h("div", { class: "duration" }, num, unit);
       break;
     }
+    case "model": {
+      control = h("select", { ...common, dataset: { modelPicker: "true" }, onchange: (e) => {
+        if (!e.target.value) return;
+        set(e.target.value);
+        const custom = document.querySelector('[data-path="runtime.model_path"] input');
+        if (custom) custom.value = e.target.value;
+      } }, h("option", { value: value || "" }, value || "Choose an installed model"));
+      break;
+    }
     case "select": {
       const opts = def.options.slice();
       if (value != null && value !== "" && !opts.some(([v]) => v === value)) opts.push([value, value + " (unknown)"]);
       control = h("select", { ...common, onchange: (e) => set(e.target.value) },
         opts.map(([v, l]) => h("option", { value: v, selected: v === value }, l)));
+      break;
+    }
+    case "argv": {
+      // Each existing token gets its own row: guessing which flags take values
+      // would change arbitrary argv. A row can explicitly add a value token.
+      const rows = (value || []).map((token) => ({ token, hasValue: false, value: "", fresh: false }));
+      const list = h("div", { class: "argv-rows" });
+      const update = () => set(rows.filter((r) => !(r.fresh && r.token === "" && (!r.hasValue || r.value === ""))).flatMap((r) => r.hasValue ? [r.token, r.value] : [r.token]));
+      const render = (focusRow, focusValue) => {
+        const refs = [];
+        list.replaceChildren(...rows.map((r, i) => {
+          const token = h("input", { id: i === 0 ? id : null, type: "text", value: r.token, "aria-label": "Argument " + (i + 1), oninput: (e) => { r.token = e.target.value; update(); } });
+          const val = h("input", { type: "text", value: r.value, "aria-label": "Value for argument " + (i + 1), oninput: (e) => { r.value = e.target.value; update(); } });
+          refs.push({ token, val });
+          return h("div", { class: "argv-row" }, token,
+            h("label", null, h("input", { type: "checkbox", checked: r.hasValue, onchange: (e) => { r.hasValue = e.target.checked; update(); render(i, r.hasValue); } }), " Has value"),
+            r.hasValue && val,
+            h("button", { type: "button", onclick: () => { rows.splice(i, 1); update(); render(Math.min(i, rows.length - 1)); } }, "Remove"));
+        }));
+        if (focusRow >= 0) refs[focusRow]?.[focusValue ? "val" : "token"].focus();
+      };
+      render(-1);
+      control = h("div", { role: "group", "aria-labelledby": id + "-label", "aria-describedby": describedBy }, list,
+        h("button", { type: "button", onclick: () => { rows.push({ token: "", hasValue: false, value: "", fresh: true }); render(rows.length - 1); } }, "Add argument"));
       break;
     }
     case "lines": {
@@ -184,17 +228,20 @@ export function field(ctx, def) {
       control = h("input", {
         ...common, type: "text", spellcheck: "false", value: value ?? "", placeholder: def.placeholder,
         list: def.list, autocomplete: "off",
-        oninput: (e) => set(e.target.value),
+        oninput: (e) => {
+          set(e.target.value);
+          if (path === "runtime.model_path") ctx.modelPathChanged?.();
+        },
       });
     }
   }
 
   if (def.type !== "bool") {
-    const label = h("label", { for: id }, def.label, def.unit ? h("span", { class: "unit" }, " (" + def.unit + ")") : null);
+    const label = h(def.type === "argv" ? "span" : "label", { for: def.type === "argv" ? null : id, id: def.type === "argv" ? id + "-label" : null }, def.label, def.unit ? h("span", { class: "unit" }, " (" + def.unit + ")") : null);
     wrap.append(label, control);
   }
   if (def.help) wrap.append(h("p", { class: "help", id: helpId }, def.help));
-  wrap.append(err);
+  if (err) wrap.append(err);
   return wrap;
 }
 

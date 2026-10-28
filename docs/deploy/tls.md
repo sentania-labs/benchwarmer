@@ -73,7 +73,7 @@ subject alternative names; clients validate against those, not the CN.
 
 ### 2. Configure
 
-Dashboard > Configuration > Network > Inference HTTPS, or the API:
+Dashboard > Configuration > Network and security > Advanced settings > Inference HTTPS, or the API:
 
 ```json
 "listen": {

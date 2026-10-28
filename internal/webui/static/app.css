@@ -286,3 +286,10 @@ th, td { overflow-wrap: normal; word-break: normal; }
   .grid { grid-template-columns: 1fr; }
   .fields { grid-template-columns: 1fr; }
 }
+
+/* Argument rows wrap on narrow screens while preserving their order. */
+.argv-rows { display: grid; gap: 8px; }
+.argv-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.argv-row input[type="text"] { flex: 1 1 140px; min-width: 0; }
+.argv-row label { white-space: nowrap; }
+.subnav summary, .config-body summary { cursor: pointer; font-weight: 600; }

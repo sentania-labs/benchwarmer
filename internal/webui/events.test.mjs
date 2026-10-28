@@ -86,6 +86,7 @@ test('a warning on a transition is a state change, not a problem', () => {
     assert.equal(fmt.eventKind({ type: t, severity: 'notice', state: 'ERROR' }), fmt.eventKind({ type: t }), t);
   }
   assert.equal(fmt.eventKind({ type: 'mode_changed', severity: 'notice', state: 'ERROR' }), 'change');
+  assert.equal(fmt.eventKind({ type: 'decision_changed', severity: 'notice', state: 'ERROR' }), 'change');
 });
 
 test('state names are intelligible and unknown values are not blank', () => {

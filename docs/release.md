@@ -16,15 +16,24 @@ tag; nothing is installed from a developer's machine (ADR 0012).
      pinned in `packaging/llama-cpp.json` (build fails on a SHA-256
      mismatch), and zips the file set with `install.ps1`/`uninstall.ps1`;
    - on Windows, builds `benchwarmer-X.Y.Z-x64.msi` from that zip with WiX
-     (`packaging/build-msi.ps1`, version pinned there) and runs
+     (`packaging/build-msi.ps1`, version pinned there), Authenticode-signs this
+     repo's own `benchwarmer.exe`, `bwtray.exe` and `bwprobe.exe` before the MSI
+     is built and then the MSI itself (org shared action
+     `sentania-labs/.github/.github/actions/windows-sign`, Azure Artifact
+     Signing), repacks the zip from the signed files, and runs
      `packaging/smoke.ps1` for the MSI and the zip;
    - publishes the MSI, `benchwarmer-vX.Y.Z-windows-amd64.zip` and
      `SHA256SUMS` to the GitHub release. Re-running the workflow for the same
      tag replaces the assets instead of failing.
 4. Install per [docs/deploy/install.md](deploy/install.md).
 
-Releases are unsigned until a code-signing certificate exists; the Defender
-ASR path exclusion is what allows them to run.
+Release binaries are Authenticode signed through the lab's Azure Artifact
+Signing profile, so the publisher in a file's properties is the
+`sentania-labs` certificate: `benchwarmer.exe`, `bwtray.exe` and `bwprobe.exe`
+are signed before WiX packs them, and the MSI is signed afterwards. The bundled
+llama.cpp runtime keeps the signature upstream gave it. `SHA256SUMS` covers the
+signed files. The Defender ASR path exclusion is still what lets them run under
+rule 01443614, and it is still required.
 
 ## Building locally
 

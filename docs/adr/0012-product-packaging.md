@@ -49,9 +49,12 @@ Both carry the same file set:
 
 The MSI is built with WiX Toolset (pinned version, installed as a .NET tool)
 on the GitHub-hosted Windows runner. CI builds it on every push, to validate
-it; the release workflow builds and publishes it on a tag. Artifacts are
-unsigned until a code-signing certificate exists; the ASR path exclusion is
-what lets them run.
+it; the release workflow builds and publishes it on a tag. The files this repo
+builds (`benchwarmer.exe`, `bwtray.exe`, `bwprobe.exe`) and the MSI are
+Authenticode signed at release time (the org's `windows-sign` action, Azure
+Artifact Signing) before the checksums are made; the bundled llama.cpp runtime
+keeps the signature upstream gave it and is not re-signed. The ASR path
+exclusion is still what lets the files run.
 
 ### What the MSI does
 
@@ -161,8 +164,8 @@ above, so the script no longer creates folders, ACLs or tokens.
   and a new release, tested like any other change.
 - **Model files** are still copied by an admin (or a GPO file preference) to
   `C:\ProgramData\Benchwarmer\models\`.
-- **Unsigned MSI.** GPO accepts it. SmartScreen and ASR need the documented
-  exclusions.
+- **Signed MSI.** GPO accepts it. SmartScreen gets publisher recognition from
+  the Authenticode signature; ASR still needs the documented exclusion.
 - **Fleet configuration** is either a pre-placed `config.json` or API calls.
   There is no ADMX template; adding one later would be additive.
 - **The developer no longer installs** on the target. A release is verified

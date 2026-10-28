@@ -7,6 +7,7 @@ most questions. The Events page shows every decision in order.
 | Symptom | Where to look | Usual cause |
 |---|---|---|
 | Unavailable, rule `eligibility.telemetry_unavailable` or `safety.telemetry_lost` | Status GPU card, `telemetry_lost` events | GPU counters unreadable (service identity, driver reset). See ADR 0006. |
+| `telemetry_degraded` event, "Runtime GPU attribution incomplete" | The event message and `data` (`reasons`, `missing_gpu_pids`, `sample_errors`, `duration_ms`) | Per-process GPU counters did not cover the runtime. One event per change in the cause, then a `recovered` event with the duration. When only the job membership list lacked the runtime root and counters stayed `high` confidence (`identity_only`), it is logged at DEBUG. See ADR 0003. |
 | Unavailable, rule `eligibility.vram_insufficient` | Evidence `vram_free_mib` | Another process holds VRAM, or `runtime.required_free_vram_mib` is too high for the model. |
 | Unavailable, rule `eligibility.suppressed` | Timers card | Two preemptions within `anti_thrash.window`; waits `anti_thrash.suppress_for`. |
 | ERROR with `eligibility.recovery` "crash backoff" | `runtime_crashed` / `load_failed` events, `diagnostics_tail` | Bad model path or args, driver problem. Backoff doubles up to `recovery.crash_backoff_max`. |

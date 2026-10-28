@@ -76,6 +76,8 @@ type RuntimeFacts struct {
 // GPUFacts are telemetry-derived facts for the target adapter.
 type GPUFacts struct {
 	Confidence Confidence `json:"confidence"`
+	// AttributionReasons explains the confidence grade using measured evidence.
+	AttributionReasons []string `json:"attribution_reasons,omitempty"`
 	// NoneFor is how long confidence has been none (0 if not none).
 	NoneFor time.Duration `json:"none_for_ns"`
 	// HealthyFor is how long confidence has been high or degraded; used for

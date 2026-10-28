@@ -10,6 +10,7 @@ package observe
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"time"
 
@@ -164,7 +165,7 @@ func (o *Observer) gpu(now time.Time, in Input, own map[uint32]bool) (policy.GPU
 		t := *s.TemperatureC
 		g.TemperatureC = &t
 	}
-	g.Confidence = confidence(in, own)
+	g.Confidence, g.AttributionReasons = confidence(in, own)
 	o.trackConfidence(now, g.Confidence, &g)
 	if g.Confidence == policy.ConfidenceNone {
 		// Zeros in an incomplete sample mean unknown (ADR 0003). No
@@ -242,13 +243,13 @@ func (o *Observer) gpu(now time.Time, in Input, own map[uint32]bool) (policy.GPU
 // high when per-process data is present, the runtime (if running) is visible
 // in it, and the per-process dedicated sum matches the adapter figure;
 // otherwise degraded.
-func confidence(in Input, own map[uint32]bool) policy.Confidence {
+func confidence(in Input, own map[uint32]bool) (policy.Confidence, []string) {
 	s := in.Sample
 	if s == nil || !s.Complete {
-		return policy.ConfidenceNone
+		return policy.ConfidenceNone, []string{"GPU counter sample missing or incomplete"}
 	}
 	if len(s.Processes) == 0 {
-		return policy.ConfidenceDegraded
+		return policy.ConfidenceDegraded, []string{"GPU Process Memory and GPU Engine process instances absent"}
 	}
 	var sum uint64
 	ownSeen := false
@@ -260,8 +261,11 @@ func confidence(in Input, own map[uint32]bool) policy.Confidence {
 			ownBytes += p.DedicatedBytes
 		}
 	}
-	if len(own) > 0 && (!ownSeen || (in.FootprintMiB > 0 && ownBytes == 0)) {
-		return policy.ConfidenceDegraded
+	var reasons []string
+	if len(own) > 0 && !ownSeen {
+		reasons = append(reasons, "runtime PIDs absent from GPU process counters")
+	} else if len(own) > 0 && in.FootprintMiB > 0 && ownBytes == 0 {
+		reasons = append(reasons, "runtime GPU Process Memory dedicated bytes zero despite known footprint")
 	}
 	adapter := float64(s.DedicatedUsedBytes) / mib
 	diff := adapter - float64(sum)/mib
@@ -269,9 +273,12 @@ func confidence(in Input, own map[uint32]bool) policy.Confidence {
 		diff = -diff
 	}
 	if diff > max(consistencyToleranceMiB, adapter*consistencyTolerancePct/100) {
-		return policy.ConfidenceDegraded
+		reasons = append(reasons, fmt.Sprintf("GPU Adapter Memory / GPU Process Memory mismatch: adapter=%.1f MiB processes=%.1f MiB difference=%.1f MiB tolerance=%.1f MiB", adapter, float64(sum)/mib, diff, max(consistencyToleranceMiB, adapter*consistencyTolerancePct/100)))
 	}
-	return policy.ConfidenceHigh
+	if len(reasons) > 0 {
+		return policy.ConfidenceDegraded, reasons
+	}
+	return policy.ConfidenceHigh, nil
 }
 
 func (o *Observer) trackConfidence(now time.Time, c policy.Confidence, g *policy.GPUFacts) {

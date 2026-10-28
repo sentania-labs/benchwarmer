@@ -30,7 +30,7 @@ const cancel = el();
 document.getElementById = ((orig) => (id) => (id === "token-cancel" ? cancel : orig(id)))(document.getElementById);
 cancel.addEventListener = (ev, fn) => { if (ev === "click") queueMicrotask(() => { asked.push(reasonEl.textContent); fn({ preventDefault() {} }); }); };
 
-const { put, hasToken } = await import('./static/js/api.js');
+const { put, hasToken, modeTokenReason } = await import('./static/js/api.js');
 
 test('a mode change with no token sends no credential and no dialog on success', async () => {
   calls = []; asked.length = 0;
@@ -52,4 +52,15 @@ test('a 401 on AI first asks for the token with the given reason, and cancel kee
   assert.deepEqual(asked, ["AI first needs the management token."]);
   assert.equal(store.size, 0);
   for (const c of calls) assert.ok(!c.path.includes("token"), "token must not be in a URL");
+});
+
+test('a 401 on Pause asks with a neutral reason that does not promise tokenless use', async () => {
+  calls = []; asked.length = 0;
+  responder = () => ({ status: 401, body: { error: "token", code: "unauthorized" } });
+  await assert.rejects(put("api/v1/mode", { mode: "pause", duration: "30m" }, { reason: modeTokenReason("pause") }), /Cancelled/);
+  assert.equal(asked.length, 1);
+  assert.match(asked[0], /unless you are at this PC/);
+  assert.doesNotMatch(asked[0], /do not\./);
+  assert.equal(modeTokenReason("auto"), modeTokenReason("pause"));
+  assert.equal(modeTokenReason("ai_priority"), "AI first needs the management token.");
 });

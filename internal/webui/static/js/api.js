@@ -125,6 +125,14 @@ export async function request(method, path, body, opts = {}) {
   }
 }
 
+// modeTokenReason explains a token prompt on a mode change: only AI first
+// always needs the token, the other modes need one away from this PC or with
+// local trust off.
+export function modeTokenReason(mode) {
+  if (mode === "ai_priority") return "AI first needs the management token.";
+  return "A management token is needed unless you are at this PC with local trust on.";
+}
+
 // signIn asks for a token outside a failing request (for read-only pages
 // when loopback trust is off).
 export async function signIn(reason) {

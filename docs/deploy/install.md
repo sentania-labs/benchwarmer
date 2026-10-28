@@ -155,8 +155,13 @@ settings.
    lists the files in `models\` and the runtime field suggests the
    bundled llama.cpp build, so no paths need typing. A model stored
    elsewhere can be entered under **Advanced settings** on the same page.
-   Save. Setup required clears within a few seconds and the service loads
-   the model when the GPU is free.
+   **Check this model** reads the file's header (it never loads or runs
+   the model) and previews proposed context and free-VRAM settings
+   with the reason for each. They are estimates, not a guarantee the
+   model fits. Nothing changes until you tick the ones you want and
+   choose **Apply selected to draft**. A model entered under Advanced
+   can be checked once it is saved. Save. Setup required clears within a
+   few seconds and the service loads the model when the GPU is free.
 5. **LAN access (optional).** On **Configuration > Network and security**:
    set the inference listener to `0.0.0.0:8480`, then under **Advanced
    settings** turn on **Serve inference over HTTPS**, and pick the

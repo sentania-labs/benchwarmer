@@ -98,6 +98,8 @@ function describe(o, st, at) {
       return { headline: "AI was unloaded on request and is waiting a few minutes before it loads again.", lines: backAround(o, at, "if the GPU is free") };
     case "recovering":
       return { headline: "AI is waiting a short while before it loads again.", lines: backAround(o, at, "if the GPU is free") };
+    case "telemetry_recovered":
+      return { headline: "GPU readings are back. AI is waiting a moment before it loads again.", lines: backAround(o, at, "if the GPU is free") };
     case "suppressed":
       return {
         headline: "AI was pushed off the GPU several times in a row, so it is staying off for a while instead of restarting over and over.",

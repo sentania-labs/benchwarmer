@@ -65,6 +65,14 @@ func TestDeriveOwner(t *testing.T) {
 					t.Error("a retry time is known")
 				}
 			}},
+		{"readings back, waiting out the delay, is a normal wait", Status{State: state.Cooldown, Timers: TimerStatus{NextLoadAt: at(3)},
+			Decision: rule(policy.RuleRecovery, ev("recovery_reason", "telemetry recovery (loss 2)"))},
+			OwnerWaiting, OwnerSeverityWait, "telemetry_recovered", func(t *testing.T, o OwnerStatus) {
+				if o.ReturnAt == nil {
+					t.Error("a retry time is known")
+				}
+			}},
+		{"other telemetry recovery reasons stay a problem", Status{State: state.Error, Decision: rule(policy.RuleRecovery, ev("recovery_reason", "telemetry lost"))}, OwnerProblem, OwnerSeverityProblem, "no_gpu_readings", nil},
 		{"driver reset is a problem", Status{State: state.Error, Decision: rule(policy.RuleRecovery, ev("recovery_reason", "GPU driver reset (1)"))}, OwnerProblem, OwnerSeverityProblem, "gpu_fault", nil},
 		{"unrecognised recovery stays a wait", Status{State: state.Cooldown, Decision: rule(policy.RuleRecovery, ev("recovery_reason", "something new"))}, OwnerWaiting, OwnerSeverityWait, "recovering", nil},
 		{"anti-thrash", Status{State: state.Suppressed, Timers: TimerStatus{NextLoadAt: at(20)}, Decision: rule(policy.RuleSuppressed)}, OwnerWaiting, OwnerSeverityWait, "suppressed", nil},

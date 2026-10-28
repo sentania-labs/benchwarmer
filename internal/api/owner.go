@@ -38,7 +38,7 @@ type OwnerStatus struct {
 	// Cause says why: ready, busy, loading, starting, game, gpu_busy,
 	// cooldown, startup, resume, drained, recovering, suppressed, low_vram,
 	// stopping, sleeping, paused, too_hot, setup, crash, gpu_fault,
-	// no_gpu_readings, no_process_list, vram_too_small, or unknown.
+	// no_gpu_readings, telemetry_recovered, no_process_list, vram_too_small, or unknown.
 	Cause string `json:"cause"`
 	// After names what a cooldown follows: game, gpu_busy, heat, or other.
 	After string `json:"after,omitempty"`
@@ -168,6 +168,9 @@ func recovery(o OwnerStatus, s Status, reason string) OwnerStatus {
 		return fault("crash")
 	case strings.HasPrefix(reason, "GPU"), strings.HasPrefix(reason, "device"):
 		return fault("gpu_fault")
+	case strings.HasPrefix(reason, "telemetry recovery"):
+		// Readings are back; AI is only waiting out the bounded delay.
+		o.Cause = "telemetry_recovered"
 	case strings.HasPrefix(reason, "telemetry"):
 		return fault("no_gpu_readings")
 	default:

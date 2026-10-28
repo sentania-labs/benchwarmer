@@ -44,7 +44,7 @@ test('a cooldown with no known end promises no time', () => {
 });
 
 test('startup and wake waits are normal', () => {
-  for (const cause of ['startup', 'resume', 'drained', 'recovering', 'suppressed']) {
+  for (const cause of ['startup', 'resume', 'drained', 'recovering', 'suppressed', 'telemetry_recovered']) {
     const v = view({ kind: 'waiting', severity: 'wait', cause, return_at: iso(2) });
     assert.equal(v.severity, 'wait', cause);
     assert.match(v.lines[0], /if the GPU is free/, cause);

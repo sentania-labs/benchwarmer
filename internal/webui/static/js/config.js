@@ -27,6 +27,8 @@ const ctx = {
 };
 
 export function mount(main, rest) {
+  appView.query = "";
+  appView.gpu = null;
   st.section = SECTIONS.some((s) => s.key === rest[0]) ? rest[0] : st.section;
   els = {
     top: h("div", { class: "config-top" }),
@@ -219,6 +221,8 @@ function switchSection(key) {
     return;
   }
   st.section = key;
+  appView.query = "";
+  appView.gpu = null;
   renderNav();
   renderSection();
 }
@@ -228,6 +232,8 @@ function jumpTo(path) {
   if (sec !== st.section) {
     if (st.section === "json" && !applyJSON()) return;
     st.section = sec;
+    appView.query = "";
+    appView.gpu = null;
     history.replaceState(null, "", "#/config/" + sec);
     renderNav();
     renderSection();
@@ -413,6 +419,8 @@ function clearErrorsUnder(prefix) {
   renderNav();
 }
 
+const appView = { query: "", gpu: null };
+
 function applicationsSection() {
   const list = st.draft.applications || (st.draft.applications = []);
   const structural = (fn, focusId) => {
@@ -444,7 +452,7 @@ function applicationsSection() {
     const classField = field(ctx, { path: p + ".class", label: "Class", type: "select", options: CLASSES });
     const consequence = h("p", { class: "help" });
     const explain = () => { consequence.textContent = ({ game: "A confirmed game makes AI yield the GPU.", launcher: "A GPU-using child may be treated as a game.", ordinary: "GPU use contributes to ordinary contention.", ignore: "Ignored for application classification; GPU pressure may still affect policy." })[r.class] || "Choose a class."; };
-    classField.querySelector("select").addEventListener("change", explain);
+    classField.querySelector("select").addEventListener("change", () => structural(() => {}, idFor(p + ".class")));
     explain();
     return h("li", { class: "rule", dataset: { path: p, ruleClass: r.class || "ordinary" } },
       h("div", { class: "rule-head" }, h("span", { class: "rule-num" }, "#" + (i + 1)),
@@ -462,21 +470,28 @@ function applicationsSection() {
         valueField,
         classField), consequence);
   });
-  const search = h("input", { id: "app-search", type: "search", placeholder: "Search rules" });
+  const search = h("input", { id: "app-search", type: "search", placeholder: "Search rules", value: appView.query });
   const groups = ["game", "launcher", "ignore", "ordinary"].map(cls => {
     const members = rows.filter((_, i) => (list[i].class || "ordinary") === cls);
     return h("section", { class: "app-group" }, h("h3", null, ({game:"Games", launcher:"Launchers", ignore:"Ignored", ordinary:"Ordinary"})[cls]), h("ol", { class: "rules" }, members));
   });
-  search.addEventListener("input", () => {
+  const applyQuery = () => {
     const query = search.value.toLowerCase().trim();
+    appView.query = search.value;
     rows.forEach((row, i) => { row.hidden = !JSON.stringify(list[i]).toLowerCase().includes(query); });
     snapshot.querySelectorAll("[data-process-search]").forEach(row => { row.hidden = !row.dataset.processSearch.includes(query); });
-  });
+  };
+  search.addEventListener("input", applyQuery);
   const snapshot = h("div", null, h("p", null, "Loading GPU users..."));
   async function refreshSnapshot() {
     try {
       const status = await get("api/v1/status", { interactive: false });
-      const gpu = status.gpu || {};
+      appView.gpu = status.gpu || {};
+      showSnapshot(appView.gpu);
+    } catch (e) { replace(snapshot, h("p", null, "Could not load GPU users: " + e.message), h("button", { type: "button", onclick: refreshSnapshot }, "Retry")); }
+  }
+  function showSnapshot(gpu) {
+    {
       const users = gpu.observed_gpu_users || [];
       const fresh = snapshotFresh(gpu);
       const ageNotice = h("p", null, gpu.sampled_at ? "Snapshot taken " + clockTime(new Date(gpu.sampled_at), null, { seconds: true }) + (fresh ? ". Processes may have exited since this sample." : ". This snapshot is stale; refresh before choosing an action.") : "No GPU sample available.");
@@ -498,24 +513,22 @@ function applicationsSection() {
           } }, label);
           return h("div", { class: "rule", dataset: { processSearch: JSON.stringify(proc).toLowerCase() } }, h("strong", null, proc.name || "Unknown process"), h("p", null, "Executable: " + (proc.path || proc.name || "unavailable") + " · PID " + proc.pid + " · class " + (proc.class || "unclassified") + (proc.rule ? " · rule " + proc.rule : "")),
             java && h("p", { class: "help" }, "Minecraft Java may use javaw.exe, but other Java programs do too. Check the executable path; this does not identify Minecraft."),
-            java && h("p", { class: "help" }, "Java applications may share the same executable, so these actions cannot safely identify Minecraft. Configure a more specific rule manually if available."),
             action("game", "Treat as game"), " ", action("ignore", "Ignore"));
         }), h("button", { type: "button", onclick: refreshSnapshot }, "Refresh GPU users"));
-      search.dispatchEvent(new Event("input"));
+      applyQuery();
       if (fresh) setTimeout(() => {
         if (!ageNotice.isConnected) return;
         ageNotice.textContent = "This snapshot is stale; refresh before choosing an action.";
         for (const button of snapshot.querySelectorAll(".rule button")) button.disabled = true;
       }, Math.max(0, 10000 - (Date.now() - Date.parse(gpu.sampled_at))));
-    } catch (e) { replace(snapshot, h("p", null, "Could not load GPU users: " + e.message), h("button", { type: "button", onclick: refreshSnapshot }, "Retry")); }
+    }
   }
-  refreshSnapshot();
+  if (appView.gpu) showSnapshot(appView.gpu); else refreshSnapshot();
   return [
     h("div", { class: "field" }, h("label", { for: "app-search" }, "Search processes and application rules"), search),
     h("section", { class: "group" }, h("h3", null, "Running GPU users"), snapshot),
     h("div", { class: "notice info" }, h("span", null,
       "Built-in rules ship with Benchwarmer; rules added in a newer version appear here after an upgrade, and one you delete stays deleted. Local rules were added on this PC. Rule numbers show evaluation order across groups: the lowest number wins. Put specific rules (a launcher's own executable) above broad ones (a whole library folder). Matching ignores case and treats / and \\ alike.")),
-    h("p", { class: "help" }, "Groups refresh when you revisit this section; rule numbers always show the order used when saved."),
     groups,
     h("button", { type: "button", id: "add-rule", onclick: () => structural(() => list.push({ exe: "", class: "game" }),
       idFor("applications[" + list.length + "].exe")) }, "Add rule at the end"),

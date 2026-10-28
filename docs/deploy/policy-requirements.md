@@ -1,7 +1,9 @@
 # Policy requirements on managed Windows machines
 
-Benchwarmer runs unsigned executables (its own and the llama.cpp runtime).
-On a machine managed by Group Policy or Intune, check these before installing.
+Every executable Benchwarmer ships is Authenticode signed: its own `.exe`
+files and the bundled llama.cpp runtime (`llama-server.exe`,
+`ggml-vulkan.dll`). On a machine managed by Group Policy or Intune, check
+these before installing.
 
 ## Required when ASR rule 01443614 is in Block mode
 

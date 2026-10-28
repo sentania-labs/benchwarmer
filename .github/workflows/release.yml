@@ -6,9 +6,19 @@ name: release
 #
 # Split across runners on purpose: Linux builds the binaries, fetches and
 # verifies the llama.cpp runtime, and zips the file set with the same
-# `make package` target CI and developers use; Windows builds the MSI from
-# that exact zip (WiX and msiexec need Windows) and smoke-tests it. The MSI
-# and the zip therefore cannot drift apart.
+# `make package` target CI and developers use; Windows unpacks that exact
+# zip (WiX and msiexec need Windows), Authenticode-signs every file it ships,
+# builds the MSI from the signed file set, signs the MSI, smoke-tests both
+# install routes and re-zips. The MSI and the zip therefore cannot drift
+# apart, and both carry the same signed files.
+#
+# Signing goes through the org's shared actions in sentania-labs/.github
+# (pinned by commit below; onboarding checklist in that repo's README):
+# Authenticode through Azure Artifact Signing. The credentials are org
+# secrets visible to every repo, so nothing is configured here. Signing is
+# mandatory, not "if secrets are configured": the job fails in seconds when an
+# org secret has no value, and windows-sign verifies every signature before
+# anything is published. SHA256SUMS is computed over the signed files.
 on:
   push:
     tags: ['v*.*.*']
@@ -35,13 +45,34 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - name: Refuse to start without every Windows signing secret
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_PROFILE: ${{ secrets.ARTIFACT_SIGNING_PROFILE }}
+        run: |
+          # windows-sign checks these itself; fail here, in seconds, before
+          # anything is built. Signing is mandatory, so no value is optional.
+          missing=""
+          for name in AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET ARTIFACT_SIGNING_ENDPOINT ARTIFACT_SIGNING_ACCOUNT ARTIFACT_SIGNING_PROFILE; do
+            [ -n "${!name:-}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Windows signing org secrets with no value:$missing"
+            exit 1
+          fi
       - name: Check
         run: make check VERSION="$GITHUB_REF_NAME"
       - name: Package
         run: make package VERSION="$GITHUB_REF_NAME"
+      # The intermediate file set; the msi job signs it and uploads the zip
+      # that is actually published.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-zip
+          name: zip-unsigned
           path: dist/benchwarmer-${{ github.ref_name }}-windows-amd64.zip
           if-no-files-found: error
 
@@ -52,7 +83,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: release-zip
+          name: zip-unsigned
           path: dist
       - name: Unpack zip
         shell: pwsh
@@ -60,9 +91,44 @@ jobs:
           Expand-Archive "dist\benchwarmer-$env:GITHUB_REF_NAME-windows-amd64.zip" -DestinationPath dist\zip
           "PKG_DIR=$((Resolve-Path "dist\zip\benchwarmer-$env:GITHUB_REF_NAME-windows-amd64").Path)" >> $env:GITHUB_ENV
           "MSI_VERSION=$($env:GITHUB_REF_NAME -replace '^v', '')" >> $env:GITHUB_ENV
+      - name: List the release files to sign
+        shell: pwsh
+        run: |
+          $list = (Get-ChildItem -Recurse -File -Path $env:PKG_DIR -Include '*.exe','*.dll' |
+            ForEach-Object { $_.FullName }) -join ','
+          if (-not $list) { throw 'no .exe/.dll found in the unpacked release folder' }
+          "SIGN_FILES=$list" >> $env:GITHUB_ENV
+      # Authenticode before the MSI is built, so the package carries the
+      # signed files. windows-sign verifies every signature it applies.
+      - name: Sign the release binaries (Windows)
+        uses: sentania-labs/.github/.github/actions/windows-sign@a37e4e029c8ebb8f1810c3dd50aa035acecbe1fc # sentania-labs/.github latest merged 2026-10-07
+        with:
+          files: ${{ env.SIGN_FILES }}
+          endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.ARTIFACT_SIGNING_PROFILE }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
       - name: Build MSI
         shell: pwsh
         run: .\packaging\build-msi.ps1 -StageDir $env:PKG_DIR -OutDir dist -Version $env:MSI_VERSION
+      - name: Sign the MSI (Windows)
+        uses: sentania-labs/.github/.github/actions/windows-sign@a37e4e029c8ebb8f1810c3dd50aa035acecbe1fc # sentania-labs/.github latest merged 2026-10-07
+        with:
+          files: ${{ github.workspace }}\dist\benchwarmer-${{ env.MSI_VERSION }}-x64.msi
+          endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.ARTIFACT_SIGNING_PROFILE }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+      - name: Repack the by-hand zip from the signed files
+        shell: pwsh
+        run: |
+          $zip = "dist\benchwarmer-$env:GITHUB_REF_NAME-windows-amd64.zip"
+          Remove-Item $zip -Force
+          Compress-Archive -Path $env:PKG_DIR -DestinationPath $zip
       - name: Smoke test MSI (install, verify, uninstall)
         shell: pwsh
         run: .\packaging\smoke.ps1 -Mode msi -Path "dist\benchwarmer-$env:MSI_VERSION-x64.msi" -LogDir logs\msi
@@ -86,7 +152,11 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-msi
-          path: dist/benchwarmer-*-x64.msi
+          # The signed MSI and the zip rebuilt from the same signed files;
+          # publish ships exactly these two plus SHA256SUMS.
+          path: |
+            dist/benchwarmer-*-x64.msi
+            dist/benchwarmer-*-windows-amd64.zip
           if-no-files-found: error
 
   publish:
@@ -96,7 +166,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        # Only the post-signing file set: the signed MSI and the zip rebuilt
+        # from the same signed files. `zip-unsigned` is an intermediate.
         with:
+          name: release-msi
           path: out
           merge-multiple: true
       - name: Checksums and notes
@@ -119,7 +192,10 @@ jobs:
 
           Use one route per machine. After installing, copy a GGUF model to \`C:\\ProgramData\\Benchwarmer\\models\\\` and choose it in the dashboard (http://127.0.0.1:8481/).
 
-          Unsigned: verify downloads against \`SHA256SUMS\`.
+          Windows binaries are Authenticode signed (the \`.exe\` files, the
+          llama.cpp \`ggml-vulkan.dll\` / \`llama-server.exe\`, and the MSI);
+          the publisher is the org's Azure Artifact Signing profile. Signed:
+          verify downloads against \`SHA256SUMS\`, which covers these files.
           EOF
       - name: Publish (idempotent per tag, never replaces assets)
         env:

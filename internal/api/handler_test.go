@@ -771,3 +771,20 @@ func TestRoutinePollsStayOutOfInfoLog(t *testing.T) {
 		t.Fatalf("want only the remote request at INFO, got:\n%s", logs.String())
 	}
 }
+
+// With no runtime loaded a drain or reload has nothing to act on. That is
+// not a failure, and the answer says when the change takes effect.
+func TestActionWithoutRuntimeIsNotAnError(t *testing.T) {
+	for _, action := range []string{"drain", "reload"} {
+		hr := newHarness(t)
+		hr.be.failWith = ErrRuntimeNotRunning
+		rec := hr.do(req{method: "POST", path: "/api/v1/" + action, token: mgmtTok})
+		var ar ActionResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &ar); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != 200 || ar.Accepted || ar.Action != action || !strings.Contains(ar.Message, "next time it loads") {
+			t.Fatalf("%s while stopped: %d %s", action, rec.Code, rec.Body.String())
+		}
+	}
+}

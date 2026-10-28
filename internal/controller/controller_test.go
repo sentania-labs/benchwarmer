@@ -1211,3 +1211,90 @@ func TestMissingMembershipRetainsRootAndRecordsEvidence(t *testing.T) {
 		t.Fatalf("logged repeated loss %d times", count)
 	}
 }
+
+func TestDrainAndReloadWhileStoppedReportNotRunning(t *testing.T) {
+	r := newRig(t, nil)
+	if err := r.c.RequestReload("test"); !errors.Is(err, api.ErrRuntimeNotRunning) {
+		t.Fatalf("reload while stopped: %v", err)
+	}
+	if err := r.c.RequestDrain("test"); !errors.Is(err, api.ErrRuntimeNotRunning) {
+		t.Fatalf("drain while stopped: %v", err)
+	}
+}
+
+func TestUpdateConfigRefusesMissingModelFile(t *testing.T) {
+	present := map[string]bool{}
+	r := newRigWith(t, nil, func(d *Deps) { d.FileExists = func(p string) bool { return present[p] } })
+	nc := config.Clone(r.cfg)
+	nc.Runtime.ModelPath = `D:\models\nope.gguf`
+	_, err := r.c.UpdateConfig(context.Background(), nc, "test")
+	var ve *config.ValidationError
+	if !errors.As(err, &ve) || len(ve.Errors) != 1 || ve.Errors[0].Field != "runtime.model_path" {
+		t.Fatalf("missing model accepted or wrong error: %v", err)
+	}
+	if got, _ := r.c.Config(); got.Runtime.ModelPath == nc.Runtime.ModelPath {
+		t.Fatal("rejected config was applied")
+	}
+	if _, ok := r.ev.find(events.ConfigRejected); !ok {
+		t.Fatal("no rejection event")
+	}
+
+	present[nc.Runtime.ModelPath] = true
+	if _, err := r.c.UpdateConfig(context.Background(), nc, "test"); err != nil {
+		t.Fatalf("existing model refused: %v", err)
+	}
+
+	// An unrelated change is not blocked by a model that has since gone.
+	delete(present, nc.Runtime.ModelPath)
+	nc2 := config.Clone(nc)
+	nc2.Runtime.ContextSize = 8192
+	if _, err := r.c.UpdateConfig(context.Background(), nc2, "test"); err != nil {
+		t.Fatalf("unrelated change blocked: %v", err)
+	}
+}
+
+func TestStatusReportsConfigProblemUntilSaved(t *testing.T) {
+	r := newRigWith(t, nil, func(d *Deps) {
+		d.ConfigSource, d.ConfigProblem = "last_good", "listen.management: port 18491 is already used by runtime.port"
+	})
+	if s := r.c.Status(); s.ConfigSource != "last_good" || !strings.Contains(s.ConfigProblem, "listen.management") {
+		t.Fatalf("status: %q %q", s.ConfigSource, s.ConfigProblem)
+	}
+	if _, err := r.c.UpdateConfig(context.Background(), config.Clone(r.cfg), "test"); err != nil {
+		t.Fatal(err)
+	}
+	if s := r.c.Status(); s.ConfigSource != "primary" || s.ConfigProblem != "" {
+		t.Fatalf("status after save: %q %q", s.ConfigSource, s.ConfigProblem)
+	}
+}
+
+func TestStatusNextLoadDuringPause(t *testing.T) {
+	r := newRig(t, nil)
+	r.toReady()
+	if _, err := r.c.SetMode(api.ModeRequest{Mode: policy.ModePause, Duration: "1h", SetBy: "ui"}); err != nil {
+		t.Fatal(err)
+	}
+	r.stepUntil(state.Disabled)
+	s := r.c.Status()
+	if s.Timers.NextLoadAt == nil || !s.Timers.NextLoadAt.Equal(*s.Mode.Until) {
+		t.Fatalf("next load %v, want the pause end %v", s.Timers.NextLoadAt, s.Mode.Until)
+	}
+	if !strings.Contains(s.Summary, "next load") {
+		t.Fatalf("summary %q", s.Summary)
+	}
+}
+
+func TestStatusModeOptionsFollowConfig(t *testing.T) {
+	r := newRig(t, nil)
+	nc := config.Clone(r.cfg)
+	nc.Modes.PauseDurations = []config.Duration{config.Duration(15 * time.Minute), config.Duration(90 * time.Minute)}
+	nc.Modes.AIPriorityDurations = []config.Duration{config.Duration(45 * time.Minute)}
+	if _, err := r.c.UpdateConfig(context.Background(), nc, "test"); err != nil {
+		t.Fatal(err)
+	}
+	o := r.c.Status().ModeOptions
+	if len(o.PauseDurations) != 2 || o.PauseDurations[0].D() != 15*time.Minute || o.PauseDurations[1].D() != 90*time.Minute ||
+		len(o.AIPriorityDurations) != 1 || o.AIPriorityDurations[0].D() != 45*time.Minute {
+		t.Fatalf("mode options %+v", o)
+	}
+}

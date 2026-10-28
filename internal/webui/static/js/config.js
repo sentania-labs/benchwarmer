@@ -13,12 +13,13 @@ import { SECTIONS, sectionFor, sectionDefs } from "./configdefs.js";
 // Kept across page visits so unsaved edits survive a trip to the dashboard.
 const st = {
   cfg: null, draft: null, source: "", section: "runtime",
-  errors: new Map(), clientErrors: new Map(), impact: null, message: null, loading: false, setup: null,
+  errors: new Map(), clientErrors: new Map(), impact: null, message: null, loading: false, saving: false, setup: null,
 };
 let els = null;
+let modelChoices = [];
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
-const dirty = () => st.draft && JSON.stringify(st.draft) !== JSON.stringify(st.cfg);
+const dirty = () => st.draft && (JSON.stringify(st.draft) !== JSON.stringify(st.cfg) || (els?.json && st.section === "json" && els.json.ta.value !== JSON.stringify(st.draft, null, 2)));
 
 const ctx = {
   get draft() { return st.draft; },
@@ -39,12 +40,13 @@ export function mount(main, rest) {
   };
   replace(main, h("h1", null, "Configuration"), els.top, els.nav, els.body, els.bar);
   window.addEventListener("beforeunload", beforeUnload);
-  if (!st.draft || !dirty()) load();
+  if (!st.draft || (!dirty() && !st.jsonText)) load();
   else renderAll();
   return {
     title: "Configuration",
     update: (r) => switchSection(r[0]),
     unmount: () => {
+      if (st.section === "json" && els?.json) { st.jsonText = els.json.ta.value; }
       window.removeEventListener("beforeunload", beforeUnload);
       els = null;
     },
@@ -98,6 +100,8 @@ async function loadChoices() {
   st.setup = info;
   updateCompatibility();
   const mib = (b) => Math.round(b / 1048576).toLocaleString() + " MiB";
+  modelChoices = (info.models || []).map((m) => [m.path, m.name + " (" + mib(m.size_bytes) + ")"]);
+  updateModelChoices();
   const lists = {
     "dl-models": (info.models || []).map((m) => [m.path, m.name + " (" + mib(m.size_bytes) + ")"]),
     "dl-runtimes": (info.runtimes || []).map((r) => [r.path, r.name]),
@@ -112,6 +116,15 @@ async function loadChoices() {
     }
     replace(dl, opts.map(([value, label]) => h("option", { value }, label)));
   }
+}
+
+function updateModelChoices() {
+  const picker = document.querySelector('[data-model-picker]');
+  if (!picker || document.activeElement === picker) return;
+  const current = getPath(st.draft, "runtime.model_path") || "";
+  const options = modelChoices.slice();
+  if (!options.some(([v]) => v === current)) options.unshift([current, current ? current + " (custom)" : "Choose an installed model"]);
+  replace(picker, options.map(([value, label]) => h("option", { value, selected: value === current }, label)));
 }
 
 function renderAll() {
@@ -207,13 +220,16 @@ async function restartService() {
 }
 
 function renderNav() {
-  replace(els.nav, h("ul", null, SECTIONS.map((s) => {
+  const item = (s) => {
     const n = [...st.errors.keys(), ...st.clientErrors.keys()].filter((p) => sectionFor(p) === s.key).length;
     return h("li", null, h("a", {
       href: "#/config/" + s.key,
       "aria-current": s.key === st.section ? "page" : null,
     }, s.label, n ? h("span", { class: "count", "aria-label": n + " problems" }, String(n)) : null));
-  })));
+  };
+  replace(els.nav, h("ul", null, SECTIONS.filter(s => !s.advanced).map(item)),
+    h("details", { open: SECTIONS.some(s => s.advanced && s.key === st.section) },
+      h("summary", null, "Advanced"), h("ul", null, SECTIONS.filter(s => s.advanced).map(item))));
 }
 
 function switchSection(key) {
@@ -226,6 +242,7 @@ function switchSection(key) {
   st.section = key;
   appView.query = "";
   appView.gpu = null;
+  if (key !== "json") st.jsonText = null;
   renderNav();
   renderSection();
 }
@@ -246,6 +263,7 @@ function jumpTo(path) {
     const el = document.getElementById(idFor(p)) ||
       document.querySelector("[data-path=\"" + CSS.escape(p) + "\"] input, [data-path=\"" + CSS.escape(p) + "\"] select");
     if (el) {
+      for (let parent = el.parentElement; parent; parent = parent.parentElement) if (parent.tagName === "DETAILS") parent.open = true;
       el.focus();
       el.scrollIntoView({ block: "center" });
       return;
@@ -265,11 +283,16 @@ function renderSection() {
     case "schedules": content = schedulesSection(); break;
     case "applications": content = applicationsSection(); break;
     case "json": content = jsonSection(); break;
-    default: content = sectionDefs(st.section).map((g) => group(g));
+    default: {
+      const defs = sectionDefs(st.section);
+      content = [defs.filter(g => !g.advanced).map(group),
+        defs.some(g => g.advanced) && h("details", null, h("summary", null, "Advanced settings"), defs.filter(g => g.advanced).map(group))];
+    }
   }
   replace(els.body, h("h2", null, sec.label), sec.intro && h("p", { class: "intro" }, sec.intro),
     st.section === "runtime" ? h("div", { id: "compatibility-guidance", class: "notice info", role: "status", "aria-live": "polite" }) : null, content);
   updateCompatibility();
+  updateModelChoices();
 }
 
 function updateCompatibility() {
@@ -316,10 +339,8 @@ function profilesSection() {
   return [
     h("fieldset", { class: "group" }, h("legend", null, "Which profile applies"),
       h("div", { class: "fields" },
-        field(ctx, { path: "default_profile", label: "Default profile", type: "select", options: opts,
-          help: "Applies whenever no schedule is active." }),
-        field(ctx, { path: "ai_priority_profile", label: "AI Priority profile", type: "select", options: opts,
-          help: "Applies while AI Priority mode is on. Safety limits, critical contention and confirmed gaming still win." }))),
+        profilePicker("default_profile", "Default profile", opts, "Applies whenever no schedule is active."),
+        profilePicker("ai_priority_profile", "AI Priority profile", opts, "Overrides schedules while AI Priority is on. Safety limits, critical contention and confirmed gaming still win."))),
     names.map((n) => {
       const used = [st.draft.default_profile === n && "default", st.draft.ai_priority_profile === n && "AI Priority",
         ...(st.draft.schedules || []).filter((s) => s.profile === n).map((s) => "schedule " + s.name)].filter(Boolean);
@@ -359,6 +380,23 @@ function zoneList() {
   return h("datalist", { id: "tz-list" }, zones.map((z) => h("option", { value: z })));
 }
 
+function profileSummary(profile) {
+  if (!profile) return "Profile is unavailable.";
+  const yes = (v) => v ? "yes" : "no";
+  return [profile.description || "No description.",
+    "Grace " + profile.grace + "; under pressure " + profile.grace_under_pressure + "; cooldown " + profile.cooldown + ".",
+    "Drain on game process: " + yes(profile.drain_on_game_process) + "; ambiguous signals: " + yes(profile.drain_on_ambiguous) + "; soft contention: " + yes(profile.drain_on_soft_contention) + ".",
+    "Soft GPU " + profile.external_util_soft_pct + "%, VRAM " + profile.external_vram_soft_mib + " MiB for " + profile.soft_window + "; game confirmation " + profile.game_confirm_util_pct + "% or " + profile.game_confirm_vram_mib + " MiB.",
+  ].join(" ");
+}
+
+function profilePicker(path, label, opts, help) {
+  const picker = field(ctx, { path, label, type: "select", options: opts, help });
+  const preview = h("p", { class: "help", "aria-live": "polite" }, profileSummary(st.draft.profiles?.[getPath(st.draft, path)]));
+  picker.querySelector("select").addEventListener("change", () => { preview.textContent = profileSummary(st.draft.profiles?.[getPath(st.draft, path)]); });
+  return h("div", null, picker, preview);
+}
+
 function schedulesSection() {
   const list = st.draft.schedules || (st.draft.schedules = []);
   const opts = Object.keys(st.draft.profiles || {}).sort().map((n) => [n, titleize(n)]);
@@ -394,7 +432,7 @@ function schedulesSection() {
         errorSlot(ctx, p),
         h("div", { class: "fields" },
           field(ctx, { path: p + ".name", label: "Name" }),
-          field(ctx, { path: p + ".profile", label: "Profile", type: "select", options: opts }),
+          profilePicker(p + ".profile", "Profile", opts, "Used during this schedule in normal mode. Pause stops AI; AI Priority uses its own profile. Safety limits and critical contention always win."),
           h("fieldset", { class: "field days", dataset: { path: p + ".days" } },
             h("legend", null, "Days"), h("div", { class: "day-row" }, dayBoxes), errorSlot(ctx, p + ".days")),
           field(ctx, { path: p + ".start", label: "Start", type: "time", help: "Local time in the schedule time zone." }),
@@ -557,7 +595,7 @@ function applicationsSection() {
 
 function jsonSection() {
   const ta = h("textarea", { id: "config-json", class: "json", rows: 30, spellcheck: "false",
-    "aria-describedby": "config-json-help config-json-err", value: JSON.stringify(st.draft, null, 2) });
+    "aria-describedby": "config-json-help config-json-err", value: st.jsonText ?? JSON.stringify(st.draft, null, 2), oninput: () => { st.jsonText = ta.value; syncSaveBar(); } });
   const err = h("p", { class: "field-error", id: "config-json-err", hidden: true });
   els.json = { ta, err };
   return [
@@ -566,7 +604,7 @@ function jsonSection() {
     ta, err,
     h("div", { class: "row-actions" },
       h("button", { type: "button", onclick: () => { if (applyJSON()) err.textContent = ""; } }, "Apply to draft"),
-      h("button", { type: "button", onclick: () => { ta.value = JSON.stringify(st.draft, null, 2); err.hidden = true; } }, "Reset from draft")),
+      h("button", { type: "button", onclick: () => { ta.value = JSON.stringify(st.draft, null, 2); st.jsonText = null; err.hidden = true; syncSaveBar(); } }, "Reset from draft")),
   ];
 }
 
@@ -577,6 +615,7 @@ function applyJSON() {
     const v = JSON.parse(ta.value);
     if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("the top level must be an object");
     st.draft = v;
+    st.jsonText = null;
     err.hidden = true;
     ctx.changed();
     return true;
@@ -593,15 +632,20 @@ function applyJSON() {
 function syncSaveBar() {
   if (!els) return;
   const d = dirty();
-  replace(els.bar,
-    h("span", { class: "savestate", role: "status" }, d ? "Unsaved changes" : "No unsaved changes"),
-    h("button", { type: "button", disabled: !d, onclick: discard }, "Discard"),
-    h("button", { type: "button", class: "primary", onclick: save }, "Save configuration"));
+  if (!els.saveState) {
+    els.saveState = h("span", { class: "savestate", role: "status" });
+    els.discard = h("button", { type: "button", onclick: discard }, "Discard");
+    els.save = h("button", { type: "button", class: "primary", onclick: save }, "Save configuration");
+    replace(els.bar, els.saveState, els.discard, els.save);
+  }
+  els.saveState.textContent = d ? "Unsaved changes" : "No unsaved changes";
+  els.discard.disabled = !d;
 }
 
 function discard() {
   if (!window.confirm("Discard all unsaved changes?")) return;
   st.draft = clone(st.cfg);
+  st.jsonText = null;
   st.errors.clear();
   st.clientErrors.clear();
   st.message = null;
@@ -609,7 +653,7 @@ function discard() {
 }
 
 async function save() {
-  if (!applyJSON()) return;
+  if (st.saving || !applyJSON()) return;
   st.message = null;
   if (st.clientErrors.size) {
     renderTop();
@@ -617,10 +661,13 @@ async function save() {
     focusSummary();
     return;
   }
+  const submitted = clone(st.draft);
+  st.saving = true;
   try {
-    const res = await put("api/v1/config", st.draft);
+    const res = await put("api/v1/config", submitted);
+    const unchanged = JSON.stringify(st.draft) === JSON.stringify(submitted) && !(st.section === "json" && els?.json && els.json.ta.value !== JSON.stringify(submitted, null, 2));
     st.cfg = res.config;
-    st.draft = clone(res.config);
+    if (unchanged) st.draft = clone(res.config);
     st.source = res.source || st.source;
     st.errors.clear();
     st.impact = { ...(res.impact || { changed: [] }), at: new Date() };
@@ -633,9 +680,10 @@ async function save() {
       st.message = "Save failed: " + e.message;
     }
   }
-  renderAll();
+  st.saving = false;
+  // Never replace the editor or move focus when a response arrives.
+  if (els) { renderTop(); if (st.errors.size) renderNav(); syncSaveBar(); }
   if (st.errors.size) focusSummary();
-  else if (els) els.top.scrollIntoView({ block: "start" });
 }
 
 function focusSummary() {

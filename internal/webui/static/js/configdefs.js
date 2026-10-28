@@ -1,17 +1,19 @@
 // Field definitions for the structured configuration forms. Paths and help
 // text follow internal/config/config.go.
 
+// Owner sections come first; the rest sit under one "Advanced" heading in
+// the section navigation. Keys are also the #/config/<key> routes.
 export const SECTIONS = [
-  { key: "runtime", label: "Runtime", intro: "The managed llama-server process. Most changes here need a runtime reload." },
-  { key: "network", label: "Network and security", intro: "Listeners and credentials. Changes here need a service restart." },
-  { key: "profiles", label: "Profiles", intro: "Tunable policy for a period of time. Hard safety limits and critical contention live under Thresholds and always win." },
-  { key: "thresholds", label: "Thresholds", intro: "Hard limits that apply in every profile and mode, and GPU sampling." },
-  { key: "schedules", label: "Schedules", intro: "Which profile applies when. Outside every schedule the default profile applies." },
+  { key: "runtime", label: "Runtime", intro: "The AI model and the llama-server program that runs it. Most changes here need a runtime reload." },
+  { key: "schedules", label: "Schedules", intro: "Which profile applies when, for example school hours. Outside every schedule the default profile applies." },
+  { key: "profiles", label: "Profiles", intro: "How readily AI steps aside for you. Each schedule, and AI Priority mode, picks one of these." },
   { key: "applications", label: "Applications", intro: "How running processes are classified." },
-  { key: "behavior", label: "Reload and recovery", intro: "How long Benchwarmer waits before loading again after trouble." },
   { key: "modes", label: "Manual modes", intro: "Duration choices for Pause AI and AI Priority." },
-  { key: "system", label: "Retention and logging", intro: "Event history, logs, and metrics." },
-  { key: "json", label: "Advanced JSON", intro: "Edit the whole configuration as JSON." },
+  { key: "network", label: "Network and security", intro: "Listeners and credentials. Changes here need a service restart." },
+  { key: "thresholds", label: "Thresholds", advanced: true, intro: "Hard limits that apply in every profile and mode, and GPU sampling." },
+  { key: "behavior", label: "Reload and recovery", advanced: true, intro: "How long Benchwarmer waits before loading again after trouble." },
+  { key: "system", label: "Retention and logging", advanced: true, intro: "Event history, logs, and metrics." },
+  { key: "json", label: "Advanced JSON", advanced: true, intro: "Edit the whole configuration as JSON." },
 ];
 
 const SECTION_OF = {
@@ -31,23 +33,28 @@ export function sectionFor(path) {
 
 const D = "duration";
 
+// Groups marked advanced: true render inside the section's single
+// "Advanced settings" disclosure, after the owner settings.
+
 function runtime() {
   return [
     { title: "Program and model", fields: [
-      { path: "runtime.model_path", label: "Model file", list: "dl-models",
-        help: "A .gguf model. Copy models into the models folder (C:\\ProgramData\\Benchwarmer\\models) and pick one from the suggestions, or type an absolute path." },
+      { path: "runtime.model_path", label: "Model file", type: "model", help: "Choose an installed model. To use another path, open Advanced settings." },
       { path: "runtime.executable", label: "llama-server executable", list: "dl-runtimes",
         help: "The build installed with Benchwarmer is suggested (C:\\Program Files\\Benchwarmer\\runtime\\vulkan\\llama-server.exe). Any absolute path works." },
-      { path: "runtime.args", label: "Extra arguments", type: "lines",
-        help: "One argument per line. Benchwarmer sets -m, --host, --port, -c and -ngl itself, so leave those out. Values shown as <redacted> are secrets: leave them unchanged to keep the stored value." },
       { path: "runtime.context_size", label: "Context size", type: "int", unit: "tokens", min: 256 },
       { path: "runtime.gpu_layers", label: "GPU layers", type: "int", min: 0, max: 9999, help: "Layers to offload to the GPU. 999 means all." },
     ] },
-    { title: "Private runtime listener", note: "llama-server listens only on loopback; clients reach it through the Benchwarmer proxy.", fields: [
+    { title: "Custom model and arguments", advanced: true, fields: [
+      { path: "runtime.model_path", id: "custom-model-path", label: "Custom model path", help: "Enter an absolute path to a .gguf model." },
+      { path: "runtime.args", label: "Extra arguments", type: "argv",
+        help: "Passed to llama-server in this order. Put a flag such as -np in the first box and its value, if it takes one, in the second. Benchwarmer sets -m, --host, --port, -c and -ngl itself, so leave those out. Values shown as <redacted> are secrets: leave them unchanged to keep the stored value." },
+    ] },
+    { title: "Private runtime listener", advanced: true, note: "llama-server listens only on loopback; clients reach it through the Benchwarmer proxy.", fields: [
       { path: "runtime.host", label: "Host", help: "Must be a loopback address such as 127.0.0.1." },
       { path: "runtime.port", label: "Port", type: "int", min: 1, max: 65535 },
     ] },
-    { title: "Process handling", note: "These apply live without a reload, except the stop settings, which take effect at the next model load.", fields: [
+    { title: "Process handling", advanced: true, note: "These apply live without a reload, except the stop settings, which take effect at the next model load.", fields: [
       { path: "runtime.stop_mode", label: "How to stop the runtime", type: "select", options: [["graceful", "Graceful (Ctrl+C, kill only if it hangs)"], ["kill", "Hard kill"]],
         help: "Graceful is strongly recommended: on AMD hardware a hard kill of a long-running runtime can hang the GPU driver." },
       { path: "runtime.graceful_stop_timeout", label: "Graceful stop timeout", type: D, help: "How long to wait after Ctrl+C before a hard kill." },
@@ -64,13 +71,13 @@ function runtime() {
 
 function network() {
   return [
-    { title: "Listeners", note: "host:port. An empty host listens on all interfaces.", fields: [
+    { title: "Listeners", note: "host:port. An empty host listens on all interfaces. An inference listener that is not on loopback needs HTTPS, under Advanced settings.", fields: [
       { path: "listen.inference", label: "Inference (OpenAI-compatible /v1)", help: "The only listener meant for LAN exposure." },
       { path: "listen.management", label: "Management (this UI, /api/v1, /metrics)", help: "Keep on 127.0.0.1 unless you need remote management; remote access always needs the token." },
     ] },
-    { title: "Inference HTTPS", note: "Required when the inference listener is not on loopback. Use a certificate from your CA in the computer's certificate store (LocalMachine\\My, where AD CS enrollment and a PFX import put it; the key must be in a Key Storage Provider), or PEM files. Set a store selection or files, not both. Renewals are picked up automatically. Changes here need a service restart.", fields: [
+    { title: "Inference HTTPS", advanced: true, note: "Required when the inference listener is not on loopback. Use a certificate from your CA in the computer's certificate store (LocalMachine\\My, where AD CS enrollment and a PFX import put it; the key must be in a Key Storage Provider), or PEM files. Set a store selection or files, not both. Renewals are picked up automatically. Changes here need a service restart.", fields: [
       { path: "listen.inference_tls.enabled", label: "Serve inference over HTTPS", type: "bool" },
-      { path: "listen.inference_tls.store_subject", label: "Certificate store: DNS name or subject", list: "dl-cert-names", help: "For example ss8510.example.lan. The newest valid certificate for that name with a private key and server authentication is used, so autoenrollment renewals need no change." },
+      { path: "listen.inference_tls.store_subject", label: "Certificate store: DNS name or subject", list: "dl-cert-names", help: "For example ai.example.test. The newest valid certificate for that name with a private key and server authentication is used, so autoenrollment renewals need no change." },
       { path: "listen.inference_tls.store_thumbprint", label: "Certificate store: thumbprint", list: "dl-certs", help: "Pins one certificate (40 hex characters). Use instead of the name; a renewal then needs the new thumbprint." },
       { path: "listen.inference_tls.cert_file", label: "Certificate file (PEM)", help: "Chain with the server certificate first. Relative paths are inside the data folder." },
       { path: "listen.inference_tls.key_file", label: "Private key file (PEM)" },
@@ -78,13 +85,15 @@ function network() {
         help: "Used only when no store selection or file is set. Clients will not trust it unless told to." },
       { path: "listen.inference_tls.self_signed_hosts", label: "Extra names for the self-signed certificate", type: "lines", help: "One DNS name or IP per line." },
     ] },
-    { title: "Authentication", note: "Token values are never shown or edited here. These are file locations on the PC; rotate a token by replacing its file.", fields: [
+    { title: "Who needs a token", fields: [
       { path: "security.loopback_trust", label: "Allow read-only access from this PC without a token", type: "bool",
         help: "Changes always need the management token, even from this PC." },
+      { path: "security.require_inference_token", label: "Require the inference token from loopback clients too", type: "bool" },
+    ] },
+    { title: "Token files", advanced: true, note: "Token values are never shown or edited here. These are file locations on the PC; rotate a token by replacing its file.", fields: [
       { path: "security.management_token_file", label: "Management token file" },
       { path: "security.inference_token_file", label: "Inference token file" },
       { path: "security.agent_token_file", label: "Session agent token file" },
-      { path: "security.require_inference_token", label: "Require the inference token from loopback clients too", type: "bool" },
     ] },
   ];
 }

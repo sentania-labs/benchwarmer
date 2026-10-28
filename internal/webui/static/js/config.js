@@ -25,7 +25,7 @@ const ctx = {
   get draft() { return st.draft; },
   errors: st.errors,
   clientErrors: st.clientErrors,
-  changed: () => { syncSaveBar(); updateCompatibility(); },
+  changed: () => { syncSaveBar(); updateCompatibility(); if (els) refreshProfilePreviews(st.draft, els.body); },
   modelPathChanged: () => updateModelChoices(),
 };
 
@@ -391,10 +391,17 @@ function profileSummary(profile) {
   ].join(" ");
 }
 
+export function refreshProfilePreviews(draft, root) {
+  for (const preview of root.querySelectorAll("[data-profile-preview]")) {
+    const name = getPath(draft, preview.dataset.profilePreview);
+    const text = profileSummary(draft.profiles?.[name]);
+    if (preview.textContent !== text) preview.textContent = text;
+  }
+}
+
 function profilePicker(path, label, opts, help) {
   const picker = field(ctx, { path, label, type: "select", options: opts, help });
-  const preview = h("p", { class: "help", "aria-live": "polite" }, profileSummary(st.draft.profiles?.[getPath(st.draft, path)]));
-  picker.querySelector("select").addEventListener("change", () => { preview.textContent = profileSummary(st.draft.profiles?.[getPath(st.draft, path)]); });
+  const preview = h("p", { class: "help", dataset: { profilePreview: path } }, profileSummary(st.draft.profiles?.[getPath(st.draft, path)]));
   return h("div", null, picker, preview);
 }
 

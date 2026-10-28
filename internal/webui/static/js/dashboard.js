@@ -7,7 +7,7 @@ import { adoptsOptions, defaultDuration, durationChoices, modeKey, followsServer
 import {
   clockTime, configNotice, countdown, describeDurationChoice, eventKind, KIND_LABELS,
   eventStateText, humanDuration, mib, pct, parseTime, profileSource, titleize,
-  MODE_LABELS, stateLabel,
+  MODE_LABELS,
 } from "./format.js";
 
 const POLL_MS = 2000;

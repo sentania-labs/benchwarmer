@@ -10,15 +10,16 @@ import { get, put, post, signIn, ApiError } from "./api.js";
 import { clockTime, titleize } from "./format.js";
 import { field, fields, getPath, idFor, errorSlot, refreshErrors } from "./fields.js";
 import { SECTIONS, sectionFor, sectionDefs } from "./configdefs.js";
+import { modelGroup, resetModelPicker } from "./modelpicker.js";
 
 // Kept across page visits so unsaved edits survive a trip to the dashboard.
 const st = {
   cfg: null, draft: null, source: "", section: "runtime",
   errors: new Map(), clientErrors: new Map(), impact: null, message: null, loading: false, saving: false, setup: null,
 };
+let picker = null;
 let els = null;
 let unmountHistory = null;
-let modelChoices = [];
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const dirty = () => st.draft && (JSON.stringify(st.draft) !== JSON.stringify(st.cfg) || st.jsonText != null);
@@ -28,7 +29,6 @@ const ctx = {
   errors: st.errors,
   clientErrors: st.clientErrors,
   changed: () => { syncSaveBar(); updateCompatibility(); if (els) refreshProfilePreviews(st.draft, els.body); },
-  modelPathChanged: () => updateModelChoices(),
 };
 
 export function mount(main, rest) {
@@ -44,6 +44,7 @@ export function mount(main, rest) {
   };
   replace(main, h("h1", null, "Configuration"), els.top, els.nav, els.body, els.bar);
   window.addEventListener("beforeunload", beforeUnload);
+  els.body.addEventListener("change", (e) => picker && picker.onCustom(e));
   if (!st.draft || !dirty()) load();
   else renderAll();
   return {
@@ -75,6 +76,7 @@ async function load() {
     st.source = res.source || "";
     st.errors.clear();
     st.clientErrors.clear();
+    resetModelPicker();
     loadChoices();
   } catch (e) {
     st.loading = false;
@@ -104,9 +106,8 @@ async function loadChoices() {
   }
   st.setup = info;
   updateCompatibility();
+  if (picker) picker.updateSelect();
   const mib = (b) => Math.round(b / 1048576).toLocaleString() + " MiB";
-  modelChoices = (info.models || []).map((m) => [m.path, m.name + " (" + mib(m.size_bytes) + ")"]);
-  updateModelChoices();
   const lists = {
     "dl-models": (info.models || []).map((m) => [m.path, m.name + " (" + mib(m.size_bytes) + ")"]),
     "dl-runtimes": (info.runtimes || []).map((r) => [r.path, r.name]),
@@ -121,15 +122,6 @@ async function loadChoices() {
     }
     replace(dl, opts.map(([value, label]) => h("option", { value }, label)));
   }
-}
-
-function updateModelChoices() {
-  const picker = document.querySelector('[data-model-picker]');
-  if (!picker || document.activeElement === picker) return;
-  const current = getPath(st.draft, "runtime.model_path") || "";
-  const options = modelChoices.slice();
-  if (!options.some(([v]) => v === current)) options.unshift([current, current ? current + " (custom)" : "Choose an installed model"]);
-  replace(picker, options.map(([value, label]) => h("option", { value, selected: value === current }, label)));
 }
 
 function renderAll() {
@@ -311,7 +303,6 @@ function renderSection() {
     },
   });
   updateCompatibility();
-  updateModelChoices();
 }
 
 function updateCompatibility() {
@@ -325,6 +316,10 @@ function updateCompatibility() {
 }
 
 function group(g) {
+  if (g.picker) {
+    picker = modelGroup({ ctx, setup: () => st.setup, rerender: renderSection });
+    return picker.el;
+  }
   return h("fieldset", { class: "group" }, h("legend", null, g.title), g.note && h("p", { class: "help" }, g.note),
     h("div", { class: "fields" }, fields(ctx, g.fields)));
 }
@@ -675,6 +670,7 @@ function discard() {
   st.errors.clear();
   st.clientErrors.clear();
   st.message = null;
+  resetModelPicker();
   renderAll();
 }
 

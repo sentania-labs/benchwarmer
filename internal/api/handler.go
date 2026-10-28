@@ -52,6 +52,9 @@ type Options struct {
 	SignIn *SignIn
 	// Setup answers GET /api/v1/setup; nil answers 404.
 	Setup func() SetupInfo
+	// InspectModel answers GET /api/v1/setup/model (path, optional current
+	// context size); nil answers 404. It reads only the file header.
+	InspectModel func(path string, currentContext int) ModelInspection
 	// Restart restarts the service (POST /api/v1/service/restart); nil
 	// answers 404.
 	Restart func() error
@@ -98,6 +101,7 @@ func New(o Options) http.Handler {
 		"/api/v1/reload":          {"POST": {AccessWrite, false, maxSmallBody, h.reload}},
 		"/api/v1/agent/report":    {"POST": {AccessWrite, true, maxSmallBody, h.agentReport}},
 		"/api/v1/setup":           {"GET": {AccessRead, false, 0, h.setup}},
+		"/api/v1/setup/model":     {"GET": {AccessRead, false, 0, h.inspectModel}},
 		"/api/v1/service/restart": {"POST": {AccessWrite, false, maxSmallBody, h.restart}},
 		"/api/v1/signin/codes":    {"POST": {AccessWrite, false, maxSmallBody, h.registerSignIn}},
 		"/api/v1/signin/redeem":   {"POST": {AccessLocal, false, maxSmallBody, h.redeemSignIn}},

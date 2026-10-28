@@ -161,6 +161,9 @@ func newHarness(t *testing.T) *harness {
 		Metrics: metrics, Version: "test",
 		Logger: slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		SignIn: signIn,
+		InspectModel: func(path string, ctx int) ModelInspection {
+			return ModelInspection{Path: path, Status: InspectOK, GPUTotalMiB: ctx}
+		},
 		Setup: func() SetupInfo {
 			return SetupInfo{DataDir: `C:\ProgramData\Benchwarmer`, Models: []ModelFile{{Name: "m.gguf", Path: `C:\ProgramData\Benchwarmer\models\m.gguf`}}}
 		},

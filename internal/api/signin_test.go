@@ -117,3 +117,24 @@ func TestRestartEndpoint(t *testing.T) {
 		t.Fatalf("restart without a restarter: %d", rec.Code)
 	}
 }
+
+func TestInspectModelEndpoint(t *testing.T) {
+	hr := newHarness(t)
+	var got ModelInspection
+	rec := hr.do(req{method: "GET", path: "/api/v1/setup/model?path=C%3A%5Cm.gguf&context=4096"})
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil || got.Path != `C:\m.gguf` || got.GPUTotalMiB != 4096 {
+		t.Fatalf("inspect: %d %s", rec.Code, rec.Body)
+	}
+	for _, bad := range []string{"/api/v1/setup/model", "/api/v1/setup/model?path=", "/api/v1/setup/model?path=a&context=-1",
+		"/api/v1/setup/model?path=a&context=x", "/api/v1/setup/model?path=" + strings.Repeat("a", maxInspectPath+1)} {
+		if rec := hr.do(req{method: "GET", path: bad}); rec.Code != http.StatusBadRequest {
+			t.Errorf("%.60s: %d", bad, rec.Code)
+		}
+	}
+	if rec := hr.do(req{method: "GET", path: "/api/v1/setup/model?path=a", peer: remote}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("remote without token: %d", rec.Code)
+	}
+	if rec := hr.do(req{method: "POST", path: "/api/v1/setup/model?path=a", token: mgmtTok}); rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST: %d", rec.Code)
+	}
+}

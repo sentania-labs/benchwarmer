@@ -1356,6 +1356,31 @@ func TestUntilTomorrowEndsAtEightLocalAcrossDST(t *testing.T) {
 	}
 }
 
+func TestUntilTomorrowEndsPauseAtEightAndAIFirstAtMidnight(t *testing.T) {
+	r := newRigWith(t, nil, func(d *Deps) {
+		d.Config.Timezone = "America/Chicago"
+	})
+	now := r.clk.Now()
+	pause, err := r.c.SetMode(api.ModeRequest{Mode: policy.ModePause, Duration: "until_tomorrow", SetBy: "ui"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 9, 24, 8, 0, 0, 0, chicago); pause.Until == nil || !pause.Until.Equal(want) {
+		t.Errorf("pause until %v, want %s", pause.Until, want)
+	}
+	ai, err := r.c.SetMode(api.ModeRequest{Mode: policy.ModeAIPriority, Duration: "until_tomorrow", SetBy: "ui"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 9, 24, 0, 0, 0, 0, chicago)
+	if limit := now.Add(r.cfg.Modes.MaxAIPriority.D()); limit.Before(want) {
+		want = limit
+	}
+	if ai.Until == nil || !ai.Until.Equal(want) {
+		t.Errorf("ai priority until %v, want %s", ai.Until, want)
+	}
+}
+
 func TestStatusOwnerFollowsPauseAndOffersTomorrow(t *testing.T) {
 	r := newRig(t, nil)
 	r.toReady()

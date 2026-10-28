@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ownerView, quickChoices, appliedText } from './static/js/owner.js';
+import { describeDurationChoice } from './static/js/format.js';
 
 const NOW = new Date('2026-09-24T19:46:00');
 const iso = (mins) => new Date(NOW.getTime() + mins * 60000).toISOString();
@@ -151,4 +152,13 @@ test('memory the card never had is a problem with a way forward, not a wait', ()
   assert.equal(v.severity, 'problem');
   assert.match(v.headline, /can never load/);
   assert.equal(v.action.href, '#/config/runtime');
+});
+
+test('the until tomorrow choice names its time only for pause', () => {
+  const tomorrow = new Date('2026-09-25T08:00:00').toISOString();
+  assert.match(describeDurationChoice('until_tomorrow', tomorrow, NOW), /^Until .*8:00/);
+  assert.equal(describeDurationChoice('until_tomorrow'), 'Until tomorrow');
+  assert.equal(describeDurationChoice('until_tomorrow', 'not a time'), 'Until tomorrow');
+  assert.equal(describeDurationChoice('1h0m0s', tomorrow, NOW), '1 h');
+  assert.equal(appliedText('ai_priority', 'until_tomorrow', tomorrow, NOW), 'AI first on until tomorrow.');
 });

@@ -173,8 +173,9 @@ export function quickChoices(mode, options, untilTomorrowAt, now = new Date()) {
   const o = options || {};
   const timed = (mode === "pause" ? o.pause_durations : o.ai_priority_durations) || [];
   const out = timed.slice(0, 3).map((d) => ({ label: describeDurationChoice(String(d)), duration: String(d) }));
-  const t = parseTime(untilTomorrowAt);
-  if (mode === "pause" && t) out.push({ label: "Until " + clockTime(t, now), duration: "until_tomorrow" });
+  if (mode === "pause" && parseTime(untilTomorrowAt)) {
+    out.push({ label: describeDurationChoice("until_tomorrow", untilTomorrowAt, now), duration: "until_tomorrow" });
+  }
   return out;
 }
 
@@ -183,7 +184,7 @@ export function appliedText(mode, duration, untilTomorrowAt, now = new Date()) {
   if (mode === "auto") return "Back to normal.";
   const what = mode === "pause" ? "AI paused" : "AI first on";
   if (duration === "until_tomorrow") {
-    const t = parseTime(untilTomorrowAt);
+    const t = mode === "pause" ? parseTime(untilTomorrowAt) : null;
     return what + (t ? " until " + clockTime(t, now) : " until tomorrow") + ".";
   }
   if (duration === "until_reboot") return what + " until the PC restarts.";

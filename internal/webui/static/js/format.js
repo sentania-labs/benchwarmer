@@ -166,10 +166,14 @@ export function profileSource(src) {
 
 export const MODE_LABELS = { auto: "Auto", pause: "Pause AI", ai_priority: "AI Priority" };
 
-// describeDurationChoice labels a PUT /mode duration value.
-export function describeDurationChoice(v) {
+// describeDurationChoice labels a PUT /mode duration value. Given the time
+// "until_tomorrow" would really end, it names that time.
+export function describeDurationChoice(v, untilTomorrowAt, now) {
   if (v === "") return "Indefinitely";
-  if (v === "until_tomorrow") return "Until tomorrow";
+  if (v === "until_tomorrow") {
+    const t = parseTime(untilTomorrowAt);
+    return t ? "Until " + clockTime(t, now) : "Until tomorrow";
+  }
   if (v === "until_reboot") return "Until reboot";
   const ms = parseGoDuration(v);
   return ms == null ? v : humanDuration(ms);

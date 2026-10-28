@@ -50,7 +50,10 @@ func (c *Controller) SetMode(req api.ModeRequest) (api.ModeStatus, error) {
 				m.Until = &u
 			}
 		case "until_tomorrow":
-			u := nextLocalMorning(now, c.cfg.Timezone)
+			u := nextLocalMidnight(now, c.cfg.Timezone)
+			if req.Mode == policy.ModePause {
+				u = nextLocalMorning(now, c.cfg.Timezone)
+			}
 			m.Until = &u
 		default:
 			d, err := time.ParseDuration(req.Duration)
@@ -85,7 +88,16 @@ func (c *Controller) SetMode(req api.ModeRequest) (api.ModeStatus, error) {
 	return api.ModeStatus{Mode: m.Mode, Until: m.Until, SetBy: m.SetBy, SetAt: now}, nil
 }
 
-// untilTomorrowHour is when "until tomorrow" ends: the start of the next
+func nextLocalMidnight(now time.Time, tz string) time.Time {
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		loc = time.Local
+	}
+	l := now.In(loc)
+	return time.Date(l.Year(), l.Month(), l.Day()+1, 0, 0, 0, 0, loc)
+}
+
+// untilTomorrowHour is when a pause's "until tomorrow" ends: the start of the next
 // day's usual hours, not midnight, so an evening pause does not hand the GPU
 // back while the household is still asleep or at work.
 const untilTomorrowHour = 8

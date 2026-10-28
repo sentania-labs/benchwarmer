@@ -356,11 +356,13 @@ function buildControls() {
   let quickOptions = null;
   let untilTomorrowAt = null;
   const quickRows = h("div", { class: "quick" });
-  const normalBtn = h("button", { type: "button", class: "quick-btn", onclick: () => quick("auto", "") }, "Back to normal");
+  const normalBtn = h("button", { type: "button", class: "quick-btn", onclick: () => {
+    if (normalBtn.getAttribute("aria-disabled") !== "true") quick("auto", "");
+  } }, "Back to normal");
 
   // quick is the one-click path: the same PUT as the form below, the same
-  // authentication. It uses aria-disabled while in flight, not disabled, so
-  // focus stays on the button that was pressed.
+  // authentication. It ignores clicks while one is in flight rather than
+  // disabling the buttons, so focus stays on the button that was pressed.
   async function quick(mode, duration) {
     if (busy) return;
     busy = true;
@@ -391,7 +393,6 @@ function buildControls() {
     if (key === quickKey || quickRows.contains(document.activeElement)) return;
     quickKey = key;
     quickOptions = st.mode_options;
-    untilTomorrowAt = st.mode_options && st.mode_options.until_tomorrow_at;
     replace(quickRows,
       quickGroup("pause", "Pause AI"),
       quickGroup("ai_priority", "AI first for"));
@@ -427,8 +428,15 @@ function buildControls() {
     const opts = durationChoices(m, options);
     // The seed fill runs before any options arrive; its value is not a choice.
     const prev = haveOptions ? durSel.value : null;
-    replace(durSel, opts.map((v) => h("option", { value: v }, describeDurationChoice(v))));
+    replace(durSel, opts.map((v) => h("option", { value: v })));
+    labelDurations();
     durSel.value = opts.includes(prev) ? prev : defaultDuration(m, options);
+  }
+  // labelDurations words each choice; only a pause's "until tomorrow" ends
+  // at the time the service reports, so only it names a time.
+  function labelDurations() {
+    const tomorrow = selected() === "pause" ? untilTomorrowAt : null;
+    for (const o of durSel.options) o.textContent = describeDurationChoice(o.value, tomorrow, new Date(serverNow()));
   }
   async function onApply(e) {
     e.preventDefault();
@@ -463,6 +471,7 @@ function buildControls() {
   // form the visitor is part-way through, and only checks a radio, so focus
   // stays where it is.
   el.sync = (st) => {
+    untilTomorrowAt = st.mode_options && st.mode_options.until_tomorrow_at;
     const dirty = formState() !== baseline;
     // Configured durations are not applied under an edit in progress: the
     // select would be rebuilt and the visitor's choice changed. They are
@@ -483,6 +492,7 @@ function buildControls() {
       baseline = formState();
     }
     haveOptions = true;
+    labelDurations();
     renderQuick(st);
     normalBtn.setAttribute("aria-disabled", m.mode && m.mode !== "auto" ? "false" : "true");
     normalBtn.classList.toggle("is-current", !(m.mode && m.mode !== "auto"));

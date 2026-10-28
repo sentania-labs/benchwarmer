@@ -140,8 +140,10 @@ paths:
         returned as `"<redacted>"` by `GET` may be sent back unchanged and
         keep their stored secret, so a client can round-trip what it read.
         The config is validated, persisted atomically, applied, and audited.
-        The response reports whether the change needs a runtime reload or a
-        service restart.
+        A changed model file that is missing, not a regular file, or
+        inaccessible is rejected; one whose availability cannot be
+        determined is accepted with a `warnings` entry. The response reports
+        whether the change needs a runtime reload or a service restart.
       requestBody:
         required: true
         content:
@@ -149,7 +151,7 @@ paths:
             schema: { $ref: "#/components/schemas/Config" }
       responses:
         "200":
-          description: Applied. Config is redacted; `impact` is present.
+          description: Applied. Config is redacted; `impact` is present, and `warnings` lists problems that did not block saving.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ConfigResponse" }
@@ -226,6 +228,38 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Rejected" }
+
+  /api/v1/config/validate:
+    post:
+      tags: [config]
+      operationId: validateConfig
+      summary: Check a proposed configuration without saving it.
+      description: |
+        Management token only, like saving, because it checks whether the
+        proposed model file exists as the service account. Uses the same
+        rules as saving and never changes the configuration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Config" }
+      responses:
+        "200":
+          description: Configuration is valid. `warnings` lists problems that do not block saving.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [valid]
+                properties:
+                  valid: { type: boolean }
+                  warnings:
+                    type: array
+                    items: { $ref: "#/components/schemas/FieldError" }
+        "400": { $ref: "#/components/responses/InvalidConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
 
   /api/v1/events:
     get:
@@ -801,6 +835,10 @@ components:
         config_problem:
           type: string
           description: Which field of config.json was rejected and why. Present only when the file was found but could not be used.
+        config_problem_fields:
+          type: array
+          description: The individual field errors behind `config_problem`, when the file failed validation.
+          items: { $ref: "#/components/schemas/FieldError" }
         mode_options: { $ref: "#/components/schemas/ModeOptions" }
         owner: { $ref: "#/components/schemas/OwnerStatus" }
     OwnerStatus:
@@ -1154,6 +1192,15 @@ components:
       properties:
         config: { $ref: "#/components/schemas/Config" }
         source: { type: string, enum: [primary, last_good, default] }
+        problem: { type: string, description: Why `config.json` was rejected, when a fallback is running instead. }
+        problem_fields:
+          type: array
+          description: The individual field errors behind `problem`, when the file failed validation.
+          items: { $ref: "#/components/schemas/FieldError" }
+        warnings:
+          type: array
+          description: Problems that did not block saving, such as a model file whose availability could not be determined.
+          items: { $ref: "#/components/schemas/FieldError" }
         impact: { $ref: "#/components/schemas/Impact" }
     Impact:
       type: object

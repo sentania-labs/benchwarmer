@@ -1,4 +1,5 @@
 // Dashboard: polls GET api/v1/status every 2 seconds while visible.
+import { sectionFor } from "./configdefs.js";
 import { h, replace, toneIcon, warnIcon } from "./dom.js";
 import { get, put, post, signIn, modeTokenReason, ApiError } from "./api.js";
 import { setBanner, clearBanner } from "./banners.js";
@@ -141,7 +142,7 @@ function render(st) {
   const view = ownerView(st, new Date(serverNow()));
   patch(els.head, view, () => renderHead(view));
   announce(view);
-  patch(els.notices, [st.config_source, st.config_problem, st.gpu.confidence], () => renderNotices(st));
+  patch(els.notices, [st.config_source, st.config_problem, st.config_problem_fields, st.gpu.confidence], () => renderNotices(st));
   patch(els.mode, [st.mode, st.profile], () => renderMode(st));
   patch(els.runtime, [st.runtime, st.state], () => renderRuntime(st.runtime, st.state));
   patch(els.gpu, st.gpu, () => renderGPU(st.gpu));
@@ -174,7 +175,7 @@ function announce(v) {
 function renderNotices(st) {
   const out = [];
   if (st.config_source && st.config_source !== "primary") {
-    out.push(h("div", { class: "notice error", role: "alert" }, warnIcon(), h("span", null, configNotice(st))));
+    out.push(h("div", { class: "notice error", role: "alert" }, warnIcon(), h("span", null, configNotice(st), (st.config_problem_fields || []).map(d => h("span", null, " ", h("a", { href: "#/config/" + sectionFor(d.field) }, "Fix " + d.field))))));
   }
   const c = st.gpu && st.gpu.confidence;
   if (c === "degraded") {

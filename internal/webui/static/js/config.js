@@ -3,6 +3,7 @@
 // as "<redacted>" are left untouched so the server restores them.
 import { proposedRule, sameMatcher, snapshotFresh, searchableValues } from "./applications.js";
 import { mountHistory } from "./history.js";
+import { validationGeneration, isFallbackSource, saveEnabled } from "./validation.js";
 import { waitForRestart } from "./restart.js";
 import { compatibilityMessage } from "./compatibility.js";
 import { h, replace, warnIcon } from "./dom.js";
@@ -14,12 +15,17 @@ import { modelGroup, resetModelPicker } from "./modelpicker.js";
 
 // Kept across page visits so unsaved edits survive a trip to the dashboard.
 const st = {
-  cfg: null, draft: null, source: "", section: "runtime",
-  errors: new Map(), clientErrors: new Map(), impact: null, message: null, loading: false, saving: false, setup: null,
+  cfg: null, draft: null, source: "", problem: "", problemFields: [], section: "runtime",
+  errors: new Map(), clientErrors: new Map(), warnings: [], validateFailed: false, impact: null, message: null, loading: false, saving: false, setup: null,
 };
 let picker = null;
 let els = null;
 let unmountHistory = null;
+const revision = validationGeneration();
+let validationPending = false;
+let validated = false;
+let validateTimer = null;
+const VALIDATE_DELAY_MS = 500;
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const dirty = () => st.draft && (JSON.stringify(st.draft) !== JSON.stringify(st.cfg) || st.jsonText != null);
@@ -28,7 +34,7 @@ const ctx = {
   get draft() { return st.draft; },
   errors: st.errors,
   clientErrors: st.clientErrors,
-  changed: () => { syncSaveBar(); updateCompatibility(); if (els) refreshProfilePreviews(st.draft, els.body); },
+  changed: () => { invalidateValidation(); updateCompatibility(); if (els) refreshProfilePreviews(st.draft, els.body); },
 };
 
 export function mount(main, rest) {
@@ -43,10 +49,14 @@ export function mount(main, rest) {
     bar: h("div", { class: "savebar" }),
   };
   replace(main, h("h1", null, "Configuration"), els.top, els.nav, els.body, els.bar);
+  els.body.addEventListener("focusout", () => validateDraft(), true);
   window.addEventListener("beforeunload", beforeUnload);
   els.body.addEventListener("change", (e) => picker && picker.onCustom(e));
   if (!st.draft || !dirty()) load();
-  else renderAll();
+  else {
+    renderAll();
+    validateDraft();
+  }
   return {
     title: "Configuration",
     update: (r) => switchSection(r[0]),
@@ -54,9 +64,65 @@ export function mount(main, rest) {
       window.removeEventListener("beforeunload", beforeUnload);
       if (unmountHistory) unmountHistory();
       unmountHistory = null;
+      clearTimeout(validateTimer);
       els = null;
     },
   };
+}
+
+function invalidateValidation() {
+  revision.next();
+  validationPending = true;
+  validated = false;
+  clearTimeout(validateTimer);
+  validateTimer = setTimeout(validateDraft, VALIDATE_DELAY_MS);
+  syncSaveBar();
+}
+
+function addErrors(details) {
+  for (const d of details) {
+    const field = d.field || "(config)";
+    const prior = st.errors.get(field);
+    st.errors.set(field, prior ? prior + "; " + d.message : d.message);
+  }
+}
+
+function retryValidation() {
+  validationPending = true;
+  validateDraft(true);
+}
+
+async function validateDraft(interactive = false) {
+  clearTimeout(validateTimer);
+  if (!els || !st.draft || st.clientErrors.size || !validationPending) return;
+  const requested = revision.next();
+  validationPending = true;
+  syncSaveBar();
+  let details = [];
+  let warnings = [];
+  try {
+    const res = await post("api/v1/config/validate", clone(st.draft), { interactive });
+    warnings = (res && res.warnings) || [];
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 400 && e.body.details) details = e.body.details;
+    else {
+      if (revision.isCurrent(requested)) { st.message = "Could not validate changes: " + e.message; st.validateFailed = true; validationPending = false; if (els) { renderTop(); syncSaveBar(); } }
+      return;
+    }
+  }
+  if (!revision.isCurrent(requested)) return;
+  st.message = null;
+  st.validateFailed = false;
+  st.warnings = warnings;
+  validationPending = false;
+  validated = details.length === 0;
+  st.errors.clear();
+  addErrors(details);
+  if (!els) return;
+  refreshErrors(ctx, els.body);
+  renderTop();
+  renderNav();
+  syncSaveBar();
 }
 
 function beforeUnload(e) {
@@ -74,10 +140,13 @@ async function load() {
     st.cfg = res.config;
     st.draft = clone(res.config);
     st.source = res.source || "";
+    st.problem = res.problem || "";
+    st.problemFields = res.problem_fields || [];
     st.errors.clear();
     st.clientErrors.clear();
     resetModelPicker();
     loadChoices();
+    if (isFallbackSource(st.source)) invalidateValidation();
   } catch (e) {
     st.loading = false;
     if (!els) return;
@@ -92,6 +161,7 @@ async function load() {
   }
   st.loading = false;
   renderAll();
+  if (isFallbackSource(st.source)) validateDraft();
 }
 
 // loadChoices fills the suggestion lists behind the model, runtime, and
@@ -137,18 +207,28 @@ function renderTop() {
   if (st.source && st.source !== "primary") {
     parts.push(h("div", { class: "notice error", role: "alert" }, warnIcon(),
       h("span", null, "The service is running on its " + (st.source === "last_good" ? "last known good" : "default") +
-        " configuration because the primary file could not be used. Saving writes a new primary file.")));
+        " configuration. " + (st.problem ? "config.json could not be used: " + st.problem + ". " : st.source === "default" ? "No config.json existed, so defaults were written. " : "config.json could not be used. ") + "Saving writes a new primary file.",
+        st.problemFields.map(d => h("span", null, " ", h("a", { href: "#/config/" + sectionFor(d.field), onclick: e => { e.preventDefault(); jumpTo(d.field); } }, "Fix " + d.field))))));
   }
   const all = [...st.clientErrors, ...st.errors];
   if (all.length) {
-    parts.push(h("div", { class: "error-summary", role: "alert", tabindex: "-1", id: "error-summary" },
+    parts.push(h("div", { class: "error-summary", role: "status", tabindex: "-1", id: "error-summary" },
       h("h2", null, all.length === 1 ? "1 problem to fix" : all.length + " problems to fix"),
       h("ul", null, all.map(([path, msg]) => h("li", null,
         h("a", { href: "#/config/" + sectionFor(path), onclick: (e) => { e.preventDefault(); jumpTo(path); } }, path),
         ": " + msg)))));
   }
+  if (st.warnings.length) {
+    parts.push(h("div", { class: "notice", role: "status" }, warnIcon(),
+      h("ul", null, st.warnings.map((d) => h("li", null,
+        h("a", { href: "#/config/" + sectionFor(d.field), onclick: (e) => { e.preventDefault(); jumpTo(d.field); } }, d.field),
+        ": " + d.message)))));
+  }
   if (st.impact) parts.push(renderImpact(st.impact));
-  if (st.message) parts.push(h("p", { class: "field-error", role: "alert" }, st.message));
+  if (st.message) {
+    parts.push(h("p", { class: "field-error", role: "alert", tabindex: "-1", id: all.length ? null : "error-summary" }, st.message,
+      st.validateFailed ? [" ", h("button", { type: "button", onclick: retryValidation }, "Retry")] : null));
+  }
   replace(els.top, parts);
 }
 
@@ -616,7 +696,24 @@ function applicationsSection() {
 
 function jsonSection() {
   const ta = h("textarea", { id: "config-json", class: "json", rows: 30, spellcheck: "false",
-    "aria-describedby": "config-json-help config-json-err", value: st.jsonText ?? JSON.stringify(st.draft, null, 2), oninput: () => { st.jsonText = ta.value; syncSaveBar(); } });
+    oninput: (e) => {
+      try {
+        const v = JSON.parse(e.target.value);
+        if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("the top level must be an object");
+        st.draft = v;
+        st.jsonText = null;
+        st.clientErrors.delete("json");
+        err.hidden = true;
+        ctx.changed();
+      } catch (error) {
+        st.jsonText = e.target.value;
+        st.clientErrors.set("json", "Not valid JSON: " + error.message);
+        err.textContent = st.clientErrors.get("json");
+        err.hidden = false;
+        syncSaveBar();
+      }
+    },
+    "aria-describedby": "config-json-help config-json-err", value: st.jsonText ?? JSON.stringify(st.draft, null, 2) });
   const err = h("p", { class: "field-error", id: "config-json-err", hidden: true });
   els.json = { ta, err };
   return [
@@ -625,7 +722,7 @@ function jsonSection() {
     ta, err,
     h("div", { class: "row-actions" },
       h("button", { type: "button", onclick: () => { if (applyJSON()) err.textContent = ""; } }, "Apply to draft"),
-      h("button", { type: "button", onclick: () => { ta.value = JSON.stringify(st.draft, null, 2); st.jsonText = null; err.hidden = true; syncSaveBar(); } }, "Reset from draft")),
+      h("button", { type: "button", onclick: () => { ta.value = JSON.stringify(st.draft, null, 2); st.jsonText = null; err.hidden = true; st.clientErrors.delete("json"); ctx.changed(); } }, "Reset from draft")),
   ];
 }
 
@@ -635,10 +732,14 @@ function applyJSON() {
   try {
     const v = JSON.parse(ta.value);
     if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("the top level must be an object");
-    st.draft = v;
+    const same = JSON.stringify(v) === JSON.stringify(st.draft);
     st.jsonText = null;
+    st.clientErrors.delete("json");
     err.hidden = true;
-    ctx.changed();
+    if (!same) {
+      st.draft = v;
+      ctx.changed();
+    }
     return true;
   } catch (e) {
     err.textContent = "Not valid JSON: " + e.message;
@@ -656,22 +757,32 @@ function syncSaveBar() {
   if (!els.saveState) {
     els.saveState = h("span", { class: "savestate", role: "status" });
     els.discard = h("button", { type: "button", onclick: discard }, "Discard");
-    els.save = h("button", { type: "button", class: "primary", onclick: save }, "Save configuration");
+    els.save = h("button", { type: "button", class: "primary", onclick: save });
     replace(els.bar, els.saveState, els.discard, els.save);
   }
-  els.saveState.textContent = d ? "Unsaved changes" : "No unsaved changes";
+  const fallback = isFallbackSource(st.source);
+  els.saveState.textContent = d ? "Unsaved changes" : fallback ? "Not saved as the primary config yet" : "No unsaved changes";
   els.discard.disabled = !d;
+  els.save.textContent = fallback ? "Save as primary config" : "Save configuration";
+  els.save.disabled = !saveEnabled({ dirty: !!d, fallback, validated, pending: validationPending, errorCount: st.errors.size + st.clientErrors.size });
 }
 
 function discard() {
   if (!window.confirm("Discard all unsaved changes?")) return;
+  revision.next();
+  clearTimeout(validateTimer);
+  validationPending = false;
   st.draft = clone(st.cfg);
   st.jsonText = null;
   st.errors.clear();
   st.clientErrors.clear();
   st.message = null;
   resetModelPicker();
+  st.validateFailed = false;
+  st.warnings = [];
+  if (isFallbackSource(st.source)) invalidateValidation();
   renderAll();
+  if (isFallbackSource(st.source)) validateDraft();
 }
 
 async function save() {
@@ -696,12 +807,13 @@ async function save() {
     }
     st.source = res.source || st.source;
     st.errors.clear();
+    st.warnings = res.warnings || [];
     st.impact = { ...(res.impact || { changed: [] }), at: new Date() };
   } catch (e) {
     st.impact = null;
     st.errors.clear();
     if (e instanceof ApiError && e.status === 400 && e.body.details && e.body.details.length) {
-      for (const d of e.body.details) st.errors.set(d.field || "(config)", d.message);
+      addErrors(e.body.details);
     } else {
       st.message = "Save failed: " + e.message;
     }
@@ -719,7 +831,7 @@ async function save() {
     }
     syncSaveBar();
   }
-  if (st.errors.size) focusSummary();
+  if (st.errors.size || st.message) focusSummary();
 }
 
 function focusSummary() {

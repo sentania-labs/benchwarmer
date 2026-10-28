@@ -49,7 +49,8 @@ type Status struct {
 	ConfigSource string `json:"config_source"`
 	// ConfigProblem says which field of config.json failed and why, when
 	// the service is running on a fallback because the file was rejected.
-	ConfigProblem string `json:"config_problem,omitempty"`
+	ConfigProblem       string              `json:"config_problem,omitempty"`
+	ConfigProblemFields []config.FieldError `json:"config_problem_fields,omitempty"`
 	// ModeOptions are the durations the Controls card offers, from the
 	// modes section of the configuration.
 	ModeOptions ModeOptions `json:"mode_options"`
@@ -154,9 +155,18 @@ type ModeRequest struct {
 // ConfigResponse is GET /api/v1/config (secrets redacted) and the success
 // body of PUT /api/v1/config.
 type ConfigResponse struct {
-	Config config.Config  `json:"config"`
-	Source string         `json:"source"`
-	Impact *config.Impact `json:"impact,omitempty"`
+	Config        config.Config       `json:"config"`
+	Source        string              `json:"source"`
+	Problem       string              `json:"problem,omitempty"`
+	ProblemFields []config.FieldError `json:"problem_fields,omitempty"`
+	Warnings      []config.FieldError `json:"warnings,omitempty"`
+	Impact        *config.Impact      `json:"impact,omitempty"`
+}
+
+// ValidateResponse is the success body of POST /api/v1/config/validate.
+type ValidateResponse struct {
+	Valid    bool                `json:"valid"`
+	Warnings []config.FieldError `json:"warnings,omitempty"`
 }
 
 // ApplicationsBody is GET/PUT /api/v1/applications.

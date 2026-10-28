@@ -144,45 +144,94 @@ func (c *Controller) requestManual(kind, reason string) error {
 	return nil
 }
 
+// modelCheckTimeout bounds the model file check: a stat on an unreachable
+// network path can hang.
+var modelCheckTimeout = 2 * time.Second
+
+// checkModelFile runs CheckModelFile with a deadline. A check that cannot
+// answer in time reports the file's availability as unknown.
+func (c *Controller) checkModelFile(path string) error {
+	if c.d.CheckModelFile == nil {
+		return config.ErrFileUnknown
+	}
+	ch := make(chan error, 1)
+	go func() { ch <- c.d.CheckModelFile(path) }()
+	select {
+	case err := <-ch:
+		return err
+	case <-time.After(modelCheckTimeout):
+		return config.ErrFileUnknown
+	}
+}
+
+// ValidateConfig checks a proposed change without applying it. Every field
+// problem is reported together. A model file that is definitely missing or
+// unusable is an error; one whose availability cannot be determined is a
+// warning, so the save is allowed.
+func (c *Controller) ValidateConfig(nc config.Config) ([]config.FieldError, error) {
+	return c.validateConfig(nc, false)
+}
+
+// validateConfig is ValidateConfig with the model file also checked when
+// checkModel is set. Otherwise only a changed path is checked, so an
+// unrelated save is not blocked by a model that has gone missing since.
+func (c *Controller) validateConfig(nc config.Config, checkModel bool) ([]config.FieldError, error) {
+	var errs, warnings []config.FieldError
+	if err := config.ValidateChange(nc); err != nil {
+		var ve *config.ValidationError
+		if !errors.As(err, &ve) {
+			return nil, err
+		}
+		errs = ve.Errors
+	}
+	c.mu.Lock()
+	changed := checkModel || nc.Runtime.ModelPath != c.cfg.Runtime.ModelPath
+	c.mu.Unlock()
+	reported := false
+	for _, e := range errs {
+		reported = reported || e.Field == "runtime.model_path"
+	}
+	if changed && !reported {
+		switch err := c.checkModelFile(nc.Runtime.ModelPath); {
+		case err == nil:
+		case errors.Is(err, config.ErrFileUnknown):
+			warnings = append(warnings, config.FieldError{Field: "runtime.model_path", Message: err.Error() + "; the model may not load until it is reachable"})
+		default:
+			errs = append(errs, config.FieldError{Field: "runtime.model_path", Message: err.Error()})
+		}
+	}
+	if len(errs) > 0 {
+		return warnings, &config.ValidationError{Errors: errs}
+	}
+	return warnings, nil
+}
+
 // UpdateConfig validates, persists, applies, and audits a new config.
-func (c *Controller) UpdateConfig(ctx context.Context, nc config.Config, actor string) (config.Impact, error) {
+func (c *Controller) UpdateConfig(ctx context.Context, nc config.Config, actor string) (config.Impact, []config.FieldError, error) {
 	return c.updateConfig(ctx, nc, actor, "", "")
 }
 
-func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, expected, restoreOf string) (config.Impact, error) {
-	// Only a changed model path is checked, so an unrelated save is not
-	// blocked by a model that has gone missing since. The stat can hang on
-	// an unreachable network path, so it runs before the controller lock.
-	modelMissing := false
-	if c.d.FileExists != nil {
-		c.mu.Lock()
-		changed := nc.Runtime.ModelPath != c.cfg.Runtime.ModelPath
-		c.mu.Unlock()
-		modelMissing = (changed || restoreOf != "") && !c.d.FileExists(nc.Runtime.ModelPath)
-	}
+func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, expected, restoreOf string) (config.Impact, []config.FieldError, error) {
+	// The model stat can hang on an unreachable network path, so validation
+	// runs before the controller lock.
+	warnings, verr := c.validateConfig(nc, restoreOf != "")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.d.Now()
 	if restoreOf != "" && (expected == "" || expected != c.revisionLocked()) {
-		return config.Impact{}, config.ErrHistoryConflict
+		return config.Impact{}, nil, config.ErrHistoryConflict
 	}
 	if restoreOf != "" {
 		if store, ok := c.d.ConfigStore.(historyStore); !ok {
-			return config.Impact{}, errors.New("configuration history unavailable")
+			return config.Impact{}, nil, errors.New("configuration history unavailable")
 		} else if err := store.VerifyCurrent(c.cfg); err != nil {
-			return config.Impact{}, err
+			return config.Impact{}, nil, err
 		}
 	}
-	if err := config.ValidateChange(nc); err != nil {
+	if verr != nil {
 		c.emit(events.Event{Time: now, Type: events.ConfigRejected, Severity: policy.SeverityNotice,
-			Message: "Configuration change rejected: " + err.Error(), Data: map[string]any{"actor": actor}})
-		return config.Impact{}, err
-	}
-	if modelMissing {
-		err := &config.ValidationError{Errors: []config.FieldError{{Field: "runtime.model_path", Message: "no file exists at this path"}}}
-		c.emit(events.Event{Time: now, Type: events.ConfigRejected, Severity: policy.SeverityNotice,
-			Message: "Configuration change rejected: " + err.Error(), Data: map[string]any{"actor": actor}})
-		return config.Impact{}, err
+			Message: "Configuration change rejected: " + verr.Error(), Data: map[string]any{"actor": actor}})
+		return config.Impact{}, nil, verr
 	}
 	if c.d.ConfigStore != nil {
 		var err error
@@ -198,12 +247,12 @@ func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, ex
 			err = c.d.ConfigStore.Save(nc)
 		}
 		if err != nil {
-			return config.Impact{}, fmt.Errorf("persist config: %w", err)
+			return config.Impact{}, nil, fmt.Errorf("persist config: %w", err)
 		}
 	}
 	im := config.Classify(c.cfg, nc)
 	changes := config.HistoryDiff(c.cfg, nc)
-	c.cfg, c.cfgSource, c.cfgProblem = nc, "primary", ""
+	c.cfg, c.cfgSource, c.cfgProblem, c.cfgProblemFields = nc, "primary", "", nil
 	c.configRevision = rand.Text()
 	c.schedCacheValid = false
 	c.lastSetupCheck, c.setupResult = time.Time{}, nil // re-check the runtime and model files now, ignoring a check of the old paths
@@ -222,7 +271,7 @@ func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, ex
 		Message: fmt.Sprintf("Configuration updated by %s: %s", actor, strings.Join(im.Changed, ", ")),
 		Data:    map[string]any{"actor": actor, "changed": im.Changed, "runtime_reload": im.RuntimeReload, "service_restart": im.ServiceRestart, "restore_of": restoreOf, "changes": changes}})
 	c.signalWake()
-	return im, nil
+	return im, warnings, nil
 }
 
 type historyStore interface {
@@ -278,7 +327,8 @@ func (c *Controller) RestoreConfig(ctx context.Context, id, revision, actor stri
 	if len(parts) != 2 || parts[0] == "" || parts[1] != configDigest(target) {
 		return config.Impact{}, config.ErrHistoryConflict
 	}
-	return c.updateConfig(ctx, target, actor, parts[0], id)
+	im, _, err := c.updateConfig(ctx, target, actor, parts[0], id)
+	return im, err
 }
 
 // AgentReport accepts a session-agent report.
@@ -316,7 +366,7 @@ func (c *Controller) Status() api.Status {
 		Time: now, Version: c.d.Version, Condition: c.st.Condition(), State: c.st,
 		Mode:         api.ModeStatus{Mode: c.mode.Mode, Until: c.mode.Until, SetBy: c.mode.SetBy, SetAt: c.modeSetAt},
 		Decision:     d,
-		ConfigSource: c.cfgSource, ConfigProblem: c.cfgProblem,
+		ConfigSource: c.cfgSource, ConfigProblem: c.cfgProblem, ConfigProblemFields: slices.Clone(c.cfgProblemFields),
 		ModeOptions: api.ModeOptions{PauseDurations: slices.Clone(c.cfg.Modes.PauseDurations), AIPriorityDurations: slices.Clone(c.cfg.Modes.AIPriorityDurations),
 			UntilTomorrowAt: nextLocalMorning(now, c.cfg.Timezone)},
 		RecentErrors: append([]events.Event(nil), c.recentErrors...),

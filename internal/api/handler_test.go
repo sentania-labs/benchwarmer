@@ -10,7 +10,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -95,17 +97,21 @@ func (f *fakeBackend) Config() (config.Config, string) {
 	return config.Clone(f.cfg), f.source
 }
 
-func (f *fakeBackend) UpdateConfig(_ context.Context, c config.Config, actor string) (config.Impact, error) {
+func (f *fakeBackend) ValidateConfig(c config.Config) ([]config.FieldError, error) {
+	return nil, config.ValidateChange(c)
+}
+
+func (f *fakeBackend) UpdateConfig(_ context.Context, c config.Config, actor string) (config.Impact, []config.FieldError, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := config.Validate(c); err != nil {
-		return config.Impact{}, err
+	if err := config.ValidateChange(c); err != nil {
+		return config.Impact{}, nil, err
 	}
 	im := config.Classify(f.cfg, c)
 	f.cfg = c
 	f.updates = append(f.updates, c)
 	f.actors = append(f.actors, actor)
-	return im, nil
+	return im, nil, nil
 }
 
 func (f *fakeBackend) AgentReport(r AgentReport) {
@@ -264,6 +270,7 @@ func TestAuthMatrix(t *testing.T) {
 		{"POST", "/api/v1/agent/report", report, [6]int{401, 401, 401, 204, 204, 403}},
 		// Other writes: management token only, whatever the source.
 		{"PUT", "/api/v1/config", cfgBody, [6]int{401, 401, 401, 200, 403, 403}},
+		{"POST", "/api/v1/config/validate", cfgBody, [6]int{401, 401, 401, 200, 403, 403}},
 		{"PUT", "/api/v1/applications", `{"applications":[]}`, [6]int{401, 401, 401, 200, 403, 403}},
 		{"POST", "/api/v1/drain", "", [6]int{401, 401, 401, 202, 403, 403}},
 		{"POST", "/api/v1/reload", "", [6]int{401, 401, 401, 202, 403, 403}},
@@ -436,6 +443,32 @@ func TestConfigValidationErrorShape(t *testing.T) {
 	}
 	if len(hr.be.updates) != 0 {
 		t.Fatal("invalid config reached UpdateConfig")
+	}
+}
+
+func TestValidateConfigMatchesSaveAndDoesNotUpdate(t *testing.T) {
+	hr := newHarness(t)
+	c := config.Default()
+	c.Listen.Management = "127.0.0.1:" + strconv.Itoa(c.Runtime.Port)
+	body, _ := json.Marshal(c)
+	validate := hr.do(req{method: "POST", path: "/api/v1/config/validate", body: string(body), token: mgmtTok})
+	save := hr.do(req{method: "PUT", path: "/api/v1/config", body: string(body), token: mgmtTok})
+	if validate.Code != 400 || save.Code != 400 {
+		t.Fatalf("validate=%d save=%d", validate.Code, save.Code)
+	}
+	got, want := decodeErr(t, validate), decodeErr(t, save)
+	if !reflect.DeepEqual(got.Details, want.Details) {
+		t.Fatalf("validate=%+v save=%+v", got.Details, want.Details)
+	}
+	fields := map[string]bool{}
+	for _, d := range got.Details {
+		fields[d.Field] = true
+	}
+	if !fields["runtime.port"] || !fields["listen.management"] {
+		t.Fatalf("missing conflict fields: %+v", got.Details)
+	}
+	if len(hr.be.updates) != 0 {
+		t.Fatal("validation changed configuration")
 	}
 }
 

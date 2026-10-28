@@ -43,6 +43,50 @@ func fieldErrs(t *testing.T, err error) map[string]string {
 	return m
 }
 
+func TestValidationFlagsBothSidesOfCrossFieldConflicts(t *testing.T) {
+	cases := []struct {
+		name   string
+		mut    func(*Config)
+		fields []string
+	}{
+		{"resume above critical", func(c *Config) { c.Safety.GPUTempCriticalC = 65; c.Safety.GPUTempResumeC = 70 },
+			[]string{"safety.gpu_temp_critical_c", "safety.gpu_temp_resume_c"}},
+		{"loss grace below sample interval", func(c *Config) {
+			c.Telemetry.SampleInterval = Duration(5 * time.Second)
+			c.Telemetry.LossGrace = Duration(2 * time.Second)
+		}, []string{"telemetry.sample_interval", "telemetry.loss_grace"}},
+		{"stop budget", func(c *Config) {
+			c.Runtime.StopMode = StopGraceful
+			c.Runtime.GracefulStopTimeout = Duration(15 * time.Second)
+			c.Runtime.KillVerifyTimeout = Duration(10 * time.Second)
+		}, []string{"runtime.graceful_stop_timeout", "runtime.kill_verify_timeout"}},
+		{"soft util above critical", func(c *Config) {
+			p := c.Profiles["normal"]
+			p.ExternalUtilSoftPct = 70
+			c.Profiles["normal"] = p
+			c.Contention.ExternalUtilCriticalPct = 60
+		}, []string{"profiles.normal.external_util_soft_pct", "contention.external_util_critical_pct"}},
+		{"soft vram above critical", func(c *Config) {
+			p := c.Profiles["normal"]
+			p.ExternalVRAMSoftMiB = 4096
+			c.Profiles["normal"] = p
+			c.Contention.ExternalVRAMCriticalMiB = 2048
+		}, []string{"profiles.normal.external_vram_soft_mib", "contention.external_vram_critical_mib"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Clone(Default())
+			tc.mut(&c)
+			errs := fieldErrs(t, Validate(c))
+			for _, f := range tc.fields {
+				if _, ok := errs[f]; !ok {
+					t.Fatalf("expected error on %s, got %v", f, errs)
+				}
+			}
+		})
+	}
+}
+
 func TestValidationRejectsUnsafeValues(t *testing.T) {
 	cases := []struct {
 		name  string

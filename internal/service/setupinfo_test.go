@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -64,8 +65,32 @@ func TestConfigProblemNamesTheRejectedField(t *testing.T) {
 	if !strings.Contains(got, "listen.management") || !strings.Contains(got, "already used by runtime.port") {
 		t.Fatalf("problem %q does not say which field and why", got)
 	}
+	fields := configProblemFields(lr)
+	if len(fields) != 2 || fields[0].Field != "listen.management" || fields[1].Field != "runtime.port" {
+		t.Fatalf("structured fields: %+v", fields)
+	}
 	if configProblem(config.LoadResult{Source: "primary"}) != "" {
 		t.Fatal("a clean load reported a problem")
+	}
+}
+
+func TestModelFileOnUnreachableShareIsUnknown(t *testing.T) {
+	missing := func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
+	if err := classifyModelFile(`\\nas\models\x.gguf`, missing); !errors.Is(err, config.ErrFileUnknown) {
+		t.Fatalf("offline share: %v", err)
+	}
+	dir := t.TempDir()
+	reachable := func(p string) (os.FileInfo, error) {
+		if p == `\\nas\models\` {
+			return os.Stat(dir)
+		}
+		return nil, os.ErrNotExist
+	}
+	if err := classifyModelFile(`\\nas\models\x.gguf`, reachable); err == nil || errors.Is(err, config.ErrFileUnknown) {
+		t.Fatalf("missing file on a reachable share must be a hard error: %v", err)
+	}
+	if err := classifyModelFile(`D:\models\x.gguf`, missing); err == nil || errors.Is(err, config.ErrFileUnknown) {
+		t.Fatalf("missing file on a local path must be a hard error: %v", err)
 	}
 }
 
@@ -75,7 +100,7 @@ func TestFileExistsIgnoresDirectories(t *testing.T) {
 	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if !fileExists(f) || fileExists(dir) || fileExists(filepath.Join(dir, "nope.gguf")) {
+	if checkModelFile(f) != nil || checkModelFile(dir) == nil || checkModelFile(filepath.Join(dir, "nope.gguf")) == nil {
 		t.Fatal("fileExists wrong")
 	}
 }

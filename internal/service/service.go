@@ -149,7 +149,7 @@ func New(o Options) (*Service, error) {
 		s.log.Error("cannot read GPU watchdog dump folders: GPU driver resets will not be detected", "dirs", blind)
 	}
 	s.ctl = controller.New(controller.Deps{
-		Config: s.cfg, ConfigSource: lr.Source, ConfigProblem: configProblem(lr), FileExists: fileExists, ConfigStore: auditingStore{cs: cs, st: st, met: s.met},
+		Config: s.cfg, ConfigSource: lr.Source, ConfigProblem: configProblem(lr), ConfigProblemFields: configProblemFields(lr), CheckModelFile: checkModelFile, ConfigStore: auditingStore{cs: cs, st: st, met: s.met},
 		Adapter: llamacpp.New(), Telemetry: s.tel, Processes: procs, Facts: facts, Gate: s.gate,
 		Events: events.SinkFunc(s.sink.Emit), EventReader: eventReader{st}, Persist: persister{st},
 		Metrics: s.met, Log: s.log, Version: version.Version, BootTime: signals.BootTime,
@@ -540,8 +540,52 @@ func configProblem(lr config.LoadResult) string {
 	return lr.PrimaryErr.Error()
 }
 
-// fileExists reports whether path names an existing regular file.
-func fileExists(path string) bool {
-	fi, err := os.Stat(path)
-	return err == nil && !fi.IsDir()
+func configProblemFields(lr config.LoadResult) []config.FieldError {
+	var ve *config.ValidationError
+	if errors.As(lr.PrimaryErr, &ve) {
+		return append([]config.FieldError(nil), ve.Errors...)
+	}
+	return nil
+}
+
+// checkModelFile distinguishes a missing file from an inaccessible or unknown path.
+func checkModelFile(path string) error { return classifyModelFile(path, os.Stat) }
+
+// uncShareRoot returns the \\host\share root of a UNC path, or "" for any
+// other path.
+func uncShareRoot(path string) string {
+	p := strings.ReplaceAll(path, "/", `\`)
+	if !strings.HasPrefix(p, `\\`) {
+		return ""
+	}
+	parts := strings.SplitN(p[2:], `\`, 3)
+	if len(parts) < 2 {
+		return p
+	}
+	return `\\` + parts[0] + `\` + parts[1] + `\`
+}
+
+func classifyModelFile(path string, stat func(string) (os.FileInfo, error)) error {
+	fi, err := stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		// Windows reports an unreachable host as "not found"; only a
+		// reachable share can say the file itself is missing.
+		if root := uncShareRoot(path); root != "" {
+			if _, rerr := stat(root); rerr != nil {
+				return config.ErrFileUnknown
+			}
+		}
+	}
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return errors.New("no file exists at this path")
+	case errors.Is(err, os.ErrPermission):
+		return errors.New("the service cannot access this file")
+	case err != nil:
+		return config.ErrFileUnknown
+	case !fi.Mode().IsRegular():
+		return errors.New("this path is not a regular file")
+	default:
+		return nil
+	}
 }

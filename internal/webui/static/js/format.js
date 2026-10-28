@@ -296,7 +296,7 @@ export function configNotice(st) {
     ? "Running on the last known good configuration"
     : "Running on built-in defaults";
   if (st.config_problem) {
-    return "config.json was found but not used. " + running + ". Fix this and save: " + st.config_problem + ".";
+    return "config.json could not be used. " + running + ". Fix this and save: " + st.config_problem + ".";
   }
   if (st.config_source === "last_good") {
     return running + ", because config.json could not be used. Check the Events page for the reason, then fix and save the configuration.";

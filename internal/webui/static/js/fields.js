@@ -151,15 +151,6 @@ export function field(ctx, def) {
       control = h("div", { class: "duration" }, num, unit);
       break;
     }
-    case "model": {
-      control = h("select", { ...common, dataset: { modelPicker: "true" }, onchange: (e) => {
-        if (!e.target.value) return;
-        set(e.target.value);
-        const custom = document.querySelector('[data-path="runtime.model_path"] input');
-        if (custom) custom.value = e.target.value;
-      } }, h("option", { value: value || "" }, value || "Choose an installed model"));
-      break;
-    }
     case "select": {
       const opts = def.options.slice();
       if (value != null && value !== "" && !opts.some(([v]) => v === value)) opts.push([value, value + " (unknown)"]);
@@ -228,10 +219,7 @@ export function field(ctx, def) {
       control = h("input", {
         ...common, type: "text", spellcheck: "false", value: value ?? "", placeholder: def.placeholder,
         list: def.list, autocomplete: "off",
-        oninput: (e) => {
-          set(e.target.value);
-          if (path === "runtime.model_path") ctx.modelPathChanged?.();
-        },
+        oninput: (e) => set(e.target.value),
       });
     }
   }

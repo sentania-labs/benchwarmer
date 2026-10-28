@@ -72,17 +72,13 @@ test('argument editor focus follows the row that changed', () => {
   assert.equal(globalThis.focused, all[3]);
 });
 
-test('model picker and custom path share one error slot that the picker owns', () => {
+test('custom model path leaves the error slot to the model picker', () => {
   const ctx = { draft: { runtime: { model_path: 'rel.gguf' } }, errors: new Map([['runtime.model_path', 'must be an absolute path']]), clientErrors: new Map(), changed() {} };
-  const picker = field(ctx, { path: 'runtime.model_path', label: 'Model file', type: 'model' });
   const custom = field(ctx, { path: 'runtime.model_path', id: 'custom-model-path', noError: true, label: 'Custom model path', help: 'h' });
-  const slots = [picker, custom].flatMap(w => w.walk().filter(e => e.class === 'field-error'));
-  assert.equal(slots.length, 1);
-  assert.equal(slots[0].textContent ?? slots[0].children[0], 'must be an absolute path');
+  assert.equal(custom.walk().filter(e => e.class === 'field-error').length, 0);
   const input = custom.walk().find(e => e.tagName === 'input');
   assert.equal(input.id, 'custom-model-path');
   assert.ok(!String(input['aria-describedby']).includes('-err'));
-  assert.notEqual(input.name, picker.walk().find(e => e.tagName === 'select').name);
 });
 
 test('ticking Has value, typing a value, then unticking does not emit a blank token', () => {

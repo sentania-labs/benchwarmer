@@ -296,3 +296,19 @@ th, td { overflow-wrap: normal; word-break: normal; }
 .argv-row input[type="text"] { flex: 1 1 140px; min-width: 0; }
 .argv-row label { white-space: nowrap; }
 .subnav summary, .config-body summary { cursor: pointer; font-weight: 600; }
+
+/* Model picker (Configuration > Runtime) */
+.model-result { margin: 10px 0; min-width: 0; }
+.model-result:focus { outline: 2px solid var(--info-ink); outline-offset: 2px; }
+.model-result:empty { margin: 0; }
+.facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 14px; margin: 8px 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.proposals { display: grid; gap: 10px; margin: 8px 0; }
+.proposal { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; min-width: 0; }
+.proposal-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.proposal .change { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin: 6px 0 2px; }
+.proposal .to { display: inline-flex; align-items: center; gap: 8px; }
+.proposal .to input { width: 9em; max-width: 100%; }
+details.advanced, details.notes { margin: 10px 0; }
+details.advanced > summary, details.notes > summary { cursor: pointer; font-weight: 600; }

@@ -39,8 +39,8 @@ const D = "duration";
 
 function runtime() {
   return [
-    { title: "Program and model", fields: [
-      { path: "runtime.model_path", label: "Model file", type: "model", help: "Choose an installed model. To use another path, open Advanced settings." },
+    { title: "Model", picker: true },
+    { title: "Program and settings", fields: [
       { path: "runtime.executable", label: "llama-server executable", list: "dl-runtimes",
         help: "The build installed with Benchwarmer is suggested (C:\\Program Files\\Benchwarmer\\runtime\\vulkan\\llama-server.exe). Any absolute path works." },
       { path: "runtime.context_size", label: "Context size", type: "int", unit: "tokens", min: 256 },

@@ -425,6 +425,25 @@ paths:
               schema: { $ref: "#/components/schemas/SetupInfo" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/v1/setup/model:
+    get:
+      tags: [config]
+      operationId: getSetupModel
+      summary: What a model file's GGUF header says, and the settings that follow from it.
+      description: Reads only the file header (bounded, with a deadline) and never loads or runs the model. Only files in the models folder and the saved runtime.model_path are read; any other path answers not_available without touching the disk. Settings are proposals computed from the header and the GPU's total memory; nothing is applied. Read access.
+      parameters:
+        - { name: path, in: query, required: true, schema: { type: string, maxLength: 1024 }, description: "Absolute path to a .gguf file in the models folder or the currently saved model path. UNC and device paths are refused. Any other path gets status not_available." }
+        - { name: context, in: query, required: false, schema: { type: integer, minimum: 0 }, description: The context size currently in the draft; a smaller owner-chosen context is never raised. }
+      responses:
+        "200":
+          description: Inspection. A file that cannot be inspected is still a 200 with a status other than ok.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelInspection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { description: Another model is being read. }
+
   /api/v1/signin/codes:
     post:
       tags: [auth]
@@ -1037,6 +1056,22 @@ components:
         size_bytes: { type: integer, format: int64 }
         modified: { type: string, format: date-time }
         architecture: { type: string, description: GGUF general.architecture when readable. }
+    ModelInspection:
+      type: object
+      properties:
+        path: { type: string }
+        status: { type: string, enum: [ok, not_found, unreadable, not_gguf, unsupported, invalid, not_available] }
+        message: { type: string, description: Why the file could not be inspected. }
+        size_bytes: { type: integer, format: int64 }
+        metadata: { type: object, description: "GGUF header fields (architecture, block_count, context_length, ...). Set only when status is ok." }
+        plan: { type: object, description: "Estimated memory use (weights_mib, kv_bytes_per_token, overhead_mib, estimated_mib), notes on its uncertainty, and recommendations (path, value, reason, certainty from_file or estimate). Set only when status is ok." }
+        gpu_total_mib: { type: integer, description: Total VRAM the plan used; 0 when telemetry had none. }
+        compatibility: { $ref: "#/components/schemas/Compatibility" }
+    Compatibility:
+      type: object
+      properties:
+        status: { type: string, enum: [unknown, incompatible] }
+        message: { type: string }
     RuntimeInstall:
       type: object
       properties:

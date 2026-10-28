@@ -1,8 +1,8 @@
 # Policy requirements on managed Windows machines
 
 The executables Benchwarmer ships are Authenticode signed (`benchwarmer.exe`,
-`bwtray.exe`, `bwprobe.exe`, and the MSI); the bundled llama.cpp runtime keeps
-the signature upstream gave it. On a machine managed by Group Policy or Intune,
+`bwtray.exe`, `bwprobe.exe`, and the MSI); the bundled llama-server runtime is
+Ollama's own build, signed by Ollama Inc. On a machine managed by Group Policy or Intune,
 check these before installing.
 
 ## Required when ASR rule 01443614 is in Block mode

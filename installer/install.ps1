@@ -58,7 +58,7 @@ Get-Process bwtray -ErrorAction SilentlyContinue | Stop-Process -Force
 Get-Process llama-server -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Prog\*" } | Stop-Process -Force
 
 # 2. Files. runtime\vulkan and licenses are replaced as a whole so files
-# dropped by a newer llama.cpp release do not linger. Other folders under
+# dropped by a newer runtime release do not linger. Other folders under
 # runtime\ (a runtime added by hand) are left alone.
 Step "Installing files to $Prog"
 New-Item -ItemType Directory -Force $Prog, (Join-Path $Prog 'runtime') | Out-Null

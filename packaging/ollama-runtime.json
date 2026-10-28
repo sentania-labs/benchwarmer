@@ -1,0 +1,14 @@
+{
+  "ollama_version": "v0.40.12",
+  "llama_cpp_tag": "b11901",
+  "asset": "ollama-windows-amd64.zip",
+  "url": "https://github.com/ollama/ollama/releases/download/v0.40.12/ollama-windows-amd64.zip",
+  "sha256": "21814944f3e50d3f07b6bb3af75baddb96f59e91353c332ac9c5063b3bfd1041",
+  "signer": "Ollama Inc.",
+  "ollama_license_url": "https://raw.githubusercontent.com/ollama/ollama/v0.40.12/LICENSE",
+  "ollama_license_sha256": "5934ed2ce0d15154bcdb9c85203210abac0da4314af34081e36df4599f90b226",
+  "llama_cpp_license_url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/b11901/LICENSE",
+  "llama_cpp_license_sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+  "smoke_model_url": "https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf",
+  "smoke_model_sha256": "270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d"
+}

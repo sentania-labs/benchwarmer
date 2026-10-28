@@ -149,7 +149,7 @@
       <File Id="VersionFile" Source="$(var.StageDir)\VERSION" />
       <File Id="ConfigExample" Source="$(var.StageDir)\config.example.json" />
 
-      <!-- llama.cpp runtime (packaging/llama-cpp.json) and licenses. -->
+      <!-- llama-server runtime (packaging/ollama-runtime.json; keeps its vulkan\ subfolder) and licenses. -->
       <Files Include="$(var.StageDir)\runtime\**" Directory="INSTALLFOLDER" Subdirectory="runtime" />
       <Files Include="$(var.StageDir)\licenses\**" Directory="INSTALLFOLDER" Subdirectory="licenses" />
     </ComponentGroup>

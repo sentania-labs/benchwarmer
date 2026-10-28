@@ -43,7 +43,7 @@ runners.
   read before running, which matters on a GPO-managed machine.
 - Signing: the executables this repo builds, and the MSI, are Authenticode
   signed through the lab's Azure Artifact Signing profile; the bundled runtime
-  keeps upstream's signature. ASR is handled by the path exclusion, not by
+  is Ollama's signed build and keeps its signature. ASR is handled by the path exclusion, not by
   reputation.
 - An MSI can be added later without changing the service, since service
   registration lives in `benchwarmer.exe`.

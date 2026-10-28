@@ -455,3 +455,37 @@ func TestMembersDoesNotWaitForAStopInProgress(t *testing.T) {
 		t.Fatalf("members after stop: %v", m)
 	}
 }
+
+func TestEnvVulkanBackend(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "llama-server.exe")
+	base := []string{"Path=C:\\Windows", "TEMP=x"}
+
+	if got := Env(exe, base); !slices.Equal(got, base) {
+		t.Fatalf("no vulkan folder: env changed to %v", got)
+	}
+
+	if err := os.Mkdir(filepath.Join(dir, "vulkan"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	backend := filepath.Join(dir, "vulkan", "ggml-vulkan.dll")
+	if err := os.WriteFile(backend, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := Env(exe, base)
+	want := []string{"Path=" + filepath.Dir(backend) + string(os.PathListSeparator) + "C:\\Windows", "TEMP=x", "GGML_BACKEND_PATH=" + backend}
+	if !slices.Equal(got, want) {
+		t.Fatalf("env = %v, want %v", got, want)
+	}
+	if base[0] != "Path=C:\\Windows" {
+		t.Fatal("Env modified its input")
+	}
+
+	// An operator-set backend wins; an empty one does not.
+	if got := Env(exe, []string{"GGML_BACKEND_PATH=D:\\mine.dll"}); !slices.Contains(got, "GGML_BACKEND_PATH=D:\\mine.dll") || slices.Contains(got, "GGML_BACKEND_PATH="+backend) {
+		t.Fatalf("operator value not kept: %v", got)
+	}
+	if got := Env(exe, []string{"GGML_BACKEND_PATH="}); !slices.Contains(got, "GGML_BACKEND_PATH="+backend) || slices.Contains(got, "GGML_BACKEND_PATH=") {
+		t.Fatalf("empty value not replaced: %v", got)
+	}
+}

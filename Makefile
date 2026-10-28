@@ -47,8 +47,8 @@ windows:
 check: lint test-webui test-race vuln windows
 
 # Release file set (ADR 0012): what the MSI and the zip both install under
-# C:\Program Files\Benchwarmer\. The llama.cpp runtime is the release pinned
-# in packaging/llama-cpp.json, verified by SHA-256.
+# C:\Program Files\Benchwarmer\. The llama-server runtime is Ollama's signed
+# Windows release pinned in packaging/ollama-runtime.json, verified by SHA-256.
 STAGE    ?= $(DIST)/stage
 PKG      := benchwarmer-$(VERSION)-windows-amd64
 stage:
@@ -57,7 +57,7 @@ stage:
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(STAGE)/benchwarmer.exe ./cmd/benchwarmer
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS) -H windowsgui" -o $(STAGE)/bwtray.exe ./cmd/bwtray
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(STAGE)/bwprobe.exe ./cmd/bwprobe
-	packaging/fetch-llama-cpp.sh $(STAGE)
+	packaging/fetch-ollama-runtime.sh $(STAGE)
 	if [ -f LICENSE ]; then cp LICENSE $(STAGE)/licenses/LICENSE-benchwarmer; fi
 	$(GO) run ./cmd/benchwarmer config default > $(STAGE)/config.example.json
 	printf '%s\n' '$(VERSION)' > $(STAGE)/VERSION

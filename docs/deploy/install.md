@@ -121,7 +121,7 @@ run `.\uninstall.ps1`.
 | Where | What |
 |---|---|
 | `C:\Program Files\Benchwarmer\` | `benchwarmer.exe` (service), `bwtray.exe` (tray), `bwprobe.exe` (diagnostics), `VERSION`, `config.example.json` |
-| `...\runtime\vulkan\` | The bundled llama.cpp runtime (Vulkan build) |
+| `...\runtime\vulkan\` | The bundled llama-server runtime: Ollama's signed Windows build, with the Vulkan backend in `vulkan\` |
 | `...\licenses\` | Third-party licenses |
 | Service `Benchwarmer` | Runs as LocalSystem, starts automatically |
 | `HKLM\...\CurrentVersion\Run` value `Benchwarmer Tray` | Starts the tray in every user session |

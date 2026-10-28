@@ -30,6 +30,16 @@ jobs:
           name: bwprobe-windows-amd64
           path: dist/*.exe
           if-no-files-found: error
+      # The full Ollama zip (1.6 GB) is cached by its pinned hash; the fetch
+      # script re-verifies it on every use and extracts only the members the
+      # runtime needs.
+      - name: Read the runtime pin
+        id: pin
+        run: echo "sha=$(jq -er .sha256 packaging/ollama-runtime.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/ollama-runtime
+          key: ollama-runtime-${{ steps.pin.outputs.sha }}
       # Release file set and by-hand zip (ADR 0012), built the same way the
       # release workflow builds them. The msi job builds the MSI from it.
       - run: make package
@@ -98,6 +108,12 @@ jobs:
           Expand-Archive $zip.FullName -DestinationPath dist\zip
           $dir = Get-ChildItem dist\zip -Directory | Select-Object -First 1
           "PKG_DIR=$($dir.FullName)" >> $env:GITHUB_ENV
+      - name: Verify the runtime is signed by Ollama Inc.
+        shell: pwsh
+        run: .\packaging\verify-runtime.ps1 -RuntimeDir "$env:PKG_DIR\runtime\vulkan"
+      - name: Smoke test the bundled runtime (every flag Benchwarmer passes)
+        shell: pwsh
+        run: .\packaging\smoke-runtime.ps1 -RuntimeDir "$env:PKG_DIR\runtime\vulkan" -LogDir logs\runtime
       - name: Build MSI
         shell: pwsh
         run: |

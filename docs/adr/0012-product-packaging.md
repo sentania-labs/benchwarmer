@@ -43,7 +43,7 @@ Both carry the same file set:
 | `benchwarmer.exe` | Service, CLI |
 | `bwtray.exe` | Tray and session agent |
 | `bwprobe.exe` | Diagnostics (Phase 0 probe) |
-| `runtime\vulkan\` | llama.cpp release pinned in `packaging/llama-cpp.json`, verified by SHA-256 at build time |
+| `runtime\vulkan\` | llama-server from Ollama's Windows release pinned in `packaging/ollama-runtime.json` (Ollama's `lib\ollama` layout, with the Vulkan backend in `vulkan\`), verified by SHA-256 at build time; every file's Authenticode signer is checked to be Ollama Inc. |
 | `licenses\` | Benchwarmer and llama.cpp licenses |
 | `VERSION` | The exact tag |
 
@@ -52,9 +52,9 @@ on the GitHub-hosted Windows runner. CI builds it on every push, to validate
 it; the release workflow builds and publishes it on a tag. The files this repo
 builds (`benchwarmer.exe`, `bwtray.exe`, `bwprobe.exe`) and the MSI are
 Authenticode signed at release time (the org's `windows-sign` action, Azure
-Artifact Signing) before the checksums are made; the bundled llama.cpp runtime
-keeps the signature upstream gave it and is not re-signed. The ASR path
-exclusion is still what lets the files run.
+Artifact Signing) before the checksums are made; the bundled runtime is
+Ollama's signed build and is not re-signed. The ASR path exclusion remains
+documented for Benchwarmer's own files.
 
 ### What the MSI does
 
@@ -167,8 +167,8 @@ above, so the script no longer creates folders, ACLs or tokens.
 - **One install state.** A GPO deployment, a hand install and an upgrade end
   up the same. An admin repairs a broken ACL or a deleted token by restarting
   the service.
-- **Release size.** The MSI carries the llama.cpp runtime, about 32 MB
-  compressed. Upgrading llama.cpp is a change to `packaging/llama-cpp.json`
+- **Release size.** The MSI carries the llama-server runtime, about 30 MB
+  compressed. Upgrading it is a change to `packaging/ollama-runtime.json`
   and a new release, tested like any other change.
 - **Model files** are still copied by an admin (or a GPO file preference) to
   `C:\ProgramData\Benchwarmer\models\`.

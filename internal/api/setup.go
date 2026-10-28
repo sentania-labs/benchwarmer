@@ -69,6 +69,9 @@ const (
 	InspectNotGGUF     = "not_gguf"
 	InspectUnsupported = "unsupported"
 	InspectInvalid     = "invalid"
+	// InspectNotAvailable is the one answer for a path outside the models
+	// folder and the saved model path. It does not say whether the file exists.
+	InspectNotAvailable = "not_available"
 )
 
 // ModelInspection answers GET /api/v1/setup/model: what the header of one

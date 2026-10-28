@@ -71,9 +71,6 @@ type Plan struct {
 	Recommendations []Recommendation `json:"recommendations"`
 	// Notes are the uncertainties and limits of this estimate.
 	Notes []string `json:"notes"`
-	// Fit is "unknown", "likely_fits" or "may_not_fit". It is never a
-	// guarantee.
-	Fit string `json:"fit"`
 }
 
 // KVBytesPerToken is the f16 KV cache cost of one context token, or 0 when
@@ -97,7 +94,7 @@ func roundDown(v, step int) int { return v / step * step }
 
 // Compute builds the plan for one model.
 func Compute(in Input) Plan {
-	p := Plan{OverheadMiB: OverheadMiB, Recommendations: []Recommendation{}, Notes: []string{}, Fit: "unknown"}
+	p := Plan{OverheadMiB: OverheadMiB, Recommendations: []Recommendation{}, Notes: []string{}}
 	m := in.Meta
 	p.WeightsMiB = int((in.FileSize + mib - 1) / mib)
 	p.KVBytesPerTok = KVBytesPerToken(m)
@@ -139,7 +136,6 @@ func Compute(in Input) Plan {
 	budget := int(float64(in.GPU.TotalMiB) * UsableFraction)
 	room := budget - p.WeightsMiB - OverheadMiB
 	if room <= 0 {
-		p.Fit = "may_not_fit"
 		p.Notes = append(p.Notes, fmt.Sprintf("The weights alone (about %d MiB) plus overhead leave no room in %d MiB of GPU memory at 90%% use. The model may still run with layers or experts on the CPU; nothing was changed.", p.WeightsMiB, in.GPU.TotalMiB))
 		return p
 	}
@@ -148,7 +144,6 @@ func Compute(in Input) Plan {
 	fitTokens = min(fitTokens, limit)
 	fitTokens = roundDown(fitTokens, ctxStep)
 	if fitTokens < ctxStep {
-		p.Fit = "may_not_fit"
 		p.Notes = append(p.Notes, "Less than 1024 tokens of context fit alongside the weights in the estimate; nothing was changed.")
 		return p
 	}
@@ -159,9 +154,9 @@ func Compute(in Input) Plan {
 		prev := ctx
 		ctx = fitTokens
 		p.Recommendations = dropPath(p.Recommendations, "runtime.context_size")
-		reason := fmt.Sprintf("about %d MiB of weights plus %d MiB of KV cache at %d tokens fits in %d MiB of GPU memory at 90%% use", p.WeightsMiB, kvMiB(ctx), ctx, in.GPU.TotalMiB)
+		reason := fmt.Sprintf("the model is estimated to need about %d MiB of weights plus %d MiB of KV cache at %d tokens, against %d MiB of GPU memory (90%% of it usable)", p.WeightsMiB, kvMiB(ctx), ctx, in.GPU.TotalMiB)
 		if prev > 0 {
-			reason = fmt.Sprintf("%d tokens would need about %d MiB of KV cache; ", prev, kvMiB(prev)) + reason
+			reason = fmt.Sprintf("%d tokens is estimated to need about %d MiB of KV cache alone, and ", prev, kvMiB(prev)) + reason
 		}
 		p.Recommendations = append(p.Recommendations, Recommendation{Path: "runtime.context_size", Value: ctx, Certainty: Estimate, Reason: reason})
 	}
@@ -175,7 +170,6 @@ func Compute(in Input) Plan {
 	if free > in.GPU.TotalMiB {
 		free = in.GPU.TotalMiB
 	}
-	p.Fit = "likely_fits"
 	p.Recommendations = append(p.Recommendations, Recommendation{
 		Path: "runtime.required_free_vram_mib", Value: free, Certainty: Estimate,
 		Reason: fmt.Sprintf("estimated load of %d MiB (weights %d, KV cache %d, overhead %d), rounded up to %d MiB", need, p.WeightsMiB, kvMiB(ctx), OverheadMiB, vramStep),

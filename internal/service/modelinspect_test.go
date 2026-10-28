@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sentania-labs/benchwarmer/internal/api"
 	"github.com/sentania-labs/benchwarmer/internal/modelplan"
@@ -48,7 +49,7 @@ func ggufFixture(t *testing.T, size int64) string {
 func TestInspectModelFile(t *testing.T) {
 	gpu := modelplan.GPU{TotalMiB: 24576, Reliable: true}
 	p := ggufFixture(t, 4690<<20) // sparse: only the header is real
-	got := inspectModelFile(p, 262144, gpu)
+	got := inspectModelFile(p, 262144, gpu, []string{p})
 	if got.Status != api.InspectOK || got.Metadata == nil || got.Plan == nil || got.Metadata.Arch != "llama" ||
 		got.GPUTotalMiB != 24576 || got.Compatibility.Status != "unknown" {
 		t.Fatalf("%+v", got)
@@ -56,7 +57,7 @@ func TestInspectModelFile(t *testing.T) {
 	if got.Plan.WeightsMiB != 4690 || len(got.Plan.Recommendations) == 0 {
 		t.Fatalf("%+v", got.Plan)
 	}
-	if g := inspectModelFile(p, 8192, modelplan.GPU{}); g.Status != api.InspectOK || g.GPUTotalMiB != 0 || len(g.Plan.Recommendations) != 0 {
+	if g := inspectModelFile(p, 8192, modelplan.GPU{}, []string{p}); g.Status != api.InspectOK || g.GPUTotalMiB != 0 || len(g.Plan.Recommendations) != 0 {
 		t.Fatalf("no gpu info must give no memory proposals: %+v", g)
 	}
 }
@@ -82,9 +83,13 @@ func TestInspectModelFileFailuresReplaceNothing(t *testing.T) {
 		"wrong ext":   {notModel, api.InspectNotGGUF},
 		"relative":    {"models/x.gguf", api.InspectInvalid},
 		"nul in path": {filepath.Join(dir, "a\x00.gguf"), api.InspectInvalid},
+		"unc":         {`\\\\host\\share\\m.gguf`, api.InspectInvalid},
+		"device":      {`\\\\.\\pipe\\m.gguf`, api.InspectInvalid},
+		"extended":    {`\\\\?\\C:\\m.gguf`, api.InspectInvalid},
+		"slash unc":   {"//host/share/m.gguf", api.InspectInvalid},
 	}
 	for name, c := range cases {
-		got := inspectModelFile(c.path, 8192, modelplan.GPU{TotalMiB: 24576, Reliable: true})
+		got := inspectModelFile(c.path, 8192, modelplan.GPU{TotalMiB: 24576, Reliable: true}, []string{c.path})
 		if got.Status != c.status || got.Message == "" || got.Metadata != nil || got.Plan != nil {
 			t.Errorf("%s: %+v", name, got)
 		}
@@ -100,7 +105,46 @@ func TestInspectModelFileUnreadable(t *testing.T) {
 	}
 	p := ggufFixture(t, 0)
 	os.Chmod(p, 0)
-	if got := inspectModelFile(p, 0, modelplan.GPU{}); got.Status != api.InspectUnreadable {
+	if got := inspectModelFile(p, 0, modelplan.GPU{}, []string{p}); got.Status != api.InspectUnreadable {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestInspectModelFileOnlyReadsAllowedPaths(t *testing.T) {
+	gpu := modelplan.GPU{TotalMiB: 24576, Reliable: true}
+	p := ggufFixture(t, 1<<20)
+	other := ggufFixture(t, 1<<20)
+	missing := filepath.Join(t.TempDir(), "none.gguf")
+
+	if got := inspectModelFile(p, 0, gpu, []string{other}); got.Status != api.InspectNotAvailable || got.Metadata != nil || got.Plan != nil || got.SizeBytes != 0 {
+		t.Fatalf("a real file outside the allowed set must not be read: %+v", got)
+	}
+	real, none := inspectModelFile(p, 0, gpu, nil), inspectModelFile(missing, 0, gpu, nil)
+	if real.Status != none.Status || real.Message != none.Message {
+		t.Fatalf("existing and missing files must be indistinguishable: %+v vs %+v", real, none)
+	}
+	if got := inspectModelFile(missing, 0, gpu, []string{missing}); got.Status != api.InspectNotFound {
+		t.Fatalf("an allowed missing file is reported as missing: %+v", got)
+	}
+	if got := inspectModelFile(p, 0, gpu, []string{"", filepath.Dir(p) + string(filepath.Separator) + "." + string(filepath.Separator) + filepath.Base(p)}); got.Status != api.InspectOK {
+		t.Fatalf("an allowed path matches after cleaning: %+v", got)
+	}
+}
+
+func TestWithDeadlineReleasesAStuckRead(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	start := time.Now()
+	got := withDeadline(50*time.Millisecond,
+		func() api.ModelInspection { <-block; return api.ModelInspection{Status: api.InspectOK} },
+		func() api.ModelInspection { return api.ModelInspection{Status: api.InspectUnreadable} })
+	if got.Status != api.InspectUnreadable || time.Since(start) > 2*time.Second {
+		t.Fatalf("%+v after %s", got, time.Since(start))
+	}
+	got = withDeadline(time.Second,
+		func() api.ModelInspection { return api.ModelInspection{Status: api.InspectOK} },
+		func() api.ModelInspection { return api.ModelInspection{Status: api.InspectUnreadable} })
+	if got.Status != api.InspectOK {
 		t.Fatalf("%+v", got)
 	}
 }

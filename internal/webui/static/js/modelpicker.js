@@ -95,6 +95,9 @@ export function modelGroup(deps) {
     if (!r || r.path !== currentPath() || ms.path !== currentPath()) {
       return [h("p", { class: "help" }, "The model path changed since it was last checked. Use Check this model to read it again.")];
     }
+    if (r.status === "not_available") {
+      return [h("p", { class: "help" }, "This path has not been checked. After you save the configuration with it, use Check this model to read it.")];
+    }
     if (r.status !== "ok") {
       return [h("div", { class: "notice warn" }, h("span", null, r.message || "This file could not be inspected."),
         " ", h("strong", null, "No settings were proposed or changed."))];

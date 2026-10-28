@@ -48,8 +48,8 @@ func TestComputeCapsAtTrainedContextWhenItFits(t *testing.T) {
 	}
 	free := rec(p, "runtime.required_free_vram_mib")
 	// 4690 + 16384 (131072 tokens x 128 KiB) + 768 = 21842 -> 22016
-	if free == nil || free.Value != 22016 || p.EstimatedMiB != 21842 || p.Fit != "likely_fits" {
-		t.Fatalf("%+v est %d fit %s", p.Recommendations, p.EstimatedMiB, p.Fit)
+	if free == nil || free.Value != 22016 || p.EstimatedMiB != 21842 {
+		t.Fatalf("%+v est %d", p.Recommendations, p.EstimatedMiB)
 	}
 }
 
@@ -82,21 +82,21 @@ func TestComputeUnsetContextGetsAProposal(t *testing.T) {
 
 func TestComputeWeightsDoNotFit(t *testing.T) {
 	p := Compute(Input{Meta: llama31(), FileSize: 30000 << 20, GPU: GPU{TotalMiB: 24576, Reliable: true}, CurrentContext: 4096})
-	if len(p.Recommendations) != 0 || p.Fit != "may_not_fit" {
-		t.Fatalf("%+v fit %s", p.Recommendations, p.Fit)
+	if len(p.Recommendations) != 0 {
+		t.Fatalf("%+v", p.Recommendations)
 	}
 }
 
 func TestComputeUnknownGPU(t *testing.T) {
 	for _, g := range []GPU{{}, {TotalMiB: 24576}, {Reliable: true}} {
 		p := Compute(Input{Meta: llama31(), FileSize: 4690 << 20, GPU: g, CurrentContext: 8192})
-		if len(p.Recommendations) != 0 || p.Fit != "unknown" || len(p.Notes) == 0 {
+		if len(p.Recommendations) != 0 || len(p.Notes) == 0 {
 			t.Fatalf("gpu %+v: %+v", g, p)
 		}
 	}
 	// A trained-context cap needs no GPU: it comes from the file.
 	p := Compute(Input{Meta: llama31(), FileSize: 4690 << 20, CurrentContext: 262144})
-	if r := rec(p, "runtime.context_size"); r == nil || r.Value != 131072 || p.Fit != "unknown" {
+	if r := rec(p, "runtime.context_size"); r == nil || r.Value != 131072 {
 		t.Fatalf("%+v", p)
 	}
 }
@@ -104,7 +104,7 @@ func TestComputeUnknownGPU(t *testing.T) {
 func TestComputeUnknownShape(t *testing.T) {
 	m := gguf.Metadata{Arch: "mystery"}
 	p := Compute(Input{Meta: m, FileSize: 4690 << 20, GPU: GPU{TotalMiB: 24576, Reliable: true}, CurrentContext: 8192})
-	if len(p.Recommendations) != 0 || p.Fit != "unknown" {
+	if len(p.Recommendations) != 0 {
 		t.Fatalf("%+v", p)
 	}
 }
@@ -131,7 +131,7 @@ func TestComputeSplitModelProposesNothingFromMemory(t *testing.T) {
 	m := llama31()
 	m.SplitCount = 3
 	p := Compute(Input{Meta: m, FileSize: 1600 << 20, GPU: GPU{TotalMiB: 24576, Reliable: true}, CurrentContext: 4096})
-	if len(p.Recommendations) != 0 || p.Fit != "unknown" || p.EstimatedMiB != 0 {
+	if len(p.Recommendations) != 0 || p.EstimatedMiB != 0 {
 		t.Fatalf("%+v", p)
 	}
 	if !strings.Contains(strings.Join(p.Notes, " "), "split across 3 files") {

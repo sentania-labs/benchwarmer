@@ -56,7 +56,7 @@ test('rows outside the server bounds are dropped', () => {
   assert.deepEqual(rows, []);
 });
 test('failed inspections give no rows', () => {
-  for (const status of ['not_found', 'unreadable', 'not_gguf', 'unsupported', 'invalid']) {
+  for (const status of ['not_found', 'unreadable', 'not_gguf', 'unsupported', 'invalid', 'not_available']) {
     assert.deepEqual(proposalRows({ status, plan: { recommendations: [{ path: 'runtime.context_size', value: 1, reason: '' }] } }, draft()), []);
   }
   assert.deepEqual(proposalRows(null, draft()), []);

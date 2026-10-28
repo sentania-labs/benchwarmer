@@ -17,7 +17,7 @@ class Node {
   get firstElementChild() { return this.children[0] || null; }
   get firstChild() { return this.children[0] || null; }
   removeChild(c) { this.children.splice(this.children.indexOf(c), 1); }
-  addEventListener() {}
+  addEventListener(t, fn) { (this.listeners ||= {})[t] = fn; }
   setAttribute(k, v) { this.attributes[k] = v; }
   contains(n) {
     return n === this || this.children.some((c) => c && (c === n || (c instanceof Node && c.contains(n))));
@@ -228,21 +228,23 @@ test('a failed refresh keeps the list, expansions and focus', async () => {
   mounted.unmount();
 });
 
-test('a successful refresh keeps expansions and focus on the rebuilt rows', async () => {
-  stubFetch(() => ({ body: { events: [ev(3), ev(2), ev(1)] } }));
+test('a refresh with new events keeps expansions and focus on the rebuilt rows', async () => {
+  let events = [ev(3), ev(2), ev(1)];
+  stubFetch(() => ({ body: { events } }));
   const { main, mounted } = mountEvents();
   await settle();
   const list = findAll(main, 'ol')[0];
   findAll(list.children[1], 'details')[0].open = true;
   findAll(list.children[2], 'summary')[0].focus();
   const focused = Node.active;
+  events = [ev(4), ev(3), ev(2), ev(1)];
   mounted.visibility(true);
   await settle();
-  assert.equal(list.children.length, 3);
-  assert.equal(findAll(list.children[1], 'details')[0].open, true);
-  assert.equal(findAll(list.children[0], 'details')[0].open, false);
+  assert.equal(list.children.length, 4);
+  assert.equal(findAll(list.children[2], 'details')[0].open, true);
+  assert.equal(findAll(list.children[1], 'details')[0].open, false);
   assert.notEqual(Node.active, focused, 'the summary is a new element');
-  assert.equal(Node.active, findAll(list.children[2], 'summary')[0]);
+  assert.equal(Node.active, findAll(list.children[3], 'summary')[0]);
   mounted.unmount();
 });
 
@@ -336,5 +338,56 @@ test('a repeating generic failure does not rewrite the status on every tick', as
   mounted.visibility(true);
   await settle();
   assert.equal(writes, 0);
+  mounted.unmount();
+});
+
+test('an unchanged list is left untouched by a background refresh', async () => {
+  stubFetch(() => ({ body: { events: [ev(2), ev(1)] } }));
+  const { main, mounted } = mountEvents();
+  await settle();
+  const list = findAll(main, 'ol')[0];
+  const [a, b] = list.children;
+  mounted.visibility(true);
+  await settle();
+  assert.equal(list.children[0], a);
+  assert.equal(list.children[1], b);
+  mounted.unmount();
+});
+
+test('a new event on a background refresh rebuilds the list', async () => {
+  let events = [ev(2), ev(1)];
+  stubFetch(() => ({ body: { events } }));
+  const { main, mounted } = mountEvents();
+  await settle();
+  const list = findAll(main, 'ol')[0];
+  events = [ev(3), ev(2), ev(1)];
+  mounted.visibility(true);
+  await settle();
+  assert.equal(list.children.length, 3);
+  mounted.unmount();
+});
+
+test('Load older events clicked during a background fetch is not lost', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  let slow = false;
+  const calls = stubFetch(async (path) => {
+    if (path.includes('before_id=')) return { body: { events: [ev(1)] } };
+    if (slow) await gate;
+    return { body: { events: [ev(2)], next_before_id: 2 } };
+  });
+  const { main, mounted } = mountEvents();
+  await settle();
+  const list = findAll(main, 'ol')[0];
+  const more = findAll(main, 'button').find((b) => b.children[0] === 'Load older events');
+  slow = true;
+  mounted.visibility(true);
+  await settle();
+  more.listeners.click();
+  release();
+  await settle();
+  await settle();
+  assert.ok(calls.some((c) => c.includes('before_id=2')), 'the older page was requested');
+  assert.equal(list.children.length, 2);
   mounted.unmount();
 });

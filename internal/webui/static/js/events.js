@@ -19,7 +19,7 @@ export function mount(main) {
   const more = h("button", { type: "button", hidden: true, onclick: () => load(false) }, "Load older events");
   const status = h("p", { class: "muted", role: "status" });
   state = {
-    filter, list, more, status, before: 0, shown: null, failure: null, loading: false, timer: null,
+    filter, list, more, status, before: 0, shown: null, failure: null, pending: null, loading: false, timer: null,
     rows: [], summaries: new Map(), // id -> summary element, for focus restore
   };
   replace(main,
@@ -76,7 +76,11 @@ function openIds(s) {
 
 async function load(reset, background) {
   const s = state;
-  if (!s || s.loading) return;
+  if (!s) return;
+  if (s.loading) {
+    if (!background) s.pending = { reset };
+    return;
+  }
   s.loading = true;
   // A different filter than the one the rows were fetched with starts over:
   // the old row count, expansions and focus belong to the old list.
@@ -98,27 +102,32 @@ async function load(reset, background) {
   try {
     const res = await get("api/v1/events?" + q.toString(), { interactive: false });
     if (state !== s) return;
-    // Rows are built off-DOM and swapped in whole, so a failed or slow fetch
-    // leaves the current list, its scroll position and focus untouched.
-    const rows = reset ? [] : s.rows;
-    const summaries = reset ? new Map() : s.summaries;
-    const items = [];
-    for (const e of res.events || []) {
-      const { li, details, summary } = row(e, new Date(), opened);
-      items.push(li);
-      rows.push({ id: String(e.id), details });
-      summaries.set(String(e.id), summary);
+    const events = res.events || [];
+    const unchanged = background && keep && events.length === s.rows.length &&
+      events.every((e, i) => String(e.id) === s.rows[i].id);
+    if (!unchanged) {
+      // Rows are built off-DOM and swapped in whole, so a failed or slow fetch
+      // leaves the current list, its scroll position and focus untouched.
+      const rows = reset ? [] : s.rows;
+      const summaries = reset ? new Map() : s.summaries;
+      const items = [];
+      for (const e of events) {
+        const { li, details, summary } = row(e, new Date(), opened);
+        items.push(li);
+        rows.push({ id: String(e.id), details });
+        summaries.set(String(e.id), summary);
+      }
+      if (reset) replace(s.list, items);
+      else s.list.append(...items);
+      s.rows = rows;
+      s.summaries = summaries;
     }
-    if (reset) replace(s.list, items);
-    else s.list.append(...items);
-    s.rows = rows;
-    s.summaries = summaries;
     s.shown = filterValue;
     s.before = res.next_before_id || 0;
     s.more.hidden = !s.before;
     s.failure = null;
     s.status.textContent = s.rows.length ? "" : "No events.";
-    if (focus && s.summaries.has(focus)) s.summaries.get(focus).focus({ preventScroll: true });
+    if (!unchanged && focus && s.summaries.has(focus)) s.summaries.get(focus).focus({ preventScroll: true });
   } catch (e) {
     if (state !== s) return;
     const failure = e instanceof ApiError && e.status === 401 ? "unauthorized" : "failed: " + e.message;
@@ -133,6 +142,9 @@ async function load(reset, background) {
     }
   } finally {
     s.loading = false;
+    const next = s.pending;
+    s.pending = null;
+    if (next && state === s) load(next.reset);
   }
 }
 

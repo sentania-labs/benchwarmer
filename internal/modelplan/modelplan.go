@@ -24,7 +24,9 @@ const (
 	// started with a quantized cache (-ctk/-ctv) uses less.
 	kvBytesPerElem = 2
 	ctxStep        = 1024
-	vramStep       = 256
+	// maxContext is the largest context_size the config accepts.
+	maxContext = 1 << 20
+	vramStep   = 256
 )
 
 // Certainty says where a proposed value comes from.
@@ -108,15 +110,23 @@ func Compute(in Input) Plan {
 	}
 	p.Notes = append(p.Notes, "Memory figures assume an f16 KV cache and a fixed allowance for compute buffers. They are estimates; the loaded model may use more or less.")
 
+	limit := maxContext
+	if m.ContextLength > 0 && m.ContextLength < maxContext {
+		limit = int(m.ContextLength)
+	}
 	ctx := in.CurrentContext
-	if m.ContextLength > 0 && ctx > int(m.ContextLength) {
-		ctx = int(m.ContextLength)
+	if m.ContextLength > 0 && uint64(ctx) > m.ContextLength {
+		ctx = limit
 		p.Recommendations = append(p.Recommendations, Recommendation{
 			Path: "runtime.context_size", Value: ctx, Certainty: FromFile,
 			Reason: fmt.Sprintf("the model was trained for %d tokens of context; %d is more than it supports", m.ContextLength, in.CurrentContext),
 		})
 	}
 
+	if m.SplitCount > 1 {
+		p.Notes = append(p.Notes, fmt.Sprintf("This model is split across %d files and only one was inspected, so its total size is unknown and no memory-based settings are proposed.", m.SplitCount))
+		return p
+	}
 	if !in.GPU.Reliable || in.GPU.TotalMiB <= 0 {
 		p.Notes = append(p.Notes, "GPU memory is not known right now, so no memory-based settings are proposed.")
 		return p
@@ -135,9 +145,7 @@ func Compute(in Input) Plan {
 	}
 	kvMiB := func(tokens int) int { return int((int64(tokens)*int64(p.KVBytesPerTok) + mib - 1) / mib) }
 	fitTokens := int(int64(room) * mib / int64(p.KVBytesPerTok))
-	if m.ContextLength > 0 {
-		fitTokens = min(fitTokens, int(m.ContextLength))
-	}
+	fitTokens = min(fitTokens, limit)
 	fitTokens = roundDown(fitTokens, ctxStep)
 	if fitTokens < ctxStep {
 		p.Fit = "may_not_fit"

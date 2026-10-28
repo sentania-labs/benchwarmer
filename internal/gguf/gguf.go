@@ -62,6 +62,9 @@ type Metadata struct {
 	ExpertCount  uint64 `json:"expert_count,omitempty"`
 	ExpertUsed   uint64 `json:"expert_used_count,omitempty"`
 	SlidingWin   uint64 `json:"sliding_window,omitempty"`
+	// SplitCount is split.count: how many files the model is split across.
+	// Zero or one means a single file.
+	SplitCount uint64 `json:"split_count,omitempty"`
 }
 
 const (
@@ -303,6 +306,7 @@ func Parse(r io.Reader) (Metadata, error) {
 
 	m.Name, m.SizeLabel, m.Arch = strs["general.name"], strs["general.size_label"], strs["general.architecture"]
 	m.FileType = uint32(min(ints["general.file_type"], math.MaxUint32))
+	m.SplitCount = ints["split.count"]
 	if m.Arch == "" {
 		return m, nil
 	}
@@ -342,7 +346,7 @@ func (rd *reader) skipValue2(et uint32, n uint64) {
 // wanted reports whether a key feeds Metadata.
 func wanted(key string) bool {
 	switch key {
-	case "general.architecture", "general.name", "general.size_label", "general.file_type":
+	case "general.architecture", "general.name", "general.size_label", "general.file_type", "split.count":
 		return true
 	}
 	for _, s := range []string{".context_length", ".block_count", ".embedding_length", ".attention.head_count",

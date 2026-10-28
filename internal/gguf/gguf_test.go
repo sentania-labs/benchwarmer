@@ -64,6 +64,23 @@ func TestParseLlama(t *testing.T) {
 	}
 }
 
+func TestParseSplitCount(t *testing.T) {
+	b := header(3, 3)
+	b.kvStr("general.architecture", "llama")
+	b.str("split.count")
+	b.u32(tU16)
+	b.Write([]byte{3, 0})
+	b.kvU32("llama.block_count", 32)
+	m, err := Parse(bytes.NewReader(b.Bytes()))
+	if err != nil || m.SplitCount != 3 {
+		t.Fatalf("%+v %v", m, err)
+	}
+	m, err = Parse(bytes.NewReader(llama31().Bytes()))
+	if err != nil || m.SplitCount != 0 {
+		t.Fatalf("%+v %v", m, err)
+	}
+}
+
 func TestParsePerLayerKVHeads(t *testing.T) {
 	b := header(3, 4)
 	b.kvStr("general.architecture", "gemma3")

@@ -126,3 +126,31 @@ func TestRequiredFreeCappedAtTotal(t *testing.T) {
 		t.Fatalf("%+v", p.Recommendations)
 	}
 }
+
+func TestComputeSplitModelProposesNothingFromMemory(t *testing.T) {
+	m := llama31()
+	m.SplitCount = 3
+	p := Compute(Input{Meta: m, FileSize: 1600 << 20, GPU: GPU{TotalMiB: 24576, Reliable: true}, CurrentContext: 4096})
+	if len(p.Recommendations) != 0 || p.Fit != "unknown" || p.EstimatedMiB != 0 {
+		t.Fatalf("%+v", p)
+	}
+	if !strings.Contains(strings.Join(p.Notes, " "), "split across 3 files") {
+		t.Fatalf("%v", p.Notes)
+	}
+}
+
+func TestComputeContextNeverExceedsConfigMax(t *testing.T) {
+	huge := gguf.Metadata{Arch: "tiny", BlockCount: 1, EmbeddingLength: 64, HeadCount: 1, HeadCountKV: 1, KVHeadsTotal: 1}
+	p := Compute(Input{Meta: huge, FileSize: 100 << 20, GPU: GPU{TotalMiB: 24576, Reliable: true}})
+	if r := rec(p, "runtime.context_size"); r == nil || r.Value != maxContext {
+		t.Fatalf("%+v", p.Recommendations)
+	}
+	m := huge
+	m.ContextLength = 4 << 20
+	p = Compute(Input{Meta: m, FileSize: 100 << 20, GPU: GPU{TotalMiB: 24576, Reliable: true}, CurrentContext: 3 << 20})
+	for _, r := range p.Recommendations {
+		if r.Path == "runtime.context_size" && r.Value > maxContext {
+			t.Fatalf("%+v", p.Recommendations)
+		}
+	}
+}

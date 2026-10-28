@@ -48,6 +48,13 @@ test('unchanged, unknown-field and non-integer rows are dropped', () => {
   ]), draft());
   assert.deepEqual(rows, []);
 });
+test('rows outside the server bounds are dropped', () => {
+  const rows = proposalRows(ok([
+    { path: 'runtime.context_size', value: 2000000, reason: 'too big' },
+    { path: 'runtime.context_size', value: 100, reason: 'too small' },
+  ]), draft());
+  assert.deepEqual(rows, []);
+});
 test('failed inspections give no rows', () => {
   for (const status of ['not_found', 'unreadable', 'not_gguf', 'unsupported', 'invalid']) {
     assert.deepEqual(proposalRows({ status, plan: { recommendations: [{ path: 'runtime.context_size', value: 1, reason: '' }] } }, draft()), []);

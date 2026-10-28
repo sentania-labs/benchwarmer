@@ -56,7 +56,7 @@ export function proposalRows(result, draft) {
   const rows = [];
   for (const r of result.plan.recommendations || []) {
     const meta = FIELD_META[r.path];
-    if (!meta || !Number.isInteger(r.value)) continue;
+    if (!meta || !Number.isInteger(r.value) || r.value < meta.min || r.value > meta.max) continue;
     const before = getPath(draft, r.path);
     if (before === r.value) continue;
     rows.push({ path: r.path, label: meta.label, unit: meta.unit, before: before ?? null, after: r.value,

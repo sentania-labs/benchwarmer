@@ -4,10 +4,9 @@
   Authenticode signature from the pinned signer (Ollama Inc.).
 .DESCRIPTION
   The runtime is unpacked from Ollama's release zip, which is signed (the
-  upstream llama.cpp Windows builds are not). That signature is what lets
-  Defender ASR rule 01443614 start the runtime without a path exclusion, so a
-  future pin that points at an unsigned or differently signed zip must fail
-  the build, not ship. Needs Windows (Get-AuthenticodeSignature).
+  upstream llama.cpp Windows builds are not). A future pin that points at an
+  unsigned or differently signed zip must fail the build, not ship. A valid
+  signature does not guarantee that a Windows security policy permits it. Needs Windows (Get-AuthenticodeSignature).
 
   The check is on the signer in the signing certificate, not only on the
   signature being valid, and covers every .exe and .dll under -RuntimeDir

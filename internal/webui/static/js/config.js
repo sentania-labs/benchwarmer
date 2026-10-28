@@ -2,6 +2,7 @@
 // structured forms or raw JSON, and PUT the whole object back. Values shown
 // as "<redacted>" are left untouched so the server restores them.
 import { waitForRestart } from "./restart.js";
+import { compatibilityMessage } from "./compatibility.js";
 import { h, replace, warnIcon } from "./dom.js";
 import { get, put, post, signIn, ApiError } from "./api.js";
 import { clockTime, titleize } from "./format.js";
@@ -11,7 +12,7 @@ import { SECTIONS, sectionFor, sectionDefs } from "./configdefs.js";
 // Kept across page visits so unsaved edits survive a trip to the dashboard.
 const st = {
   cfg: null, draft: null, source: "", section: "runtime",
-  errors: new Map(), clientErrors: new Map(), impact: null, message: null, loading: false,
+  errors: new Map(), clientErrors: new Map(), impact: null, message: null, loading: false, setup: null,
 };
 let els = null;
 
@@ -22,7 +23,7 @@ const ctx = {
   get draft() { return st.draft; },
   errors: st.errors,
   clientErrors: st.clientErrors,
-  changed: () => syncSaveBar(),
+  changed: () => { syncSaveBar(); updateCompatibility(); },
 };
 
 export function mount(main, rest) {
@@ -91,6 +92,8 @@ async function loadChoices() {
   } catch {
     return;
   }
+  st.setup = info;
+  updateCompatibility();
   const mib = (b) => Math.round(b / 1048576).toLocaleString() + " MiB";
   const lists = {
     "dl-models": (info.models || []).map((m) => [m.path, m.name + " (" + mib(m.size_bytes) + ")"]),
@@ -257,7 +260,19 @@ function renderSection() {
     case "json": content = jsonSection(); break;
     default: content = sectionDefs(st.section).map((g) => group(g));
   }
-  replace(els.body, h("h2", null, sec.label), sec.intro && h("p", { class: "intro" }, sec.intro), content);
+  replace(els.body, h("h2", null, sec.label), sec.intro && h("p", { class: "intro" }, sec.intro),
+    st.section === "runtime" ? h("div", { id: "compatibility-guidance", class: "notice info", role: "status", "aria-live": "polite" }) : null, content);
+  updateCompatibility();
+}
+
+function updateCompatibility() {
+  if (!els || st.section !== "runtime") return;
+  const box = document.getElementById("compatibility-guidance");
+  if (!box || !st.draft) return;
+  const model = (st.setup?.models || []).find(m => m.path === st.draft.runtime?.model_path);
+  const runtime = (st.setup?.runtimes || []).find(r => r.path === st.draft.runtime?.executable);
+  const text = compatibilityMessage(model, runtime);
+  if (box.textContent !== text) box.textContent = text;
 }
 
 function group(g) {

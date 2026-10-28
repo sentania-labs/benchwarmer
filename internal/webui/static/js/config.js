@@ -119,13 +119,7 @@ async function validateDraft(interactive = false) {
   st.errors.clear();
   addErrors(details);
   if (!els) return;
-  for (const wrap of els.body.querySelectorAll(".field[data-path]")) {
-    const path = wrap.dataset.path;
-    const msgs = [...st.clientErrors, ...st.errors].filter(([p]) => p === path || p.startsWith(path + "["));
-    const slot = wrap.querySelector(".field-error");
-    if (slot) { slot.textContent = msgs.map(([, msg]) => msg).join("; "); slot.hidden = !msgs.length; }
-    wrap.classList.toggle("invalid", !!msgs.length);
-  }
+  refreshErrors(ctx, els.body);
   renderTop();
   renderNav();
   syncSaveBar();

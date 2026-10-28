@@ -6,7 +6,8 @@
   The runtime is unpacked from Ollama's release zip, which is signed (the
   upstream llama.cpp Windows builds are not). A future pin that points at an
   unsigned or differently signed zip must fail the build, not ship. A valid
-  signature does not guarantee that a Windows security policy permits it. Needs Windows (Get-AuthenticodeSignature).
+  signature does not guarantee that a Windows security policy permits it.
+  Needs Windows (Get-AuthenticodeSignature).
 
   The check is on the signer in the signing certificate, not only on the
   signature being valid, and covers every .exe and .dll under -RuntimeDir

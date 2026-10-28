@@ -197,7 +197,7 @@ export function modelGroup(deps) {
 
   const info = deps.setup();
   const dir = info && info.models_dir ? info.models_dir : "the models folder";
-  const el = h("fieldset", { class: "group", id: "model-picker" },
+  const el = h("fieldset", { class: "group", id: "model-picker", dataset: { path: PATH } },
     h("legend", null, "Model"),
     h("div", { class: "field" }, h("label", { for: PICKER_ID }, "Model"), select,
       h("p", { class: "help", id: "model-picker-help" }, "Models found in " + dir + ". Copy a .gguf file there and reload this page to see it. Choosing one reads its header (it is never run) and proposes settings you can accept or decline. To use a model at another path, open Advanced settings.")),

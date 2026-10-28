@@ -227,7 +227,8 @@ paths:
       description: |
         Management token or agent token. `duration` is a Go duration string
         (`"30m"`, `"2h"`), empty for indefinite, `"until_reboot"`, or
-        `"until_tomorrow"` (08:00 the next day in the configured time zone).
+        `"until_tomorrow"` (for Pause AI, 08:00 the next day in the configured
+        time zone; for AI Priority, the next local midnight).
         `auto` takes no duration. Pause durations are at
         most 720h; AI Priority durations at most `modes.max_ai_priority`.
         `set_by` defaults to `"api"`.
@@ -732,7 +733,7 @@ components:
       properties:
         pause_durations: { type: array, items: { type: string } }
         ai_priority_durations: { type: array, items: { type: string } }
-        until_tomorrow_at: { type: string, format: date-time, description: "When `until_tomorrow` would end if chosen now: 08:00 the next day in the configured time zone." }
+        until_tomorrow_at: { type: string, format: date-time, description: "When a Pause AI with `until_tomorrow` would end if chosen now: 08:00 the next day in the configured time zone. AI Priority with `until_tomorrow` ends at the next local midnight." }
     ModeStatus:
       type: object
       required: [mode]
@@ -917,7 +918,7 @@ components:
         mode: { $ref: "#/components/schemas/Mode" }
         duration:
           type: string
-          description: Go duration, empty for indefinite, "until_reboot", or "until_tomorrow".
+          description: Go duration, empty for indefinite, "until_reboot", or "until_tomorrow" (Pause AI ends 08:00 the next day, AI Priority at the next local midnight).
           examples: ["30m", "2h", "until_reboot", "until_tomorrow"]
         set_by: { type: string, maxLength: 64, examples: ["tray", "ui"] }
     ActionRequest:

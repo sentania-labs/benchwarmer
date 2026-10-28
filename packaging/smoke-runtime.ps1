@@ -10,8 +10,10 @@
   vulkan\ggml-vulkan.dll and that folder on PATH.
 
   Flags covered: -m --host --port -c -ngl (always), -np, --kv-unified, -fa,
-  -ctk/-ctv, --n-cpu-moe, --jinja, and --ssl-key-file/--ssl-cert-file. Each
-  case also serves one completion.
+  -ctk/-ctv, --n-cpu-moe, and --jinja. Each case also serves one
+  completion. The server's own TLS flags are not covered: Benchwarmer never
+  passes them (it terminates TLS itself and runs llama-server on loopback),
+  and Ollama's build has no SSL support.
 
   What this cannot prove: the GitHub runner has no GPU, so the model runs on
   the CPU backend. The script checks that the Vulkan backend DLL is found and
@@ -91,39 +93,27 @@ if ($text -match 'Vulkan\d+:') {
   Write-Host '::warning::No Vulkan loader (vulkan-1.dll) on this runner; the Vulkan backend could not be exercised. Check it on a machine with a GPU.'
 }
 
-# A throwaway self-signed certificate for the TLS flags.
-Step 'Creating a throwaway TLS certificate'
-$rsa = [System.Security.Cryptography.RSA]::Create(2048)
-$req = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=localhost', $rsa,
-  [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
-$cert = $req.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-1), [DateTimeOffset]::UtcNow.AddDays(1))
-$certPem = Join-Path $LogDir 'smoke-cert.pem'
-$keyPem = Join-Path $LogDir 'smoke-key.pem'
-Set-Content $certPem $cert.ExportCertificatePem()
-Set-Content $keyPem $rsa.ExportPkcs8PrivateKeyPem()
-
-function Test-Case([string] $Name, [string[]] $Extra, [switch] $Tls) {
+function Test-Case([string] $Name, [string[]] $Extra) {
   Step "llama-server $Name"
   $port = Get-FreePort
   $log = Join-Path $LogDir ("case-" + ($Name -replace '[^A-Za-z0-9]+', '_') + '.log')
   $srvArgs = @('-m', $Model, '--host', '127.0.0.1', '--port', "$port", '-c', '256', '-ngl', '0') + $Extra
   $proc = Start-Process $Exe -ArgumentList $srvArgs -NoNewWindow -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
-  $scheme = if ($Tls) { 'https' } else { 'http' }
-  $base = "${scheme}://127.0.0.1:$port"
+  $base = "http://127.0.0.1:$port"
   $ok = $false
   try {
     $deadline = (Get-Date).AddSeconds(90)
     while ((Get-Date) -lt $deadline) {
       if ($proc.HasExited) { break }
       try {
-        $r = Invoke-WebRequest "$base/health" -SkipCertificateCheck -TimeoutSec 3
+        $r = Invoke-WebRequest "$base/health" -TimeoutSec 3
         if ($r.StatusCode -eq 200) { $ok = $true; break }
       } catch { }
       Start-Sleep -Milliseconds 500
     }
     if ($ok) {
       $body = @{ prompt = 'Once'; n_predict = 2 } | ConvertTo-Json
-      $c = Invoke-RestMethod "$base/completion" -Method Post -Body $body -ContentType 'application/json' -SkipCertificateCheck -TimeoutSec 60
+      $c = Invoke-RestMethod "$base/completion" -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 60
       if ($null -eq $c.content) { $ok = $false }
     }
   } finally {
@@ -143,6 +133,5 @@ Test-Case 'flash-attn' @('-fa', 'on')
 Test-Case 'cache-type' @('-fa', 'on', '-ctk', 'f16', '-ctv', 'f16')
 Test-Case 'n-cpu-moe' @('--n-cpu-moe', '1')
 Test-Case 'jinja' @('--jinja')
-Test-Case 'tls' @('--ssl-key-file', $keyPem, '--ssl-cert-file', $certPem) -Tls
 Test-Case 'all' @('-np', '2', '--kv-unified', '-fa', 'on', '-ctk', 'f16', '-ctv', 'f16', '--n-cpu-moe', '1', '--jinja')
 Step 'Runtime smoke passed'

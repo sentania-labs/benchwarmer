@@ -229,6 +229,11 @@ const TRANSITION_TYPES = new Set([
   "grace_shortened", "preempted",
 ]);
 
+// ENTERS_STATE are the transitions whose state is the one entered; other
+// events are stamped with the controller's current state, which says nothing
+// about the event itself.
+const ENTERS_STATE = new Set(["state_changed", "decision_changed"]);
+
 // eventKind classifies one event as "problem", "change" or "step". A critical
 // or warning event is a problem, except that a transition is a problem only
 // when critical or when it lands in ERROR.
@@ -236,7 +241,7 @@ export function eventKind(e) {
   const t = e && e.type;
   const sev = e && e.severity;
   if (t && TRANSITION_TYPES.has(t)) {
-    if (sev === "critical" || (e && e.state === "ERROR")) return "problem";
+    if (sev === "critical" || (ENTERS_STATE.has(t) && e.state === "ERROR")) return "problem";
   } else if (sev === "critical" || sev === "warning") {
     return "problem";
   }

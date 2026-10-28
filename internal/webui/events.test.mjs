@@ -82,6 +82,10 @@ test('a warning on a transition is a state change, not a problem', () => {
   assert.equal(fmt.eventKind({ type: 'state_changed', severity: 'critical', state: 'ERROR' }), 'problem');
   assert.equal(fmt.eventKind({ type: 'state_changed', severity: 'notice', state: 'ERROR' }), 'problem');
   assert.equal(fmt.eventKind({ type: 'decision_changed', severity: 'critical', state: 'STOPPED' }), 'problem');
+  for (const t of ['mode_changed', 'mode_expired', 'cooldown_reset', 'suppression_started', 'grace_shortened', 'preempted']) {
+    assert.equal(fmt.eventKind({ type: t, severity: 'notice', state: 'ERROR' }), fmt.eventKind({ type: t }), t);
+  }
+  assert.equal(fmt.eventKind({ type: 'mode_changed', severity: 'notice', state: 'ERROR' }), 'change');
 });
 
 test('state names are intelligible and unknown values are not blank', () => {

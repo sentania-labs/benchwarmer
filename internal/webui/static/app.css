@@ -12,7 +12,7 @@
   --ok-bg: #e3f3e8; --ok-ink: #14532d; --ok-mark: #1f7a45;
   --warn-bg: #fff3d6; --warn-ink: #5c3d00; --warn-mark: #b7791f;
   --bad-bg: #fde4e1; --bad-ink: #7a1d12; --bad-mark: #c0392b;
-  --info-bg: #e5eefb; --info-ink: #173a6b;
+  --info-bg: #e5eefb; --info-ink: #173a6b; --info-mark: #2f5fa8;
   --own: #2f6f4f; --ext: #c05621; --other: #8a8f99; --free: #d9ddd7; --total: #3b5b92;
   --radius: 10px;
   color-scheme: light dark;
@@ -31,7 +31,7 @@
     --ok-bg: #16311f; --ok-ink: #bdebcb; --ok-mark: #4cc27b;
     --warn-bg: #3a2c0a; --warn-ink: #ffe3a3; --warn-mark: #e5a93a;
     --bad-bg: #3d1713; --bad-ink: #ffc9c1; --bad-mark: #f0705f;
-    --info-bg: #15263f; --info-ink: #c9dcfb;
+    --info-bg: #15263f; --info-ink: #c9dcfb; --info-mark: #7fa2e0;
     --own: #5fb58a; --ext: #f08a4b; --other: #7c828c; --free: #343a36; --total: #7fa2e0;
   }
 }
@@ -98,21 +98,30 @@ h3 { font-size: 0.95rem; margin: 12px 0 6px; }
 .card.wide { grid-column: 1 / -1; }
 @media (min-width: 900px) { .card.wide { grid-column: span 2; } }
 .card.head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; margin-bottom: 16px; }
-.card.head .summary { margin: 0; font-size: 1.15rem; flex: 1 1 260px; }
-.card.head .muted { flex-basis: 100%; margin: 0; }
+.card.head { gap: 10px 16px; }
+.card.head .headtext { flex: 1 1 260px; min-width: 0; }
+.card.head .summary { margin: 0; font-size: 1.15rem; font-weight: 600; }
+.card.head .detail { margin: 4px 0 0; color: var(--muted); }
+.card.head .detail a { font-weight: 600; }
 
-/* Condition badge: color plus text plus a distinct shape. */
+/* Status badge: color plus text plus a distinct icon shape, per severity. */
 .badge {
-  display: inline-flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px;
-  font-size: 1.6rem; font-weight: 800; letter-spacing: 0.01em; border: 2px solid;
+  display: inline-flex; align-items: center; gap: 10px; padding: 8px 16px; border-radius: 999px;
+  font-size: 1.3rem; font-weight: 800; letter-spacing: 0.01em; border: 2px solid; flex: none; max-width: 100%;
 }
-.badge .icon { width: 1.5em; height: 1.5em; }
-.cond-available { background: var(--ok-bg); color: var(--ok-ink); border-color: var(--ok-mark); --badge-ink: var(--ok-bg); }
-.cond-available .icon { color: var(--ok-mark); }
-.cond-yielding { background: var(--warn-bg); color: var(--warn-ink); border-color: var(--warn-mark); --badge-ink: var(--warn-bg); }
-.cond-yielding .icon { color: var(--warn-mark); }
-.cond-unavailable { background: var(--bad-bg); color: var(--bad-ink); border-color: var(--bad-mark); --badge-ink: var(--bad-bg); }
-.cond-unavailable .icon { color: var(--bad-mark); }
+.badge .icon { width: 1.4em; height: 1.4em; }
+.tone-ok { background: var(--ok-bg); color: var(--ok-ink); border-color: var(--ok-mark); --badge-ink: var(--ok-bg); }
+.tone-ok .icon { color: var(--ok-mark); }
+.tone-wait { background: var(--info-bg); color: var(--info-ink); border-color: var(--info-mark); --badge-ink: var(--info-bg); }
+.tone-wait .icon { color: var(--info-mark); }
+.tone-paused { background: var(--surface-2); color: var(--ink); border-color: var(--muted); --badge-ink: var(--surface-2); }
+.tone-paused .icon { color: var(--muted); }
+.tone-attention { background: var(--warn-bg); color: var(--warn-ink); border-color: var(--warn-mark); --badge-ink: var(--warn-bg); }
+.tone-attention .icon { color: var(--warn-mark); }
+.tone-attention .icon .knock { fill: var(--warn-bg); }
+.tone-problem { background: var(--bad-bg); color: var(--bad-ink); border-color: var(--bad-mark); --badge-ink: var(--bad-bg); }
+.tone-problem .icon { color: var(--bad-mark); }
+.tone-unknown { background: var(--surface); color: var(--muted); border: 2px dashed var(--muted); --badge-ink: var(--surface); }
 .icon .ink { fill: var(--badge-ink, var(--surface)); }
 .icon .ink-stroke { fill: none; stroke: var(--badge-ink, var(--surface)); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 
@@ -184,6 +193,21 @@ input[type=checkbox], input[type=radio] { width: 18px; height: 18px; accent-colo
 .duration select { flex: 1 1 120px; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .action-status { min-height: 1.5em; margin: 8px 0 0; }
+
+/* Quick controls and troubleshooting */
+.card.controls { margin-bottom: 16px; }
+.quick-group { margin-bottom: 12px; }
+.quick-label { margin: 0 0 6px; font-weight: 600; }
+.quick-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.quick-btn { min-height: 44px; padding: 8px 16px; }
+.quick-btn[aria-disabled="true"] { opacity: 0.55; cursor: default; }
+.quick-btn.is-current::after { content: " (current)"; font-weight: 400; }
+.more-options { margin-top: 4px; }
+.more-options summary, .troubleshoot > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.more-options form { margin-top: 10px; }
+.troubleshoot { margin-top: 16px; }
+.troubleshoot > .grid { margin-top: 12px; }
+.maintenance p { margin: 0 0 8px; }
 
 /* Mode controls */
 .mode-form { display: grid; gap: 12px; }

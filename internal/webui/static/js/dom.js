@@ -82,3 +82,27 @@ export function warnIcon() {
     ["rect", { x: 11, y: 8, width: 2, height: 7, class: "knock" }],
     ["rect", { x: 11, y: 16.5, width: 2, height: 2, class: "knock" }]);
 }
+
+// toneIcon draws the status head's icon. Each severity has its own shape, so
+// color is never the only cue: check, clock, pause bars, triangle, octagon,
+// question mark.
+export function toneIcon(severity) {
+  switch (severity) {
+    case "ok":
+      return conditionIcon("Available");
+    case "wait":
+      return svg("0 0 24 24", ["circle", { cx: 12, cy: 12, r: 10, fill: "currentColor" }],
+        ["path", { d: "M12 6.5V12l3.5 2.2", class: "ink-stroke" }]);
+    case "paused":
+      return svg("0 0 24 24", ["circle", { cx: 12, cy: 12, r: 10, fill: "currentColor" }],
+        ["rect", { x: 8.5, y: 7.5, width: 2.6, height: 9, class: "ink" }],
+        ["rect", { x: 12.9, y: 7.5, width: 2.6, height: 9, class: "ink" }]);
+    case "attention":
+      return warnIcon();
+    case "problem":
+      return conditionIcon("Unavailable");
+  }
+  return svg("0 0 24 24", ["circle", { cx: 12, cy: 12, r: 10, fill: "currentColor" }],
+    ["path", { d: "M9.2 9.3a2.9 2.9 0 1 1 4.3 2.5c-1 .6-1.5 1.1-1.5 2.2", class: "ink-stroke" }],
+    ["circle", { cx: 12, cy: 17.2, r: 1.3, class: "ink" }]);
+}

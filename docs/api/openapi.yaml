@@ -227,7 +227,8 @@ paths:
       description: |
         Management token or agent token. `duration` is a Go duration string
         (`"30m"`, `"2h"`), empty for indefinite, `"until_reboot"`, or
-        `"until_tomorrow"`. `auto` takes no duration. Pause durations are at
+        `"until_tomorrow"` (08:00 the next day in the configured time zone).
+        `auto` takes no duration. Pause durations are at
         most 720h; AI Priority durations at most `modes.max_ai_priority`.
         `set_by` defaults to `"api"`.
       requestBody:
@@ -670,7 +671,7 @@ components:
 
     Status:
       type: object
-      required: [time, version, condition, state, summary, mode, profile, runtime, gpu, decision, timers, agent, config_source, mode_options]
+      required: [time, version, condition, state, summary, mode, profile, runtime, gpu, decision, timers, agent, config_source, mode_options, owner]
       properties:
         time: { type: string, format: date-time }
         version: { type: string }
@@ -696,13 +697,42 @@ components:
           type: string
           description: Which field of config.json was rejected and why. Present only when the file was found but could not be used.
         mode_options: { $ref: "#/components/schemas/ModeOptions" }
+        owner: { $ref: "#/components/schemas/OwnerStatus" }
+    OwnerStatus:
+      type: object
+      required: [kind, severity, cause]
+      description: |
+        The status read the way the person at the PC would: one kind, one
+        severity, and the facts a sentence needs. It carries codes, not
+        sentences; clients word them in local time. Anything the service
+        cannot classify is `unknown`, never a guess.
+      properties:
+        kind: { type: string, enum: [available, starting, waiting, paused, problem, unknown] }
+        severity:
+          type: string
+          enum: [ok, wait, paused, attention, problem, unknown]
+          description: "`wait` is normal and needs nothing; `attention` means AI works but something needs fixing; `problem` means AI is not working for a reason the owner can act on."
+        cause:
+          type: string
+          description: "ready, busy, loading, starting, game, gpu_busy, cooldown, startup, resume, drained, recovering, suppressed, low_vram, stopping, sleeping, paused, too_hot, setup, crash, gpu_fault, no_gpu_readings, no_process_list, unknown."
+        after: { type: string, enum: [game, gpu_busy, heat, other], description: What a cooldown follows. }
+        app: { type: string, description: The application behind a wait, when one is named. }
+        detail: { type: string, description: Service-written text for the `setup` cause. }
+        yielding: { type: boolean, description: AI is stepping aside now (draining or stopping). }
+        return_at:
+          type: string
+          format: date-time
+          description: When AI can next start, present only when a timer decides it. A bound, not a promise; later checks can still hold it back.
+        resume_delay_seconds: { type: integer, description: How long AI waits after the GPU is free again, for waits with no end time. }
+        config_fallback: { type: boolean, description: The service is running on a fallback configuration. }
     ModeOptions:
       type: object
-      required: [pause_durations, ai_priority_durations]
+      required: [pause_durations, ai_priority_durations, until_tomorrow_at]
       description: The timed choices for the manual modes, from the modes section of the configuration. Clients add until_tomorrow and until_reboot.
       properties:
         pause_durations: { type: array, items: { type: string } }
         ai_priority_durations: { type: array, items: { type: string } }
+        until_tomorrow_at: { type: string, format: date-time, description: "When `until_tomorrow` would end if chosen now: 08:00 the next day in the configured time zone." }
     ModeStatus:
       type: object
       required: [mode]

@@ -3,7 +3,7 @@
 // as "<redacted>" are left untouched so the server restores them.
 import { proposedRule, sameMatcher, snapshotFresh, searchableValues } from "./applications.js";
 import { mountHistory } from "./history.js";
-import { validationGeneration } from "./validation.js";
+import { validationGeneration, isFallbackSource, saveEnabled } from "./validation.js";
 import { waitForRestart } from "./restart.js";
 import { compatibilityMessage } from "./compatibility.js";
 import { h, replace, warnIcon } from "./dom.js";
@@ -152,6 +152,7 @@ async function load() {
     st.clientErrors.clear();
     resetModelPicker();
     loadChoices();
+    if (isFallbackSource(st.source)) invalidateValidation();
   } catch (e) {
     st.loading = false;
     if (!els) return;
@@ -166,6 +167,7 @@ async function load() {
   }
   st.loading = false;
   renderAll();
+  if (isFallbackSource(st.source)) validateDraft();
 }
 
 // loadChoices fills the suggestion lists behind the model, runtime, and
@@ -761,12 +763,14 @@ function syncSaveBar() {
   if (!els.saveState) {
     els.saveState = h("span", { class: "savestate", role: "status" });
     els.discard = h("button", { type: "button", onclick: discard }, "Discard");
-    els.save = h("button", { type: "button", class: "primary", onclick: save }, "Save configuration");
+    els.save = h("button", { type: "button", class: "primary", onclick: save });
     replace(els.bar, els.saveState, els.discard, els.save);
   }
-  els.saveState.textContent = d ? "Unsaved changes" : "No unsaved changes";
+  const fallback = isFallbackSource(st.source);
+  els.saveState.textContent = d ? "Unsaved changes" : fallback ? "Not saved as the primary config yet" : "No unsaved changes";
   els.discard.disabled = !d;
-  els.save.disabled = !d || !validated || validationPending || st.errors.size > 0 || st.clientErrors.size > 0;
+  els.save.textContent = fallback ? "Save as primary config" : "Save configuration";
+  els.save.disabled = !saveEnabled({ dirty: !!d, fallback, validated, pending: validationPending, errorCount: st.errors.size + st.clientErrors.size });
 }
 
 function discard() {
@@ -782,7 +786,9 @@ function discard() {
   resetModelPicker();
   st.validateFailed = false;
   st.warnings = [];
+  if (isFallbackSource(st.source)) invalidateValidation();
   renderAll();
+  if (isFallbackSource(st.source)) validateDraft();
 }
 
 async function save() {

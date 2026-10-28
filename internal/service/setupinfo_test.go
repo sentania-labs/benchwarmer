@@ -79,3 +79,15 @@ func TestFileExistsIgnoresDirectories(t *testing.T) {
 		t.Fatal("fileExists wrong")
 	}
 }
+
+func TestModelFilesListsNamesWithoutReadingHeaders(t *testing.T) {
+	p := ggufFixture(t, 1<<20)
+	dir := filepath.Dir(p)
+	names := modelFiles(dir)
+	if len(names) != 1 || names[0].Path != p || names[0].Architecture != "" {
+		t.Fatalf("%+v", names)
+	}
+	if full := listModels(dir); len(full) != 1 || full[0].Architecture != "llama" {
+		t.Fatalf("%+v", full)
+	}
+}

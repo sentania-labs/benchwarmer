@@ -28,7 +28,7 @@ func (s *Service) inspectModel(path string, currentContext int) api.ModelInspect
 	g := modelplan.GPU{TotalMiB: gpu.VRAMTotalMiB, Reliable: gpu.Confidence != policy.ConfidenceNone}
 	cfg, _ := s.ctl.Config()
 	allowed := []string{cfg.Runtime.ModelPath}
-	for _, m := range listModels(filepath.Join(s.o.DataDir, "models")) {
+	for _, m := range modelFiles(filepath.Join(s.o.DataDir, "models")) {
 		allowed = append(allowed, m.Path)
 	}
 	return inspectModelFile(path, currentContext, g, allowed)

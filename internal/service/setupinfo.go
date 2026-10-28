@@ -37,13 +37,24 @@ func installDir() string {
 	return filepath.Dir(exe)
 }
 
-// listModels returns the GGUF files directly in dir and one level below
-// (models are often kept in a folder per model), sorted by path.
+// listModels is modelFiles plus each file's architecture, read from its
+// bounded header.
 func listModels(dir string) []api.ModelFile {
+	out := modelFiles(dir)
+	for i := range out {
+		out[i].Architecture = ggufArchitecture(out[i].Path)
+	}
+	return out
+}
+
+// modelFiles returns the GGUF files directly in dir and one level below
+// (models are often kept in a folder per model), sorted by path. It lists
+// names only and opens no file.
+func modelFiles(dir string) []api.ModelFile {
 	out := []api.ModelFile{}
 	add := func(p string, fi os.FileInfo) {
 		if fi.Mode().IsRegular() && strings.EqualFold(filepath.Ext(p), ".gguf") {
-			out = append(out, api.ModelFile{Name: filepath.Base(p), Path: p, SizeBytes: fi.Size(), Modified: fi.ModTime(), Architecture: ggufArchitecture(p)})
+			out = append(out, api.ModelFile{Name: filepath.Base(p), Path: p, SizeBytes: fi.Size(), Modified: fi.ModTime()})
 		}
 	}
 	ents, _ := os.ReadDir(dir)

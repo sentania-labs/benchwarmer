@@ -232,7 +232,10 @@ paths:
       tags: [config]
       operationId: validateConfig
       summary: Check a proposed configuration without saving it.
-      description: Loopback trust or management token. Uses the same rules as saving.
+      description: |
+        Management token only, like saving, because it checks whether the
+        proposed model file exists as the service account. Uses the same
+        rules as saving and never changes the configuration.
       requestBody:
         required: true
         content:

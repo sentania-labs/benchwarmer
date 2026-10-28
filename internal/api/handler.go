@@ -92,7 +92,7 @@ func New(o Options) http.Handler {
 		"/api/v1/config/history":         {"GET": {AccessRead, false, 0, h.configHistory}},
 		"/api/v1/config/restore-preview": {"GET": {AccessRead, false, 0, h.restorePreview}},
 		"/api/v1/config/restore":         {"POST": {AccessWrite, false, maxSmallBody, h.restoreConfig}},
-		"/api/v1/config/validate":        {"POST": {AccessRead, false, maxConfigBody, h.validateConfig}},
+		"/api/v1/config/validate":        {"POST": {AccessWrite, false, maxConfigBody, h.validateConfig}},
 		"/api/v1/applications": {
 			"GET": {AccessRead, false, 0, h.getApplications},
 			"PUT": {AccessWrite, false, maxConfigBody, h.putApplications},

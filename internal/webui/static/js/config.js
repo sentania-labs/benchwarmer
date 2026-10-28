@@ -16,7 +16,7 @@ import { modelGroup, resetModelPicker } from "./modelpicker.js";
 // Kept across page visits so unsaved edits survive a trip to the dashboard.
 const st = {
   cfg: null, draft: null, source: "", problem: "", problemFields: [], section: "runtime",
-  errors: new Map(), clientErrors: new Map(), warnings: [], impact: null, message: null, loading: false, saving: false, setup: null,
+  errors: new Map(), clientErrors: new Map(), warnings: [], validateFailed: false, impact: null, message: null, loading: false, saving: false, setup: null,
 };
 let picker = null;
 let els = null;
@@ -55,7 +55,10 @@ export function mount(main, rest) {
   window.addEventListener("beforeunload", beforeUnload);
   els.body.addEventListener("change", (e) => picker && picker.onCustom(e));
   if (!st.draft || !dirty()) load();
-  else renderAll();
+  else {
+    renderAll();
+    validateDraft();
+  }
   return {
     title: "Configuration",
     update: (r) => switchSection(r[0]),
@@ -78,27 +81,32 @@ function invalidateValidation() {
   syncSaveBar();
 }
 
-async function validateDraft() {
+function retryValidation() {
+  validationPending = true;
+  validateDraft(true);
+}
+
+async function validateDraft(interactive = false) {
   clearTimeout(validateTimer);
-  if (!els || !st.draft || st.clientErrors.size) return;
-  if (validated && !validationPending) return;
+  if (!els || !st.draft || st.clientErrors.size || !validationPending) return;
   const requested = revision.next();
   validationPending = true;
   syncSaveBar();
   let details = [];
   let warnings = [];
   try {
-    const res = await post("api/v1/config/validate", clone(st.draft), { interactive: false });
+    const res = await post("api/v1/config/validate", clone(st.draft), { interactive });
     warnings = (res && res.warnings) || [];
   } catch (e) {
     if (e instanceof ApiError && e.status === 400 && e.body.details) details = e.body.details;
     else {
-      if (revision.isCurrent(requested)) { st.message = "Could not validate changes: " + e.message; validationPending = false; renderTop(); syncSaveBar(); }
+      if (revision.isCurrent(requested)) { st.message = "Could not validate changes: " + e.message; st.validateFailed = true; validationPending = false; renderTop(); syncSaveBar(); }
       return;
     }
   }
   if (!revision.isCurrent(requested)) return;
   st.message = null;
+  st.validateFailed = false;
   st.warnings = warnings;
   validationPending = false;
   validated = details.length === 0;
@@ -215,7 +223,10 @@ function renderTop() {
         ": " + d.message)))));
   }
   if (st.impact) parts.push(renderImpact(st.impact));
-  if (st.message) parts.push(h("p", { class: "field-error", role: "alert", tabindex: "-1", id: all.length ? null : "error-summary" }, st.message));
+  if (st.message) {
+    parts.push(h("p", { class: "field-error", role: "alert", tabindex: "-1", id: all.length ? null : "error-summary" }, st.message,
+      st.validateFailed ? [" ", h("button", { type: "button", onclick: retryValidation }, "Retry")] : null));
+  }
   replace(els.top, parts);
 }
 
@@ -759,6 +770,7 @@ function discard() {
   st.clientErrors.clear();
   st.message = null;
   resetModelPicker();
+  st.validateFailed = false;
   st.warnings = [];
   renderAll();
 }

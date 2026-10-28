@@ -270,6 +270,7 @@ func TestAuthMatrix(t *testing.T) {
 		{"POST", "/api/v1/agent/report", report, [6]int{401, 401, 401, 204, 204, 403}},
 		// Other writes: management token only, whatever the source.
 		{"PUT", "/api/v1/config", cfgBody, [6]int{401, 401, 401, 200, 403, 403}},
+		{"POST", "/api/v1/config/validate", cfgBody, [6]int{401, 401, 401, 200, 403, 403}},
 		{"PUT", "/api/v1/applications", `{"applications":[]}`, [6]int{401, 401, 401, 200, 403, 403}},
 		{"POST", "/api/v1/drain", "", [6]int{401, 401, 401, 202, 403, 403}},
 		{"POST", "/api/v1/reload", "", [6]int{401, 401, 401, 202, 403, 403}},
@@ -450,7 +451,7 @@ func TestValidateConfigMatchesSaveAndDoesNotUpdate(t *testing.T) {
 	c := config.Default()
 	c.Listen.Management = "127.0.0.1:" + strconv.Itoa(c.Runtime.Port)
 	body, _ := json.Marshal(c)
-	validate := hr.do(req{method: "POST", path: "/api/v1/config/validate", body: string(body)})
+	validate := hr.do(req{method: "POST", path: "/api/v1/config/validate", body: string(body), token: mgmtTok})
 	save := hr.do(req{method: "PUT", path: "/api/v1/config", body: string(body), token: mgmtTok})
 	if validate.Code != 400 || save.Code != 400 {
 		t.Fatalf("validate=%d save=%d", validate.Code, save.Code)

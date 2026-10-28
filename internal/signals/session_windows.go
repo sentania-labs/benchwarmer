@@ -131,6 +131,8 @@ var procCloseDesktop = moduser32.NewProc("CloseDesktop")
 
 // WorkstationLocked reports whether the interactive desktop is locked: the
 // input desktop cannot be opened while the secure (lock) desktop is active.
+// It misses the Windows 11 LockApp lock screen, which runs on the normal
+// desktop, so the service overrides it with WTS session notifications.
 func WorkstationLocked() bool {
 	const desktopSwitchDesktop = 0x0100
 	h, _, _ := procOpenInputDesktop.Call(0, 0, desktopSwitchDesktop)

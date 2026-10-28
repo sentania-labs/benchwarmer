@@ -58,6 +58,7 @@ type Service struct {
 	store  *store.Store
 	sink   *store.EventSink
 	ctl    *controller.Controller
+	facts  *Facts
 	cfg    config.Config
 	gate   *proxy.Gate
 	met    *metrics.Metrics
@@ -142,6 +143,7 @@ func New(o Options) (*Service, error) {
 	}
 
 	facts := NewFacts()
+	s.facts = facts
 	gpuWatch := gpureset.New(gpureset.DefaultDirs())
 	if blind := gpuWatch.Unreadable(); len(blind) > 0 {
 		s.log.Error("cannot read GPU watchdog dump folders: GPU driver resets will not be detected", "dirs", blind)
@@ -277,6 +279,7 @@ loop:
 			case winsvc.Resume:
 				s.ctl.Resumed()
 			case winsvc.SessionChange:
+				s.facts.SessionChange(e.Session, e.SessionID)
 				s.log.Info("session change", "kind", e.Session, "session", e.SessionID)
 			}
 		}

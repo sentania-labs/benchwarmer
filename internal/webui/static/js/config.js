@@ -49,7 +49,6 @@ export function mount(main, rest) {
     bar: h("div", { class: "savebar" }),
   };
   replace(main, h("h1", null, "Configuration"), els.top, els.nav, els.body, els.bar);
-  els.body.addEventListener("input", invalidateValidation, true);
   els.body.addEventListener("focusout", () => validateDraft(), true);
   window.addEventListener("beforeunload", beforeUnload);
   els.body.addEventListener("change", (e) => picker && picker.onCustom(e));

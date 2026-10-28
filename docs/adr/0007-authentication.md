@@ -22,12 +22,12 @@ token being sufficient for a trusted LAN.
     administrator rights. Not allowed for configuration, events, drain,
     reload, or metrics.
 - Loopback management requests are allowed without a token only for read-only
-  endpoints and only when `security.loopback_trust` is true (default true
-  during setup). Writes always require the management token, so a
-  malicious web page cannot drive the API through the user's browser (no
-  cookies are used, so CSRF does not apply; the web UI keeps the token in
-  memory after the user pastes it once, or is served a short-lived token by
-  the tray).
+  endpoints (plus the one write amended below) and only when
+  `security.loopback_trust` is true (default true during setup). Other writes
+  require a token, so a malicious web page cannot drive the API through the
+  user's browser (no cookies are used, so CSRF does not apply; the web UI
+  keeps the token in memory after the user pastes it once, or is served a
+  short-lived token by the tray).
 - **Amendment (issue 30): a tokenless Pause AI.** The person at the PC can
   pause the GPU, or return to Auto, from the web UI without a token. This is
   the only tokenless write and is scoped to `PUT /api/v1/mode` with `pause` or

@@ -104,8 +104,9 @@ async function once(method, path, body, timeoutMs) {
 
 // request performs an API call. With interactive (the default for writes),
 // a 401 opens the token dialog and retries until the token works or the user
-// cancels (opts.reason explains why a token is needed). Non-interactive calls just throw the 401 so the caller can offer
-// a sign-in control without a dialog popping up on every poll.
+// cancels (opts.reason explains why a token is needed). Non-interactive calls
+// just throw the 401 so the caller can offer a sign-in control without a
+// dialog popping up on every poll.
 export async function request(method, path, body, opts = {}) {
   const interactive = opts.interactive ?? method !== "GET";
   let reason = null;

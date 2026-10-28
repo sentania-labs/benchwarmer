@@ -19,7 +19,7 @@ export function mount(main) {
   const more = h("button", { type: "button", hidden: true, onclick: () => load(false) }, "Load older events");
   const status = h("p", { class: "muted", role: "status" });
   state = {
-    filter, list, more, status, before: 0, shown: "", loading: false, timer: null,
+    filter, list, more, status, before: 0, shown: null, loading: false, timer: null,
     rows: [], summaries: new Map(), // id -> summary element, for focus restore
   };
   replace(main,
@@ -85,9 +85,9 @@ async function load(reset) {
   const focus = keep ? focusedId(s) : null;
   const opened = new Set(keep ? openIds(s) : []);
   const seen = keep ? s.rows.length : 0;
-  // Only the first fill announces: a polite live region that repeats
-  // "Loading..." on every refresh is noise for a screen reader.
-  if (!s.rows.length || fresh) s.status.textContent = "Loading...";
+  // Only the first fill of a list announces: a polite live region that
+  // repeats "Loading..." on every refresh is noise for a screen reader.
+  if (fresh) s.status.textContent = "Loading...";
   // A refresh asks for at least the rows already on screen, so an automatic
   // refresh cannot shrink a list the reader has paged through.
   const limit = reset ? Math.max(PAGE, seen) : PAGE;

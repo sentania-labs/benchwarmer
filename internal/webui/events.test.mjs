@@ -236,3 +236,22 @@ test('changing the filter starts over instead of inheriting the old list', async
   assert.equal(findAll(list.children[0], 'details')[0].open, false);
   mounted.unmount();
 });
+
+test('an empty list does not re-announce Loading on every refresh', async () => {
+  stubFetch(() => ({ body: { events: [] } }));
+  const { main, mounted } = mountEvents();
+  await settle();
+  const status = findAll(main, 'p')[0];
+  assert.equal(status.textContent, 'No events.');
+  let writes = 0;
+  let text = status.textContent;
+  Object.defineProperty(status, 'textContent', {
+    get: () => text,
+    set: (v) => { writes++; text = v; assert.notEqual(v, 'Loading...'); },
+  });
+  mounted.visibility(true);
+  await settle();
+  assert.equal(text, 'No events.');
+  assert.ok(writes >= 1);
+  mounted.unmount();
+});

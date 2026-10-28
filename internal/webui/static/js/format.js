@@ -166,6 +166,84 @@ export function profileSource(src) {
 
 export const MODE_LABELS = { auto: "Auto", pause: "Pause AI", ai_priority: "AI Priority" };
 
+// STATE_LABELS are owner-readable names for the internal lifecycle states
+// (internal/state). The raw state stays available in Details for diagnosis.
+export const STATE_LABELS = {
+  STOPPED: "Idle",
+  COOLDOWN: "Waiting",
+  LOADING: "Loading",
+  READY: "Ready",
+  BUSY: "Busy",
+  DRAINING: "Draining",
+  PREEMPTING: "Stopping",
+  SUPPRESSED: "Held",
+  DISABLED: "Paused",
+  ERROR: "Problem",
+};
+
+// stateLabel names a lifecycle state in owner terms; an unlisted or missing
+// value is still readable rather than blank.
+export function stateLabel(s) {
+  if (!s) return "unknown";
+  return STATE_LABELS[s] || titleize(s);
+}
+
+// Event kinds: a state transition is not an error. KIND_BY_TYPE is the
+// reference for internal/events.Type; severity is the fallback for a type
+// this build does not know.
+export const KIND_LABELS = { problem: "Problem", change: "State change", step: "Step" };
+
+const KIND_BY_TYPE = {
+  load_failed: "problem", runtime_crashed: "problem", kill_failed: "problem",
+  vram_release_timeout: "problem", orphan_killed: "problem", config_rejected: "problem",
+  telemetry_lost: "problem", device_lost: "problem", requests_rejected: "problem",
+  request_force_closed: "problem", service_misconfigured: "problem",
+  provisioning_problem: "problem", tls_certificate_problem: "problem",
+
+  state_changed: "change", decision_changed: "change", mode_changed: "change",
+  mode_expired: "change", cooldown_started: "change", cooldown_reset: "change",
+  suppression_started: "change", recovery_scheduled: "change", session_change: "change",
+  power_suspend: "change", power_resume: "change", config_changed: "change",
+  config_recovered: "change", telemetry_recovered: "change", telemetry_degraded: "change",
+  agent_connected: "change", agent_disconnected: "change",
+  tls_certificate_reloaded: "change",
+
+  service_started: "step", service_stopping: "step", load_started: "step",
+  load_completed: "step", drain_started: "step", drain_completed: "step",
+  grace_shortened: "step", preempted: "step", runtime_stopped: "step",
+  vram_released: "step", power_suspend_stop: "step",
+  tls_certificate_loaded: "step",
+};
+
+const KIND_BY_SEVERITY = {
+  critical: "problem", warning: "problem", notice: "change", info: "step",
+};
+
+// eventKind classifies one event as "problem", "change" or "step".
+export function eventKind(e) {
+  const t = e && e.type;
+  if (t && KIND_BY_TYPE[t]) return KIND_BY_TYPE[t];
+  const sev = e && e.severity;
+  if (sev && KIND_BY_SEVERITY[sev]) return KIND_BY_SEVERITY[sev];
+  return "step";
+}
+
+// typeGroups orders the type filter: problems first, then state changes,
+// then ordinary steps. Every known type is listed exactly once, and each
+// group's kind matches what eventKind gives for its types.
+export const TYPE_GROUPS = [
+  { label: "Problems", kind: "problem", types: ["load_failed", "runtime_crashed", "kill_failed", "vram_release_timeout", "orphan_killed", "config_rejected", "telemetry_lost", "device_lost", "requests_rejected", "request_force_closed", "service_misconfigured", "provisioning_problem", "tls_certificate_problem"] },
+  { label: "State changes", kind: "change", types: ["state_changed", "decision_changed", "mode_changed", "mode_expired", "cooldown_started", "cooldown_reset", "suppression_started", "recovery_scheduled", "session_change", "power_suspend", "power_resume", "config_changed", "config_recovered", "telemetry_recovered", "telemetry_degraded", "agent_connected", "agent_disconnected", "tls_certificate_reloaded"] },
+  { label: "Steps", kind: "step", types: ["service_started", "service_stopping", "load_started", "load_completed", "drain_started", "drain_completed", "grace_shortened", "preempted", "runtime_stopped", "vram_released", "power_suspend_stop", "tls_certificate_loaded"] },
+];
+
+// transitionText renders prev -> next with the owner names, "\u2014" for a side
+// with no state yet (the first recorded transition).
+export function transitionText(prev, next) {
+  const fmt = (s) => (s ? stateLabel(s) : "\u2014");
+  return fmt(prev) + " \u2192 " + fmt(next);
+}
+
 // describeDurationChoice labels a PUT /mode duration value. Given the time
 // "until_tomorrow" would really end, it names that time.
 export function describeDurationChoice(v, untilTomorrowAt, now) {

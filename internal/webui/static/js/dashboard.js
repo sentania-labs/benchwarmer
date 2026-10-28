@@ -5,8 +5,9 @@ import { setBanner, clearBanner } from "./banners.js";
 import { appliedText, ownerView, quickChoices } from "./owner.js";
 import { adoptsOptions, defaultDuration, durationChoices, modeKey, followsServer, normalizeOptions } from "./modes.js";
 import {
-  clockTime, configNotice, countdown, describeDurationChoice, humanDuration, mib, pct, parseTime,
-  profileSource, titleize, MODE_LABELS,
+  clockTime, configNotice, countdown, describeDurationChoice, eventKind, KIND_LABELS,
+  humanDuration, mib, pct, parseTime, profileSource, titleize, transitionText,
+  MODE_LABELS, stateLabel,
 } from "./format.js";
 
 const POLL_MS = 2000;
@@ -340,11 +341,15 @@ function renderAgent(a) {
   ]);
 }
 
-function renderErrors(errs) {
+export function renderErrors(errs) {
   if (!errs.length) return h("p", { class: "muted" }, "None.");
-  return h("ul", { class: "errors" }, errs.slice().reverse().map((e) =>
-    h("li", null, h("time", null, clockTime(parseTime(e.time), null, { seconds: true })), " ",
-      h("code", null, e.type), " ", e.message)));
+  return h("ul", { class: "errors" }, errs.slice().reverse().map((e) => {
+    const kind = KIND_LABELS[eventKind(e)] || "Step";
+    const change = (e.prev_state || e.state) ? transitionText(e.prev_state, e.state) : "";
+    return h("li", null, h("time", null, clockTime(parseTime(e.time), null, { seconds: true })), " ",
+      h("span", { class: "ekind ekind-" + eventKind(e) }, kind), " ",
+      h("code", null, e.type), change ? " " + change : "", " ", e.message || "");
+  }));
 }
 
 // Controls

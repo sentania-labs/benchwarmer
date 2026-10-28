@@ -22,12 +22,29 @@ token being sufficient for a trusted LAN.
     administrator rights. Not allowed for configuration, events, drain,
     reload, or metrics.
 - Loopback management requests are allowed without a token only for read-only
-  endpoints and only when `security.loopback_trust` is true (default true
-  during setup). Writes always require the management token, so a
-  malicious web page cannot drive the API through the user's browser (no
-  cookies are used, so CSRF does not apply; the web UI keeps the token in
-  memory after the user pastes it once, or is served a short-lived token by
-  the tray).
+  endpoints (plus the one write amended below) and only when
+  `security.loopback_trust` is true (default true during setup). Other writes
+  require a token, so a malicious web page cannot drive the API through the
+  user's browser (no cookies are used, so CSRF does not apply; the web UI
+  keeps the token in memory after the user pastes it once, or is served a
+  short-lived token by the tray).
+- **Amendment (issue 30): a tokenless Pause AI.** The person at the PC can
+  pause the GPU, or return to Auto, from the web UI without a token. This is
+  the only tokenless write and is scoped to `PUT /api/v1/mode` with `pause` or
+  `auto`; AI Priority, config, applications, drain, reload, restart and every
+  remote request still need a token. It requires `security.loopback_trust`, a
+  loopback TCP peer, and a loopback `Host`, plus a cross-site barrier, because
+  those first two checks do not stop a hostile page from sending a request to
+  `http://localhost:<port>` itself: the request must be `application/json`
+  (which a page cannot send cross-origin without a CORS preflight, and no
+  preflight is ever granted), `Origin` must be exactly this listener's origin
+  when present (`null` is refused), and `Sec-Fetch-*` must say same-origin.
+  With neither `Origin` nor `Sec-Fetch-*` (a native client) the request is
+  allowed on the remaining checks. The barrier keeps other web pages out; it
+  is not authentication. Local processes and users are trusted by design and
+  can forge any header, as they can already read the agent token. The change is
+  recorded as `set_by: local` with `principal: local` and obeys the same
+  duration limits and safety overrides as any other mode change.
 - Tokens are compared in constant time, never logged, and redacted from
   config reads as `"<redacted>"`.
 - Config holds token *file references*, not values.

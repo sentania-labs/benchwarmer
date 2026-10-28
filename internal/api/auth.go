@@ -3,8 +3,10 @@ package api
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/sentania-labs/benchwarmer/internal/secrets"
@@ -26,6 +28,11 @@ const (
 	// AccessLocal: no token, but only from this PC addressed as localhost
 	// or a loopback IP (sign-in code redemption).
 	AccessLocal
+	// AccessModeWrite: AccessWrite plus one narrow tokenless path for the
+	// person at this PC (mode changes). Without a token it needs
+	// security.loopback_trust, a trusted loopback request, and the browser
+	// request barrier below; the handler then limits which modes qualify.
+	AccessModeWrite
 )
 
 // Principal is who a request authenticated as.
@@ -42,6 +49,22 @@ const (
 	// the management token, but only from this PC.
 	PrincipalSession
 )
+
+// String names the principal for audit records. A request with no token that
+// was authorized anyway came from the person at this PC.
+func (p Principal) String() string {
+	switch p {
+	case PrincipalManagement:
+		return "management"
+	case PrincipalAgent:
+		return "agent"
+	case PrincipalSession:
+		return "session"
+	case PrincipalNone:
+		return "local"
+	}
+	return "unknown"
+}
 
 // Authenticator checks management API credentials. It holds only SHA-256
 // digests of the tokens, and compares digests in constant time, so neither
@@ -140,10 +163,78 @@ func (a *Authenticator) Authorize(r *http.Request, need Access, agentOK, loopbac
 	if need == AccessRead && loopbackTrust && trustedLoopback(r) {
 		return nil
 	}
-	if need == AccessRead && loopbackTrust && isLoopback(r) {
+	if need == AccessModeWrite && loopbackTrust && trustedLoopback(r) {
+		return localWriteBarrier(r)
+	}
+	if need != AccessWrite && loopbackTrust && isLoopback(r) {
 		return &authError{http.StatusUnauthorized, CodeUnauthorized, "loopback requests without a token must address the service as localhost or a loopback IP"}
 	}
 	return &authError{http.StatusUnauthorized, CodeUnauthorized, "a bearer token is required"}
+}
+
+// localWriteBarrier is the cross-site request defence for the tokenless mode
+// change. trustedLoopback alone does not stop a hostile web page: its browser
+// can send a request straight to http://localhost:<port>, which passes both the
+// peer and the Host check. A real browser always labels such a request, so a
+// request is refused when it:
+//
+//   - carries an Origin that is not exactly this listener's own origin
+//     (including "null", from sandboxed frames and file pages);
+//   - carries Fetch Metadata that is not a same-origin script fetch;
+//   - is not application/json, the one body type a page cannot send without a
+//     CORS preflight, which this API never grants (no Access-Control-* header
+//     is ever sent, and OPTIONS is not a route).
+//
+// A request with no Origin and no Fetch Metadata is a native client (the
+// tray, curl, a script) and is allowed on the remaining checks. None of this
+// authenticates anyone: it assumes the person and every process on this PC
+// are trusted and only keeps other web pages out. A local process can forge
+// every header here.
+func localWriteBarrier(r *http.Request) *authError {
+	refuse := func(msg string) *authError { return &authError{http.StatusForbidden, CodeForbidden, msg} }
+	mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mt != "application/json" {
+		return refuse("a tokenless mode change must be sent as application/json")
+	}
+	origins := r.Header.Values("Origin")
+	if len(origins) > 1 {
+		return refuse("request refused: more than one Origin header")
+	}
+	site, mode, dest := r.Header.Get("Sec-Fetch-Site"), r.Header.Get("Sec-Fetch-Mode"), r.Header.Get("Sec-Fetch-Dest")
+	if len(origins) == 0 {
+		if site != "" || mode != "" || dest != "" {
+			// A browser always sends Origin with a PUT.
+			return refuse("request refused: a browser request without an Origin")
+		}
+		return nil
+	}
+	if !sameOrigin(r, origins[0]) {
+		return refuse("request refused: it comes from a different origin than this page")
+	}
+	if site != "" && site != "same-origin" {
+		return refuse("request refused: it was not made by a page served from this listener")
+	}
+	if mode != "" && mode != "cors" && mode != "same-origin" {
+		return refuse("request refused: unexpected request mode")
+	}
+	if dest != "" && dest != "empty" {
+		return refuse("request refused: unexpected request destination")
+	}
+	return nil
+}
+
+// sameOrigin reports whether origin is exactly this listener's origin: the
+// scheme the listener speaks and the Host the request was addressed to.
+func sameOrigin(r *http.Request, origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Opaque != "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return u.Scheme == scheme && u.Host != "" && strings.EqualFold(u.Host, r.Host)
 }
 
 // bearer extracts an "Authorization: Bearer <token>" value.

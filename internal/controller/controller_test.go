@@ -645,6 +645,26 @@ func TestPauseAndResume(t *testing.T) {
 	}
 }
 
+// A pause from the person at this PC carries its principal into the audit
+// event, and expires like any other.
+func TestLocalPauseRecordsPrincipalAndExpires(t *testing.T) {
+	r := newRig(t, nil)
+	r.toReady()
+	if _, err := r.c.SetMode(api.ModeRequest{Mode: policy.ModePause, Duration: "30m", SetBy: "local", Principal: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	e, ok := r.ev.find(events.ModeChanged)
+	if !ok || e.Data["principal"] != "local" || e.Data["set_by"] != "local" {
+		t.Fatalf("mode event: %+v", e)
+	}
+	r.stepUntil(state.Disabled)
+	r.clk.Advance(30 * time.Minute)
+	r.stepUntil(state.Ready)
+	if _, ok := r.ev.find(events.ModeExpired); !ok {
+		t.Fatal("local pause did not expire")
+	}
+}
+
 func TestAIPriorityStillYieldsToCriticalContention(t *testing.T) {
 	r := newRig(t, nil)
 	r.toReady()

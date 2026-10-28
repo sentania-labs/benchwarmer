@@ -47,9 +47,11 @@ The management listener (default `http://127.0.0.1:8481/`) serves a small
 dashboard, an events log, and configuration forms. It is plain HTML, CSS, and
 JavaScript embedded in the binary: no build step, no external requests, and a
 strict Content-Security-Policy. Reading status from the PC itself needs no
-token while `security.loopback_trust` is on; any change (mode, drain, reload,
-config) asks once for the management token, which the page keeps only for that
-browser tab. Use "Forget token" to clear it.
+token while `security.loopback_trust` is on, and so do Pause AI and Back to
+normal (Auto) when sent from the dashboard on this PC; they are recorded as made
+by `local`. Every other change (AI Priority, drain, reload, config) asks once for
+the management token, which the page keeps only for that browser tab. Use
+"Forget token" to clear it.
 
 ## Development
 

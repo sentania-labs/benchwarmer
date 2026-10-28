@@ -87,8 +87,8 @@ function network() {
       { path: "listen.inference_tls.self_signed_hosts", label: "Extra names for the self-signed certificate", type: "lines", help: "One DNS name or IP per line." },
     ] },
     { title: "Who needs a token", fields: [
-      { path: "security.loopback_trust", label: "Allow read-only access from this PC without a token", type: "bool",
-        help: "Changes always need the management token, even from this PC." },
+      { path: "security.loopback_trust", label: "Allow reading status, and pausing AI, from this PC without a token", type: "bool",
+        help: "Pause AI and Back to normal work from this PC without a token. AI first and every other change still need the token. Turn this off to require a token for everything." },
       { path: "security.require_inference_token", label: "Require the inference token from loopback clients too", type: "bool" },
     ] },
     { title: "Token files", advanced: true, note: "Token values are never shown or edited here. These are file locations on the PC; rotate a token by replacing its file.", fields: [

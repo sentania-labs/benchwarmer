@@ -33,7 +33,19 @@ info:
     peer is a loopback address **and** the `Host` header names `localhost` or
     a loopback IP (a DNS-rebinding defence). Loopback is determined from the
     TCP connection only; `X-Forwarded-For` and similar headers are ignored.
-    Every write needs a token regardless of source.
+    The one tokenless write is `PUT /api/v1/mode` for `pause` and `auto`
+    (not `ai_priority`), under the same `security.loopback_trust` and
+    loopback checks plus a cross-site request barrier: the `Content-Type` must
+    be `application/json`; an `Origin` header, when present, must be exactly
+    this listener's origin (`null` and any other origin are refused);
+    `Sec-Fetch-*` headers, when present, must describe a same-origin script
+    request; and a browser request without an `Origin` is refused. A request
+    with neither `Origin` nor `Sec-Fetch-*` (the tray, curl) is accepted on the
+    remaining checks. This API grants no CORS access and has no `OPTIONS`
+    routes, so another site's page cannot preflight. These headers are not
+    authentication: every process and user on the PC is trusted, and can forge
+    them. Refusals are `403`; `ai_priority` without a token is `401`. Every
+    other write needs a token regardless of source.
 
     Results: no token or an unknown token is `401` (with `WWW-Authenticate:
     Bearer`); a valid token that is not accepted on the endpoint is `403`.
@@ -293,7 +305,12 @@ paths:
       operationId: putMode
       summary: Set the manual mode (Auto, Pause AI, AI Priority).
       description: |
-        Management token or agent token. `duration` is a Go duration string
+        Management token or agent token, or no token for `pause` and `auto`
+        from this PC (see Authentication). A tokenless change is recorded as
+        set by `local`, whatever `set_by` says; the mode event also carries a
+        `principal` (`management`, `agent`, `session`, or `local`). Duration
+        limits, `modes.max_ai_priority`, and safety overrides apply the same
+        way to every caller. `duration` is a Go duration string
         (`"30m"`, `"2h"`), empty for indefinite, `"until_reboot"`, or
         `"until_tomorrow"` (for Pause AI, 08:00 the next day in the configured
         time zone; for AI Priority, the next local midnight).

@@ -1,6 +1,6 @@
 // Dashboard: polls GET api/v1/status every 2 seconds while visible.
 import { h, replace, toneIcon, warnIcon } from "./dom.js";
-import { get, put, post, signIn, ApiError } from "./api.js";
+import { get, put, post, signIn, modeTokenReason, ApiError } from "./api.js";
 import { setBanner, clearBanner } from "./banners.js";
 import { appliedText, ownerView, quickChoices } from "./owner.js";
 import { adoptsOptions, defaultDuration, durationChoices, modeKey, followsServer, normalizeOptions } from "./modes.js";
@@ -375,7 +375,7 @@ function buildControls() {
     try {
       const body = { mode, set_by: "ui" };
       if (mode !== "auto") body.duration = duration;
-      await put("api/v1/mode", body);
+      await put("api/v1/mode", body, { reason: modeTokenReason(mode) });
       status.textContent = appliedText(mode, duration, untilTomorrowAt);
       poll();
     } catch (err) {
@@ -451,7 +451,8 @@ function buildControls() {
     apply.disabled = true;
     status.textContent = "Applying...";
     try {
-      await put("api/v1/mode", body);
+      // Pause AI and Back to normal need no token from this PC; AI first does.
+      await put("api/v1/mode", body, { reason: modeTokenReason(mode) });
       baseline = formState();
       status.textContent = appliedText(mode, body.duration, untilTomorrowAt);
       poll();

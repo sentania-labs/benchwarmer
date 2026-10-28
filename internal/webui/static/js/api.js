@@ -104,8 +104,9 @@ async function once(method, path, body, timeoutMs) {
 
 // request performs an API call. With interactive (the default for writes),
 // a 401 opens the token dialog and retries until the token works or the user
-// cancels. Non-interactive calls just throw the 401 so the caller can offer
-// a sign-in control without a dialog popping up on every poll.
+// cancels (opts.reason explains why a token is needed). Non-interactive calls
+// just throw the 401 so the caller can offer a sign-in control without a
+// dialog popping up on every poll.
 export async function request(method, path, body, opts = {}) {
   const interactive = opts.interactive ?? method !== "GET";
   let reason = null;
@@ -118,11 +119,19 @@ export async function request(method, path, body, opts = {}) {
         setToken(null);
         reason = "The saved token was rejected. Enter the current management token.";
       }
-      const t = await askToken(reason);
+      const t = await askToken(reason || opts.reason);
       if (!t) throw new ApiError(401, { error: "Cancelled: a management token is required.", code: "unauthorized" });
       setToken(t);
     }
   }
+}
+
+// modeTokenReason explains a token prompt on a mode change: only AI first
+// always needs the token, the other modes need one away from this PC or with
+// local trust off.
+export function modeTokenReason(mode) {
+  if (mode === "ai_priority") return "AI first needs the management token.";
+  return "A management token is needed unless you are at this PC with local trust on.";
 }
 
 // signIn asks for a token outside a failing request (for read-only pages

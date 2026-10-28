@@ -270,7 +270,9 @@ type Signals struct {
 // token values never appear in the config.
 type Security struct {
 	// LoopbackTrust allows read-only management calls from loopback without
-	// a token. Writes always need the management token.
+	// a token, and the one tokenless write: Pause AI or Auto from the person
+	// at this PC (PUT /api/v1/mode; ADR 0007). Every other write needs a
+	// token.
 	LoopbackTrust         bool   `json:"loopback_trust"`
 	ManagementTokenFile   string `json:"management_token_file"`
 	InferenceTokenFile    string `json:"inference_token_file"`

@@ -2,7 +2,7 @@
 import { h, replace, conditionIcon, warnIcon } from "./dom.js";
 import { get, put, post, signIn, ApiError } from "./api.js";
 import { setBanner, clearBanner } from "./banners.js";
-import { durationChoices, modeKey, followsServer, normalizeOptions } from "./modes.js";
+import { defaultDuration, durationChoices, modeKey, followsServer, normalizeOptions } from "./modes.js";
 import {
   clockTime, configNotice, countdown, describeDurationChoice, humanDuration, mib, pct, parseTime,
   profileSource, titleize, MODE_LABELS,
@@ -345,6 +345,7 @@ function buildControls() {
   let baseline;
   let options = { pause: [], ai_priority: [] };
   let syncedMode = null;
+  let haveOptions = false;
   const form = h("form", { class: "mode-form", onsubmit: onApply },
     h("fieldset", { class: "segmented" }, h("legend", null, "Mode"), radios),
     durWrap, apply);
@@ -361,9 +362,10 @@ function buildControls() {
     const m = selected();
     durWrap.hidden = m === "auto";
     const opts = durationChoices(m, options);
-    const prev = durSel.value;
+    // The seed fill runs before any options arrive; its value is not a choice.
+    const prev = haveOptions ? durSel.value : null;
     replace(durSel, opts.map((v) => h("option", { value: v }, describeDurationChoice(v))));
-    durSel.value = opts.includes(prev) ? prev : (opts[1] ?? opts[0]);
+    durSel.value = opts.includes(prev) ? prev : defaultDuration(m, options);
   }
   async function onApply(e) {
     e.preventDefault();
@@ -412,7 +414,7 @@ function buildControls() {
   // stays where it is.
   el.sync = (st) => {
     const next = normalizeOptions(st.mode_options);
-    const optionsChanged = JSON.stringify(next) !== JSON.stringify(options);
+    const optionsChanged = JSON.stringify(next) !== JSON.stringify(options) || !haveOptions;
     if (optionsChanged) options = next;
     const m = st.mode || {};
     const key = modeKey(m);
@@ -427,6 +429,7 @@ function buildControls() {
       fillDurations();
       if (!dirty) baseline = formState();
     }
+    haveOptions = true;
   };
   return el;
 }

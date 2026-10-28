@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { durationChoices, modeKey, followsServer, normalizeOptions } from './static/js/modes.js';
+import { defaultDuration, durationChoices, modeKey, followsServer, normalizeOptions } from './static/js/modes.js';
 import { configNotice } from './static/js/format.js';
 
 const opts = normalizeOptions({ pause_durations: ['15m0s', '1h30m0s'], ai_priority_durations: ['45m0s'] });
@@ -13,6 +13,13 @@ test('ai priority choices come from modes.ai_priority_durations and cannot run f
 });
 test('missing options leave only the fixed choices', () => {
   assert.deepEqual(durationChoices('ai_priority', normalizeOptions(undefined)), ['until_tomorrow', 'until_reboot']);
+});
+test('a new form starts on a timed choice, not on until reboot', () => {
+  const stock = normalizeOptions({ pause_durations: ['30m0s', '1h0m0s', '2h0m0s'], ai_priority_durations: ['30m0s', '1h0m0s'] });
+  assert.equal(defaultDuration('pause', stock), '1h0m0s');
+  assert.equal(defaultDuration('ai_priority', stock), '1h0m0s');
+  assert.equal(defaultDuration('ai_priority', opts), '45m0s');
+  assert.equal(defaultDuration('pause', normalizeOptions(undefined)), 'until_tomorrow');
 });
 test('the form follows a mode changed elsewhere', () => {
   const was = modeKey({ mode: 'auto' });

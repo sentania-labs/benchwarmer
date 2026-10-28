@@ -172,7 +172,7 @@ export function field(ctx, def) {
       // would change arbitrary argv. A row can explicitly add a value token.
       const rows = (value || []).map((token) => ({ token, hasValue: false, value: "", fresh: false }));
       const list = h("div", { class: "argv-rows" });
-      const update = () => set(rows.filter((r) => !(r.fresh && r.token === "" && r.value === "")).flatMap((r) => r.hasValue ? [r.token, r.value] : [r.token]));
+      const update = () => set(rows.filter((r) => !(r.fresh && r.token === "" && (!r.hasValue || r.value === ""))).flatMap((r) => r.hasValue ? [r.token, r.value] : [r.token]));
       const render = (focusRow, focusValue) => {
         const refs = [];
         list.replaceChildren(...rows.map((r, i) => {

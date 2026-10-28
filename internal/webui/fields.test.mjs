@@ -84,3 +84,16 @@ test('model picker and custom path share one error slot that the picker owns', (
   assert.ok(!String(input['aria-describedby']).includes('-err'));
   assert.notEqual(input.name, picker.walk().find(e => e.tagName === 'select').name);
 });
+
+test('ticking Has value, typing a value, then unticking does not emit a blank token', () => {
+  const { ctx, widget, texts, addButton } = argvWidget(['--flag']);
+  addButton().fire('click');
+  const checkbox = widget.walk().filter(e => e.tagName === 'input' && e.type === 'checkbox')[1];
+  checkbox.checked = true; checkbox.fire('change');
+  const value = texts().at(-1);
+  value.value = 'x'; value.fire('input');
+  assert.deepEqual(ctx.draft.runtime.args, ['--flag', '', 'x']);
+  const box = widget.walk().filter(e => e.tagName === 'input' && e.type === 'checkbox')[1];
+  box.checked = false; box.fire('change');
+  assert.deepEqual(ctx.draft.runtime.args, ['--flag']);
+});

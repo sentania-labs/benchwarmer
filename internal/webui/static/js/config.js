@@ -106,7 +106,7 @@ async function validateDraft(interactive = false) {
   } catch (e) {
     if (e instanceof ApiError && e.status === 400 && e.body.details) details = e.body.details;
     else {
-      if (revision.isCurrent(requested)) { st.message = "Could not validate changes: " + e.message; st.validateFailed = true; validationPending = false; renderTop(); syncSaveBar(); }
+      if (revision.isCurrent(requested)) { st.message = "Could not validate changes: " + e.message; st.validateFailed = true; validationPending = false; if (els) { renderTop(); syncSaveBar(); } }
       return;
     }
   }

@@ -549,8 +549,33 @@ func configProblemFields(lr config.LoadResult) []config.FieldError {
 }
 
 // checkModelFile distinguishes a missing file from an inaccessible or unknown path.
-func checkModelFile(path string) error {
-	fi, err := os.Stat(path)
+func checkModelFile(path string) error { return classifyModelFile(path, os.Stat) }
+
+// uncShareRoot returns the \\host\share root of a UNC path, or "" for any
+// other path.
+func uncShareRoot(path string) string {
+	p := strings.ReplaceAll(path, "/", `\`)
+	if !strings.HasPrefix(p, `\\`) {
+		return ""
+	}
+	parts := strings.SplitN(p[2:], `\`, 3)
+	if len(parts) < 2 {
+		return p
+	}
+	return `\\` + parts[0] + `\` + parts[1] + `\`
+}
+
+func classifyModelFile(path string, stat func(string) (os.FileInfo, error)) error {
+	fi, err := stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		// Windows reports an unreachable host as "not found"; only a
+		// reachable share can say the file itself is missing.
+		if root := uncShareRoot(path); root != "" {
+			if _, rerr := stat(root); rerr != nil {
+				return config.ErrFileUnknown
+			}
+		}
+	}
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		return errors.New("no file exists at this path")

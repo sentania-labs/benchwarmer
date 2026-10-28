@@ -499,6 +499,22 @@ func (a auditingStore) Save(c config.Config) error {
 	return nil
 }
 
+func (a auditingStore) SaveVersion(old, next config.Config, actor string, at time.Time, restoreOf string) (string, error) {
+	reset, err := a.cs.SaveVersion(old, next, actor, at, restoreOf)
+	if err != nil {
+		a.met.IncConfigChange("rejected")
+		return "", err
+	}
+	a.met.IncConfigChange("applied")
+	if _, err := a.st.AppendConfigChange(at, actor, config.Redact(next), config.Classify(old, next)); err != nil {
+		slog.Warn("config history not recorded", "err", err)
+	}
+	return reset, nil
+}
+func (a auditingStore) History() ([]config.HistoryEntry, error)        { return a.cs.History() }
+func (a auditingStore) HistoryConfig(id string) (config.Config, error) { return a.cs.HistoryConfig(id) }
+func (a auditingStore) VerifyCurrent(c config.Config) error            { return a.cs.VerifyCurrent(c) }
+
 type requestObserver struct{ m *metrics.Metrics }
 
 func (r requestObserver) RequestFinished(_ string, d time.Duration, outcome string) {

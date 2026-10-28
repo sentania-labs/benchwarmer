@@ -2,6 +2,7 @@
 // structured forms or raw JSON, and PUT the whole object back. Values shown
 // as "<redacted>" are left untouched so the server restores them.
 import { proposedRule, sameMatcher, snapshotFresh, searchableValues } from "./applications.js";
+import { mountHistory } from "./history.js";
 import { waitForRestart } from "./restart.js";
 import { compatibilityMessage } from "./compatibility.js";
 import { h, replace, warnIcon } from "./dom.js";
@@ -16,6 +17,7 @@ const st = {
   errors: new Map(), clientErrors: new Map(), impact: null, message: null, loading: false, saving: false, setup: null,
 };
 let els = null;
+let unmountHistory = null;
 let modelChoices = [];
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -49,6 +51,8 @@ export function mount(main, rest) {
     update: (r) => switchSection(r[0]),
     unmount: () => {
       window.removeEventListener("beforeunload", beforeUnload);
+      if (unmountHistory) unmountHistory();
+      unmountHistory = null;
       els = null;
     },
   };
@@ -277,9 +281,12 @@ function jumpTo(path) {
 
 function renderSection() {
   if (!els) return;
+  if (unmountHistory) unmountHistory();
+  unmountHistory = null;
   const sec = SECTIONS.find((s) => s.key === st.section);
   let content;
   switch (st.section) {
+    case "history": content = h("div", { id: "config-history" }); break;
     case "profiles": content = profilesSection(); break;
     case "schedules": content = schedulesSection(); break;
     case "applications": content = applicationsSection(); break;
@@ -292,6 +299,17 @@ function renderSection() {
   }
   replace(els.body, h("h2", null, sec.label), sec.intro && h("p", { class: "intro" }, sec.intro),
     st.section === "runtime" ? h("div", { id: "compatibility-guidance", class: "notice info", role: "status", "aria-live": "polite" }) : null, content);
+  if (st.section === "history") unmountHistory = mountHistory(content, {
+    isDirty: dirty,
+    restored: (res) => {
+      const unchanged = !dirty();
+      st.cfg = res.config;
+      if (unchanged) st.draft = clone(res.config);
+      st.source = res.source || st.source;
+      st.impact = { ...(res.impact || { changed: [] }), at: new Date() };
+      if (els) { renderTop(); syncSaveBar(); }
+    },
+  });
   updateCompatibility();
   updateModelChoices();
 }

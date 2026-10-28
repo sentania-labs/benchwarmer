@@ -4,6 +4,7 @@
 // Owner sections come first; the rest sit under one "Advanced" heading in
 // the section navigation. Keys are also the #/config/<key> routes.
 export const SECTIONS = [
+  { key: "history", label: "Saved history", intro: "Review and restore earlier configurations." },
   { key: "runtime", label: "Runtime", intro: "The AI model and the llama-server program that runs it. Most changes here need a runtime reload." },
   { key: "schedules", label: "Schedules", intro: "Which profile applies when, for example school hours. Outside every schedule the default profile applies." },
   { key: "profiles", label: "Profiles", intro: "How readily AI steps aside for you. Each schedule, and AI Priority mode, picks one of these." },

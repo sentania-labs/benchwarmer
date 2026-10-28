@@ -147,6 +147,74 @@ paths:
         "409": { $ref: "#/components/responses/Rejected" }
         "413": { $ref: "#/components/responses/TooLarge" }
 
+  /api/v1/config/history:
+    get:
+      tags: [config]
+      operationId: getConfigHistory
+      summary: List up to 20 saved configuration versions, newest first.
+      responses:
+        "200":
+          description: Redacted changes and audit metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [versions]
+                properties:
+                  versions:
+                    type: array
+                    items: { $ref: "#/components/schemas/HistoryEntry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/config/restore-preview:
+    get:
+      tags: [config]
+      operationId: previewConfigRestore
+      summary: Preview a saved version against the active configuration.
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Redacted changes, impact, and revision for restore.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RestorePreview" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/config/restore:
+    post:
+      tags: [config]
+      operationId: restoreConfig
+      summary: Restore a previewed version as a new saved version.
+      description: Requires the management token. A stale preview or externally modified primary causes a conflict.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id, revision]
+              properties:
+                id: { type: string }
+                revision: { type: string }
+      responses:
+        "200":
+          description: Applied configuration and impact.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigResponse" }
+        "400": { $ref: "#/components/responses/InvalidConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Rejected" }
+
   /api/v1/events:
     get:
       tags: [status]
@@ -1000,6 +1068,34 @@ components:
         idle_seconds: { type: number }
         locked: { type: boolean }
 
+    HistoryChange:
+      type: object
+      required: [path, before, after]
+      properties:
+        path: { type: string }
+        before: {}
+        after: {}
+    HistoryEntry:
+      type: object
+      required: [id, time, actor, changes]
+      properties:
+        id: { type: string }
+        time: { type: string, format: date-time }
+        actor: { type: string }
+        restore_of: { type: string }
+        changes:
+          type: array
+          items: { $ref: "#/components/schemas/HistoryChange" }
+    RestorePreview:
+      type: object
+      required: [id, revision, changes, impact]
+      properties:
+        id: { type: string }
+        revision: { type: string }
+        changes:
+          type: array
+          items: { $ref: "#/components/schemas/HistoryChange" }
+        impact: { $ref: "#/components/schemas/Impact" }
     ConfigResponse:
       type: object
       required: [config, source]

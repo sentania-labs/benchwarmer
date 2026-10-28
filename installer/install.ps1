@@ -96,7 +96,7 @@ Write-Host "Service healthy (version $($h.version))."
 try {
   $excl = (Get-MpPreference).AttackSurfaceReductionOnlyExclusions
   if (-not ($excl | Where-Object { $_.TrimEnd('\') -ieq $Prog.TrimEnd('\') })) {
-    Write-Warning "No Defender ASR exclusion for $Prog was found. If ASR rule 01443614-cd74-433a-b99e-2ecdc07bfc25 is in Block mode, the runtime and tray will be blocked. See docs/deploy/policy-requirements.md."
+    Write-Warning "No Defender ASR exclusion for $Prog was found. If ASR rule 01443614-cd74-433a-b99e-2ecdc07bfc25 is in Block mode, Benchwarmer or the runtime may be blocked if the rule rejects them. See docs/deploy/policy-requirements.md."
   }
 } catch {
   Write-Warning "Could not read Defender settings ($_). Check the ASR exclusion for $Prog by hand; see docs/deploy/policy-requirements.md."

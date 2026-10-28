@@ -21,6 +21,7 @@ import (
 
 	"github.com/sentania-labs/benchwarmer/internal/gpureset"
 	"github.com/sentania-labs/benchwarmer/internal/procgroup"
+	"github.com/sentania-labs/benchwarmer/internal/runtime/llamacpp"
 	"github.com/sentania-labs/benchwarmer/internal/signals"
 	"github.com/sentania-labs/benchwarmer/internal/telemetry"
 )
@@ -384,7 +385,7 @@ func runCycle(o runtimeOpts, g gpuSource, n int, mode string, w *jsonl) cycleRes
 	args := append([]string{"-m", o.model, "--host", o.host, "--port", strconv.Itoa(o.port)}, strings.Fields(o.extra)...)
 	// Graceful mode on Windows needs the child on our console for Ctrl+C.
 	share := mode == modeGraceful && runtime.GOOS == "windows"
-	pg, err := procgroup.Start(procgroup.Spec{Path: o.exe, Args: args, Stdout: sink, Stderr: sink, ShareConsole: share, RunAs: o.runAs})
+	pg, err := procgroup.Start(procgroup.Spec{Path: o.exe, Args: args, Env: llamacpp.Env(o.exe, os.Environ()), Stdout: sink, Stderr: sink, ShareConsole: share, RunAs: o.runAs})
 	if err != nil {
 		r.StartErr = err.Error()
 		return r

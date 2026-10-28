@@ -36,8 +36,9 @@ Signing profile, so the publisher in a file's properties is the
 `sentania-labs` certificate: `benchwarmer.exe`, `bwtray.exe` and `bwprobe.exe`
 are signed before WiX packs them, and the MSI is signed afterwards. The bundled
 runtime is Ollama's own build and keeps Ollama Inc.'s signature. `SHA256SUMS`
-covers the signed files. The Defender ASR path exclusion is still documented
-and recommended for Benchwarmer's own files under rule 01443614.
+covers the signed files. The Defender ASR path exclusion is expected to be
+no longer required; it stays documented as a recommended fallback until a fresh
+install is verified under rule 01443614 in Block mode with no exclusion.
 
 ## Building locally
 

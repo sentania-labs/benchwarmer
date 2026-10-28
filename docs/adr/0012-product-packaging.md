@@ -53,8 +53,9 @@ it; the release workflow builds and publishes it on a tag. The files this repo
 builds (`benchwarmer.exe`, `bwtray.exe`, `bwprobe.exe`) and the MSI are
 Authenticode signed at release time (the org's `windows-sign` action, Azure
 Artifact Signing) before the checksums are made; the bundled runtime is
-Ollama's signed build and is not re-signed. The ASR path exclusion remains
-documented for Benchwarmer's own files.
+Ollama's signed build and is not re-signed. The ASR path exclusion is expected to be
+no longer required; it stays documented as a recommended fallback until a fresh
+install is verified under rule 01443614 in Block mode with no exclusion.
 
 ### What the MSI does
 
@@ -173,7 +174,8 @@ above, so the script no longer creates folders, ACLs or tokens.
 - **Model files** are still copied by an admin (or a GPO file preference) to
   `C:\ProgramData\Benchwarmer\models\`.
 - **Signed MSI.** GPO accepts it. SmartScreen gets publisher recognition from
-  the Authenticode signature; ASR still needs the documented exclusion.
+  the Authenticode signature; the ASR exclusion is expected to be
+  unnecessary but stays documented as a fallback (see policy requirements).
 - **Fleet configuration** is either a pre-placed `config.json` or API calls.
   There is no ADMX template; adding one later would be additive.
 - **The developer no longer installs** on the target. A release is verified

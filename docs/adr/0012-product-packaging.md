@@ -49,10 +49,12 @@ Both carry the same file set:
 
 The MSI is built with WiX Toolset (pinned version, installed as a .NET tool)
 on the GitHub-hosted Windows runner. CI builds it on every push, to validate
-it; the release workflow builds and publishes it on a tag. The release `.exe`
-and `.dll` files and the MSI are Authenticode signed at release time (the org's
-`windows-sign` action, Azure Artifact Signing) before the checksums are made;
-the ASR path exclusion is still what lets them run.
+it; the release workflow builds and publishes it on a tag. The files this repo
+builds (`benchwarmer.exe`, `bwtray.exe`, `bwprobe.exe`) and the MSI are
+Authenticode signed at release time (the org's `windows-sign` action, Azure
+Artifact Signing) before the checksums are made; the bundled llama.cpp runtime
+keeps the signature upstream gave it and is not re-signed. The ASR path
+exclusion is still what lets the files run.
 
 ### What the MSI does
 

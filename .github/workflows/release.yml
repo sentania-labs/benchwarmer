@@ -7,10 +7,10 @@ name: release
 # Split across runners on purpose: Linux builds the binaries, fetches and
 # verifies the llama.cpp runtime, and zips the file set with the same
 # `make package` target CI and developers use; Windows unpacks that exact
-# zip (WiX and msiexec need Windows), Authenticode-signs every file it ships,
-# builds the MSI from the signed file set, signs the MSI, smoke-tests both
-# install routes and re-zips. The MSI and the zip therefore cannot drift
-# apart, and both carry the same signed files.
+# zip (WiX and msiexec need Windows), Authenticode-signs this repo's own
+# executables before WiX packs them, signs the MSI, smoke-tests both install
+# routes and re-zips. The MSI and the zip therefore cannot drift apart, and
+# both carry the same signed files.
 #
 # Signing goes through the org's shared actions in sentania-labs/.github
 # (pinned by commit below; onboarding checklist in that repo's README):
@@ -19,6 +19,11 @@ name: release
 # mandatory, not "if secrets are configured": the job fails in seconds when an
 # org secret has no value, and windows-sign verifies every signature before
 # anything is published. SHA256SUMS is computed over the signed files.
+#
+# The bundled llama.cpp runtime is not re-signed: `make stage` unpacks the
+# upstream zip with its own signatures, and a second signature would overwrite
+# them. Only the files built from this repo (benchwarmer.exe, bwtray.exe,
+# bwprobe.exe) and the MSI carry the org signature.
 on:
   push:
     tags: ['v*.*.*']
@@ -94,10 +99,16 @@ jobs:
       - name: List the release files to sign
         shell: pwsh
         run: |
-          $list = (Get-ChildItem -Recurse -File -Path $env:PKG_DIR -Include '*.exe','*.dll' |
-            ForEach-Object { $_.FullName }) -join ','
-          if (-not $list) { throw 'no .exe/.dll found in the unpacked release folder' }
-          "SIGN_FILES=$list" >> $env:GITHUB_ENV
+          # Only this repo's own executables. The bundled llama.cpp runtime
+          # keeps the upstream signature (see the header).
+          $names = 'benchwarmer.exe', 'bwtray.exe', 'bwprobe.exe'
+          $paths = @()
+          foreach ($n in $names) {
+            $f = Join-Path $env:PKG_DIR $n
+            if (-not (Test-Path $f)) { throw "missing $n in the release folder" }
+            $paths += (Resolve-Path $f).Path
+          }
+          "SIGN_FILES=$(($paths -join ','))" >> $env:GITHUB_ENV
       # Authenticode before the MSI is built, so the package carries the
       # signed files. windows-sign verifies every signature it applies.
       - name: Sign the release binaries (Windows)
@@ -192,10 +203,11 @@ jobs:
 
           Use one route per machine. After installing, copy a GGUF model to \`C:\\ProgramData\\Benchwarmer\\models\\\` and choose it in the dashboard (http://127.0.0.1:8481/).
 
-          Windows binaries are Authenticode signed (the \`.exe\` files, the
-          llama.cpp \`ggml-vulkan.dll\` / \`llama-server.exe\`, and the MSI);
-          the publisher is the org's Azure Artifact Signing profile. Signed:
-          verify downloads against \`SHA256SUMS\`, which covers these files.
+          Benchwarmer's own Windows executables (\`benchwarmer.exe\`, \`bwtray.exe\`,
+          \`bwprobe.exe\`) and the MSI are Authenticode signed; the publisher is
+          the org's Azure Artifact Signing profile. The bundled llama.cpp runtime
+          ships as upstream built it. Verify downloads against \`SHA256SUMS\`,
+          computed over these files.
           EOF
       - name: Publish (idempotent per tag, never replaces assets)
         env:

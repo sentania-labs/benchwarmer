@@ -2,7 +2,7 @@
 import { h, replace, conditionIcon, warnIcon } from "./dom.js";
 import { get, put, post, signIn, ApiError } from "./api.js";
 import { setBanner, clearBanner } from "./banners.js";
-import { defaultDuration, durationChoices, modeKey, followsServer, normalizeOptions } from "./modes.js";
+import { adoptsOptions, defaultDuration, durationChoices, modeKey, followsServer, normalizeOptions } from "./modes.js";
 import {
   clockTime, configNotice, countdown, describeDurationChoice, humanDuration, mib, pct, parseTime,
   profileSource, titleize, MODE_LABELS,
@@ -413,12 +413,15 @@ function buildControls() {
   // form the visitor is part-way through, and only checks a radio, so focus
   // stays where it is.
   el.sync = (st) => {
+    const dirty = formState() !== baseline;
+    // Configured durations are not applied under an edit in progress: the
+    // select would be rebuilt and the visitor's choice changed. They are
+    // compared again on every poll, so they land once the form is clean.
     const next = normalizeOptions(st.mode_options);
-    const optionsChanged = JSON.stringify(next) !== JSON.stringify(options) || !haveOptions;
+    const optionsChanged = adoptsOptions(haveOptions, dirty, options, next);
     if (optionsChanged) options = next;
     const m = st.mode || {};
     const key = modeKey(m);
-    const dirty = formState() !== baseline;
     if (followsServer(dirty, syncedMode, key)) {
       const r = form.querySelector("input[value=" + (MODE_LABELS[m.mode] ? m.mode : "auto") + "]");
       if (r) r.checked = true;
@@ -427,7 +430,7 @@ function buildControls() {
       baseline = formState();
     } else if (optionsChanged) {
       fillDurations();
-      if (!dirty) baseline = formState();
+      baseline = formState();
     }
     haveOptions = true;
   };

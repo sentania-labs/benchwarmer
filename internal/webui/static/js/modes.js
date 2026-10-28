@@ -40,3 +40,10 @@ export function defaultDuration(mode, options) {
   const opts = durationChoices(mode, options);
   return timed.length > 1 ? timed[1] : opts[0];
 }
+
+// adoptsOptions says whether newly reported duration options replace the
+// select's: always for the first set, afterwards only while the form is
+// clean, so a choice in progress is never rebuilt under the visitor.
+export function adoptsOptions(haveOptions, dirty, current, next) {
+  return !haveOptions || (!dirty && JSON.stringify(next) !== JSON.stringify(current));
+}

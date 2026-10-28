@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultDuration, durationChoices, modeKey, followsServer, normalizeOptions } from './static/js/modes.js';
+import { adoptsOptions, defaultDuration, durationChoices, modeKey, followsServer, normalizeOptions } from './static/js/modes.js';
 import { configNotice } from './static/js/format.js';
 
 const opts = normalizeOptions({ pause_durations: ['15m0s', '1h30m0s'], ai_priority_durations: ['45m0s'] });
@@ -44,4 +44,16 @@ test('a rejected config.json names the field and is not called missing', () => {
 });
 test('a first start with no file says so', () => {
   assert.match(configNotice({ config_source: 'default' }), /no config\.json existed/);
+});
+
+test('configured durations are adopted when first reported, whatever the form holds', () => {
+  assert.equal(adoptsOptions(false, true, normalizeOptions(), opts), true);
+});
+test('changed durations wait while the mode form is being edited, then apply once clean', () => {
+  const next = normalizeOptions({ pause_durations: ['5m0s'] });
+  assert.equal(adoptsOptions(true, true, opts, next), false);
+  assert.equal(adoptsOptions(true, false, opts, next), true);
+});
+test('unchanged durations are not re-applied', () => {
+  assert.equal(adoptsOptions(true, false, opts, normalizeOptions({ pause_durations: ['15m0s', '1h30m0s'], ai_priority_durations: ['45m0s'] })), false);
 });

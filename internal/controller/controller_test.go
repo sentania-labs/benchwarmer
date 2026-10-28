@@ -1329,3 +1329,74 @@ func TestStatusReportsProcessScanAgeFromServiceClock(t *testing.T) {
 		t.Fatalf("failed scan still reported: %+v", g)
 	}
 }
+
+func TestUntilTomorrowEndsAtEightLocalAcrossDST(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("no tz database")
+	}
+	for _, c := range []struct {
+		name string
+		now  time.Time
+		want time.Time
+	}{
+		{"evening", time.Date(2026, 9, 24, 21, 30, 0, 0, ny), time.Date(2026, 9, 25, 8, 0, 0, 0, ny)},
+		{"just after midnight is still the next day", time.Date(2026, 9, 25, 0, 30, 0, 0, ny), time.Date(2026, 9, 26, 8, 0, 0, 0, ny)},
+		{"morning before eight", time.Date(2026, 9, 25, 7, 0, 0, 0, ny), time.Date(2026, 9, 26, 8, 0, 0, 0, ny)},
+		{"spring forward night", time.Date(2026, 3, 7, 22, 0, 0, 0, ny), time.Date(2026, 3, 8, 8, 0, 0, 0, ny)},
+		{"fall back night", time.Date(2026, 10, 31, 22, 0, 0, 0, ny), time.Date(2026, 11, 1, 8, 0, 0, 0, ny)},
+	} {
+		got := nextLocalMorning(c.now.UTC(), "America/New_York")
+		if !got.Equal(c.want) {
+			t.Errorf("%s: got %s want %s", c.name, got, c.want)
+		}
+		if h, m, _ := got.In(ny).Clock(); h != 8 || m != 0 {
+			t.Errorf("%s: wall clock %02d:%02d", c.name, h, m)
+		}
+	}
+}
+
+func TestUntilTomorrowEndsPauseAtEightAndAIFirstAtMidnight(t *testing.T) {
+	r := newRigWith(t, nil, func(d *Deps) {
+		d.Config.Timezone = "America/Chicago"
+	})
+	now := r.clk.Now()
+	pause, err := r.c.SetMode(api.ModeRequest{Mode: policy.ModePause, Duration: "until_tomorrow", SetBy: "ui"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 9, 24, 8, 0, 0, 0, chicago); pause.Until == nil || !pause.Until.Equal(want) {
+		t.Errorf("pause until %v, want %s", pause.Until, want)
+	}
+	ai, err := r.c.SetMode(api.ModeRequest{Mode: policy.ModeAIPriority, Duration: "until_tomorrow", SetBy: "ui"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 9, 24, 0, 0, 0, 0, chicago)
+	if limit := now.Add(r.cfg.Modes.MaxAIPriority.D()); limit.Before(want) {
+		want = limit
+	}
+	if ai.Until == nil || !ai.Until.Equal(want) {
+		t.Errorf("ai priority until %v, want %s", ai.Until, want)
+	}
+}
+
+func TestStatusOwnerFollowsPauseAndOffersTomorrow(t *testing.T) {
+	r := newRig(t, nil)
+	r.toReady()
+	st := r.c.Status()
+	if st.Owner.Kind != api.OwnerAvailable || st.Owner.Severity != api.OwnerSeverityOK {
+		t.Fatalf("ready: %+v", st.Owner)
+	}
+	if !st.ModeOptions.UntilTomorrowAt.After(st.Time) {
+		t.Fatalf("until_tomorrow_at %s not after now %s", st.ModeOptions.UntilTomorrowAt, st.Time)
+	}
+	if _, err := r.c.SetMode(api.ModeRequest{Mode: policy.ModePause, Duration: "1h", SetBy: "ui"}); err != nil {
+		t.Fatal(err)
+	}
+	r.stepUntil(state.Disabled)
+	st = r.c.Status()
+	if st.Owner.Kind != api.OwnerPaused || st.Owner.ReturnAt == nil || !st.Owner.ReturnAt.Equal(*st.Mode.Until) {
+		t.Fatalf("paused: %+v", st.Owner)
+	}
+}

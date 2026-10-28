@@ -51,6 +51,9 @@ func (c *Controller) SetMode(req api.ModeRequest) (api.ModeStatus, error) {
 			}
 		case "until_tomorrow":
 			u := nextLocalMidnight(now, c.cfg.Timezone)
+			if req.Mode == policy.ModePause {
+				u = nextLocalMorning(now, c.cfg.Timezone)
+			}
 			m.Until = &u
 		default:
 			d, err := time.ParseDuration(req.Duration)
@@ -92,6 +95,22 @@ func nextLocalMidnight(now time.Time, tz string) time.Time {
 	}
 	l := now.In(loc)
 	return time.Date(l.Year(), l.Month(), l.Day()+1, 0, 0, 0, 0, loc)
+}
+
+// untilTomorrowHour is when a pause's "until tomorrow" ends: the start of the next
+// day's usual hours, not midnight, so an evening pause does not hand the GPU
+// back while the household is still asleep or at work.
+const untilTomorrowHour = 8
+
+// nextLocalMorning is 08:00 on the next calendar day in tz. time.Date keeps
+// it at 08:00 wall-clock across a daylight-saving change.
+func nextLocalMorning(now time.Time, tz string) time.Time {
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		loc = time.Local
+	}
+	l := now.In(loc)
+	return time.Date(l.Year(), l.Month(), l.Day()+1, untilTomorrowHour, 0, 0, 0, loc)
 }
 
 // RequestDrain unloads the model now; it reloads when policy allows after
@@ -209,7 +228,8 @@ func (c *Controller) Status() api.Status {
 		Mode:         api.ModeStatus{Mode: c.mode.Mode, Until: c.mode.Until, SetBy: c.mode.SetBy, SetAt: c.modeSetAt},
 		Decision:     d,
 		ConfigSource: c.cfgSource, ConfigProblem: c.cfgProblem,
-		ModeOptions:  api.ModeOptions{PauseDurations: slices.Clone(c.cfg.Modes.PauseDurations), AIPriorityDurations: slices.Clone(c.cfg.Modes.AIPriorityDurations)},
+		ModeOptions: api.ModeOptions{PauseDurations: slices.Clone(c.cfg.Modes.PauseDurations), AIPriorityDurations: slices.Clone(c.cfg.Modes.AIPriorityDurations),
+			UntilTomorrowAt: nextLocalMorning(now, c.cfg.Timezone)},
 		RecentErrors: append([]events.Event(nil), c.recentErrors...),
 	}
 	name, src := c.activeProfile(now)
@@ -246,6 +266,7 @@ func (c *Controller) Status() api.Status {
 		s.Agent = c.d.Facts.AgentStatus(now, c.cfg.Signals.SessionStaleAfter.D())
 	}
 	s.Summary = c.summary(now, s)
+	s.Owner = api.DeriveOwner(s, c.cfg.Profiles[d.Profile].Cooldown.D())
 	return s
 }
 

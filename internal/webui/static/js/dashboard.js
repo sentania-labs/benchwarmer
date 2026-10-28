@@ -1,7 +1,8 @@
 // Dashboard: polls GET api/v1/status every 2 seconds while visible.
-import { h, replace, conditionIcon, warnIcon } from "./dom.js";
+import { h, replace, toneIcon, warnIcon } from "./dom.js";
 import { get, put, post, signIn, ApiError } from "./api.js";
 import { setBanner, clearBanner } from "./banners.js";
+import { appliedText, ownerView, quickChoices } from "./owner.js";
 import { adoptsOptions, defaultDuration, durationChoices, modeKey, followsServer, normalizeOptions } from "./modes.js";
 import {
   clockTime, configNotice, countdown, describeDurationChoice, humanDuration, mib, pct, parseTime,
@@ -16,13 +17,18 @@ let tickTimer = null;
 let skewMs = 0; // server clock minus browser clock
 let last = null;
 let running = false;
+let announcedKey = null; // the status the screen reader last heard
 
 const serverNow = () => Date.now() + skewMs;
 
 export function mount(main) {
   running = true;
+  announcedKey = null;
   els = {
-    head: h("section", { class: "card head", "aria-live": "polite", "aria-label": "Condition" }, h("p", null, "Loading status...")),
+    head: h("section", { class: "card head", "aria-label": "AI status" }, h("p", null, "Loading status...")),
+    // The only live region for the status: its text changes when the
+    // situation does, not on every poll or clock tick.
+    announce: h("p", { class: "sr-only", role: "status", "aria-live": "polite" }),
     notices: h("div", { class: "notices" }),
     controls: buildControls(),
     mode: h("div"),
@@ -36,17 +42,21 @@ export function mount(main) {
   replace(main,
     h("h1", { class: "sr-only" }, "Dashboard"),
     els.head,
+    els.announce,
+    els.controls,
     els.notices,
-    h("div", { class: "grid" },
-      card("Why", els.decision, "wide"),
-      card("Timers", els.timers),
-      card("Mode and profile", els.mode),
-      els.controls,
-      card("Runtime", els.runtime),
-      card("GPU", els.gpu, "wide"),
-      card("Session agent", els.agent),
-      card("Recent errors", els.errors),
-    ),
+    h("details", { class: "troubleshoot" },
+      h("summary", null, "Details for troubleshooting"),
+      h("p", { class: "muted small" }, "Evidence, timers and maintenance actions. You do not need these to pause or resume AI."),
+      h("div", { class: "grid" },
+        card("Why", els.decision, "wide"),
+        card("Timers", els.timers),
+        card("Mode and profile", els.mode),
+        card("Runtime", els.runtime),
+        card("GPU", els.gpu, "wide"),
+        card("Session agent", els.agent),
+        card("Recent errors", els.errors),
+        buildMaintenance())),
   );
   start();
   return { title: "Dashboard", unmount, visibility: (v) => (v ? start() : stop()) };
@@ -127,12 +137,14 @@ function dl(rows) {
 }
 
 function render(st) {
-  patch(els.head, [st.condition, st.summary, st.state], () => renderHead(st));
-  patch(els.notices, [st.config_source, st.config_problem, st.gpu.confidence, !!(st.decision && st.decision.rule === "eligibility.setup_required")], () => renderNotices(st));
+  const view = ownerView(st, new Date(serverNow()));
+  patch(els.head, view, () => renderHead(view));
+  announce(view);
+  patch(els.notices, [st.config_source, st.config_problem, st.gpu.confidence], () => renderNotices(st));
   patch(els.mode, [st.mode, st.profile], () => renderMode(st));
   patch(els.runtime, [st.runtime, st.state], () => renderRuntime(st.runtime, st.state));
   patch(els.gpu, st.gpu, () => renderGPU(st.gpu));
-  patch(els.decision, [st.decision, st.trigger], () => renderDecision(st));
+  patch(els.decision, [st.decision, st.trigger, st.condition, st.state], () => renderDecision(st));
   patch(els.timers, [st.timers, st.condition, st.decision.reason], () => renderTimers(st));
   patch(els.agent, st.agent, () => renderAgent(st.agent));
   patch(els.errors, st.recent_errors || [], () => renderErrors(st.recent_errors || []));
@@ -140,22 +152,26 @@ function render(st) {
   tick();
 }
 
-function renderHead(st) {
-  const cond = st.condition || "Unavailable";
+function renderHead(v) {
   return [
-    h("div", { class: "badge cond-" + cond.toLowerCase() }, conditionIcon(cond), h("span", null, cond)),
-    h("p", { class: "summary" }, st.summary || ""),
-    h("p", { class: "muted small" }, "Internal state: " + (st.state || "unknown")),
+    h("div", { class: "badge tone-" + v.severity }, toneIcon(v.severity), h("span", null, v.badge)),
+    h("div", { class: "headtext" },
+      h("p", { class: "summary" }, v.headline),
+      v.lines.map((l) => h("p", { class: "detail" }, l)),
+      v.action && h("p", { class: "detail" }, h("a", { href: v.action.href }, v.action.label))),
   ];
+}
+
+// announce tells screen readers about a change in the situation, once. The
+// first status is not announced; the page already shows it.
+function announce(v) {
+  if (v.key === announcedKey) return;
+  if (announcedKey !== null) els.announce.textContent = v.badge + ". " + v.headline;
+  announcedKey = v.key;
 }
 
 function renderNotices(st) {
   const out = [];
-  if (st.decision && st.decision.rule === "eligibility.setup_required") {
-    out.push(h("div", { class: "notice warn", role: "status" }, warnIcon(),
-      h("span", null, (st.decision.reason || "Setup required") + ". Copy a .gguf model into the models folder, then choose it under ",
-        h("a", { href: "#/config/runtime" }, "Configuration > Runtime"), ".")));
-  }
   if (st.config_source && st.config_source !== "primary") {
     out.push(h("div", { class: "notice error", role: "alert" }, warnIcon(), h("span", null, configNotice(st))));
   }
@@ -270,6 +286,7 @@ const ACTIONS = { run: "Run", hold: "Hold (do not load)", drain: "Drain", preemp
 function renderDecision(st) {
   const d = st.decision || {};
   return [
+    h("p", { class: "muted small" }, "Condition: " + (st.condition || "unknown") + ". Internal state: " + (st.state || "unknown") + "."),
     st.trigger && h("p", { class: "trigger" }, h("strong", null, "Trigger: "), st.trigger),
     h("p", { class: "reason" }, d.reason || ""),
     dl([
@@ -334,6 +351,52 @@ function renderErrors(errs) {
 
 function buildControls() {
   const status = h("p", { class: "action-status", role: "status" });
+  let busy = false;
+  let quickKey = null;
+  let quickOptions = null;
+  let untilTomorrowAt = null;
+  const quickRows = h("div", { class: "quick" });
+  const normalBtn = h("button", { type: "button", class: "quick-btn", onclick: () => {
+    if (normalBtn.getAttribute("aria-disabled") !== "true") quick("auto", "");
+  } }, "Back to normal");
+
+  // quick is the one-click path: the same PUT as the form below, the same
+  // authentication. It ignores clicks while one is in flight rather than
+  // disabling the buttons, so focus stays on the button that was pressed.
+  async function quick(mode, duration) {
+    if (busy) return;
+    busy = true;
+    status.textContent = "Applying...";
+    try {
+      const body = { mode, set_by: "ui" };
+      if (mode !== "auto") body.duration = duration;
+      await put("api/v1/mode", body);
+      status.textContent = appliedText(mode, duration, untilTomorrowAt);
+      poll();
+    } catch (err) {
+      status.textContent = "Mode change failed: " + err.message;
+    } finally {
+      busy = false;
+    }
+  }
+  function quickGroup(mode, label) {
+    const choices = quickChoices(mode, quickOptions, untilTomorrowAt, new Date(serverNow()));
+    return h("div", { class: "quick-group", role: "group", "aria-label": label },
+      h("p", { class: "quick-label" }, label),
+      h("div", { class: "quick-buttons" },
+        choices.map((c) => h("button", { type: "button", class: "quick-btn", onclick: () => quick(mode, c.duration) }, c.label))));
+  }
+  // renderQuick rebuilds the buttons only when the choices change (a saved
+  // Manual modes tab, a new day), and never under the visitor's focus.
+  function renderQuick(st) {
+    const key = JSON.stringify([st.mode_options, new Date(serverNow()).toDateString()]);
+    if (key === quickKey || quickRows.contains(document.activeElement)) return;
+    quickKey = key;
+    quickOptions = st.mode_options;
+    replace(quickRows,
+      quickGroup("pause", "Pause AI"),
+      quickGroup("ai_priority", "AI first for"));
+  }
   const radios = Object.entries(MODE_LABELS).map(([v, label]) =>
     h("label", { class: "seg-option" },
       h("input", { type: "radio", name: "mode", value: v, onchange: fillDurations }), h("span", null, label)));
@@ -365,8 +428,15 @@ function buildControls() {
     const opts = durationChoices(m, options);
     // The seed fill runs before any options arrive; its value is not a choice.
     const prev = haveOptions ? durSel.value : null;
-    replace(durSel, opts.map((v) => h("option", { value: v }, describeDurationChoice(v))));
+    replace(durSel, opts.map((v) => h("option", { value: v })));
+    labelDurations();
     durSel.value = opts.includes(prev) ? prev : defaultDuration(m, options);
+  }
+  // labelDurations words each choice; only a pause's "until tomorrow" ends
+  // at the time the service reports, so only it names a time.
+  function labelDurations() {
+    const tomorrow = selected() === "pause" ? untilTomorrowAt : null;
+    for (const o of durSel.options) o.textContent = describeDurationChoice(o.value, tomorrow, new Date(serverNow()));
   }
   async function onApply(e) {
     e.preventDefault();
@@ -378,7 +448,7 @@ function buildControls() {
     try {
       await put("api/v1/mode", body);
       baseline = formState();
-      status.textContent = MODE_LABELS[mode] + " applied" + (mode !== "auto" ? " (" + describeDurationChoice(body.duration).toLowerCase() + ")" : "") + ".";
+      status.textContent = appliedText(mode, body.duration, untilTomorrowAt);
       poll();
     } catch (err) {
       status.textContent = "Mode change failed: " + err.message;
@@ -386,34 +456,22 @@ function buildControls() {
       apply.disabled = false;
     }
   }
-  async function action(path, question, done) {
-    if (!window.confirm(question)) return;
-    status.textContent = "Sending...";
-    try {
-      const res = await post(path);
-      // 200 with accepted false: no runtime was loaded, which is not a failure.
-      status.textContent = res && res.accepted === false && res.message ? res.message : done;
-      poll();
-    } catch (err) {
-      status.textContent = "Request failed: " + err.message;
-    }
-  }
   fillDurations();
   baseline = formState();
-  const el = h("section", { class: "card controls" }, h("h2", null, "Controls"), form,
-    h("div", { class: "row-actions" },
-      h("button", { type: "button", onclick: () => action("api/v1/drain",
-        "Drain now? Active requests get their grace period, then the model unloads. It reloads when policy allows.",
-        "Drain requested.") }, "Drain now"),
-      h("button", { type: "button", onclick: () => action("api/v1/reload",
-        "Reload the runtime? It drains first, then restarts llama-server with the current configuration.",
-        "Reload requested.") }, "Reload runtime")),
+  const el = h("section", { class: "card controls" },
+    h("h2", null, "Pause or resume AI"),
+    quickRows,
+    h("div", { class: "quick-group" }, normalBtn),
+    h("details", { class: "more-options" },
+      h("summary", null, "Other durations"),
+      form),
     status);
   // sync follows the service: the configured durations, and the active mode
   // when it changed (a tray click, a pause that ran out). It never touches a
   // form the visitor is part-way through, and only checks a radio, so focus
   // stays where it is.
   el.sync = (st) => {
+    untilTomorrowAt = st.mode_options && st.mode_options.until_tomorrow_at;
     const dirty = formState() !== baseline;
     // Configured durations are not applied under an edit in progress: the
     // select would be rebuilt and the visitor's choice changed. They are
@@ -434,8 +492,43 @@ function buildControls() {
       baseline = formState();
     }
     haveOptions = true;
+    labelDurations();
+    renderQuick(st);
+    normalBtn.setAttribute("aria-disabled", m.mode && m.mode !== "auto" ? "false" : "true");
+    normalBtn.classList.toggle("is-current", !(m.mode && m.mode !== "auto"));
   };
   return el;
+}
+
+// buildMaintenance holds the two actions that are for troubleshooting, with
+// a sentence on when each helps.
+function buildMaintenance() {
+  const status = h("p", { class: "action-status", role: "status" });
+  async function action(path, question, done) {
+    if (!window.confirm(question)) return;
+    status.textContent = "Sending...";
+    try {
+      const res = await post(path);
+      // 200 with accepted false: no runtime was loaded, which is not a failure.
+      status.textContent = res && res.accepted === false && res.message ? res.message : done;
+      poll();
+    } catch (err) {
+      status.textContent = "Request failed: " + err.message;
+    }
+  }
+  return h("section", { class: "card maintenance" }, h("h2", null, "Maintenance"),
+    h("p", null, h("strong", null, "Drain now"), ": unload the AI model right away, after active requests finish. ",
+      "Use it before something that needs the whole GPU. AI loads again when policy allows."),
+    h("p", null, h("strong", null, "Reload runtime"), ": restart the AI runtime with the saved settings. ",
+      "Use it when a change under Configuration needs a restart to take effect."),
+    h("div", { class: "row-actions" },
+      h("button", { type: "button", onclick: () => action("api/v1/drain",
+        "Drain now? Active requests get their grace period, then the model unloads. It reloads when policy allows.",
+        "Drain requested.") }, "Drain now"),
+      h("button", { type: "button", onclick: () => action("api/v1/reload",
+        "Reload the runtime? It drains first, then restarts llama-server with the current configuration.",
+        "Reload requested.") }, "Reload runtime")),
+    status);
 }
 
 function updateControls(st) {

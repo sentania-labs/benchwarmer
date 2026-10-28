@@ -53,12 +53,19 @@ type Status struct {
 	// ModeOptions are the durations the Controls card offers, from the
 	// modes section of the configuration.
 	ModeOptions ModeOptions `json:"mode_options"`
+	// Owner is the plain-language reading of the above for the person at
+	// the PC: one kind, one severity, and the facts a sentence needs.
+	Owner OwnerStatus `json:"owner"`
 }
 
 // ModeOptions lists the timed choices for the manual modes.
 type ModeOptions struct {
 	PauseDurations      []config.Duration `json:"pause_durations"`
 	AIPriorityDurations []config.Duration `json:"ai_priority_durations"`
+	// UntilTomorrowAt is when a pause with "until_tomorrow" would end if
+	// chosen now: 08:00 the next day in the configured time zone. AI first
+	// with "until_tomorrow" ends at the next local midnight.
+	UntilTomorrowAt time.Time `json:"until_tomorrow_at"`
 }
 
 // ModeStatus describes the manual mode.

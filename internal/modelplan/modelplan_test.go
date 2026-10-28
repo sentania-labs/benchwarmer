@@ -154,3 +154,14 @@ func TestComputeContextNeverExceedsConfigMax(t *testing.T) {
 		}
 	}
 }
+
+func TestComputeVRAMReasonNamesItsContextAndAssumesFullOffload(t *testing.T) {
+	p := Compute(Input{Meta: llama31(), FileSize: 4690 << 20, GPU: GPU{TotalMiB: 24576, Reliable: true}, CurrentContext: 8192})
+	free := rec(p, "runtime.required_free_vram_mib")
+	if free == nil || !strings.Contains(free.Reason, "at 8192 tokens of context") {
+		t.Fatalf("%+v", p.Recommendations)
+	}
+	if !strings.Contains(strings.Join(p.Notes, " "), "every layer is offloaded") {
+		t.Fatalf("%v", p.Notes)
+	}
+}

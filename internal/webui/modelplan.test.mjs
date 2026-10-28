@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { modelOptions, proposalRows, parseEdit, applyRows, summary, inspectUrl, quantName, baseName } from './static/js/modelplan.js';
+import { modelOptions, proposalRows, parseEdit, applyRows, vramCaution, summary, inspectUrl, quantName, baseName } from './static/js/modelplan.js';
 
 const models = [
   { name: 'a.gguf', path: 'C:\\ProgramData\\Benchwarmer\\models\\a.gguf', size_bytes: 4690 * 1048576 },
@@ -90,4 +90,16 @@ test('helpers', () => {
   assert.equal(quantName(999), 'type 999');
   assert.equal(quantName(undefined), '');
   assert.equal(baseName('D:\\a\\b.gguf'), 'b.gguf');
+});
+
+test('vramCaution warns when the VRAM row is taken without its context row', () => {
+  const rows = [
+    { path: 'runtime.context_size', after: 73728 },
+    { path: 'runtime.required_free_vram_mib', after: 14848 },
+  ];
+  assert.equal(vramCaution(rows, rows), '');
+  assert.match(vramCaution(rows, [rows[1]]), /73,728 tokens/);
+  assert.match(vramCaution(rows, [{ ...rows[0], after: 131072 }, rows[1]]), /did not keep/);
+  assert.equal(vramCaution(rows, [rows[0]]), '');
+  assert.equal(vramCaution([rows[1]], [rows[1]]), '');
 });

@@ -105,7 +105,7 @@ func Compute(in Input) Plan {
 	if m.SlidingWin > 0 {
 		p.Notes = append(p.Notes, "This model uses sliding-window attention, so the real KV cache can be smaller than estimated here.")
 	}
-	p.Notes = append(p.Notes, "Memory figures assume an f16 KV cache and a fixed allowance for compute buffers. They are estimates; the loaded model may use more or less.")
+	p.Notes = append(p.Notes, "Memory figures assume every layer is offloaded to the GPU (as with the default GPU layers setting), an f16 KV cache and a fixed allowance for compute buffers. They are estimates; the loaded model may use more or less, and less if you keep layers on the CPU.")
 
 	limit := maxContext
 	if m.ContextLength > 0 && m.ContextLength < maxContext {
@@ -172,7 +172,7 @@ func Compute(in Input) Plan {
 	}
 	p.Recommendations = append(p.Recommendations, Recommendation{
 		Path: "runtime.required_free_vram_mib", Value: free, Certainty: Estimate,
-		Reason: fmt.Sprintf("estimated load of %d MiB (weights %d, KV cache %d, overhead %d), rounded up to %d MiB", need, p.WeightsMiB, kvMiB(ctx), OverheadMiB, vramStep),
+		Reason: fmt.Sprintf("estimated load of %d MiB at %d tokens of context (weights %d, KV cache %d, overhead %d), rounded up to %d MiB", need, ctx, p.WeightsMiB, kvMiB(ctx), OverheadMiB, vramStep),
 	})
 	return p
 }

@@ -75,6 +75,16 @@ export function parseEdit(path, raw) {
   return { value: n };
 }
 
+// vramCaution warns when the required-free-VRAM row is taken but the context
+// row it was estimated for is declined or edited to another value.
+export function vramCaution(rows, taken) {
+  const ctx = rows.find((r) => r.path === "runtime.context_size");
+  if (!ctx || !taken.some((r) => r.path === "runtime.required_free_vram_mib")) return "";
+  const kept = taken.find((r) => r.path === ctx.path);
+  if (kept && kept.after === ctx.after) return "";
+  return "Required free VRAM was estimated for " + ctx.after.toLocaleString("en-US") + " tokens of context, which you did not keep. Check that value before saving.";
+}
+
 // applyRows writes the accepted rows into the draft and returns how many
 // changed. Nothing else in the draft is touched.
 export function applyRows(draft, rows) {

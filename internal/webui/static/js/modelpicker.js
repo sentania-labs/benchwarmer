@@ -5,7 +5,7 @@
 import { h, replace } from "./dom.js";
 import { get, ApiError } from "./api.js";
 import { errorSlot, getPath, setPath, idFor } from "./fields.js";
-import { applyRows, inspectUrl, modelOptions, parseEdit, proposalRows, summary } from "./modelplan.js";
+import { applyRows, inspectUrl, modelOptions, parseEdit, proposalRows, summary, vramCaution } from "./modelplan.js";
 
 const PATH = "runtime.model_path";
 export const PICKER_ID = idFor(PATH);
@@ -170,6 +170,8 @@ export function modelGroup(deps) {
     const n = applyRows(ctx.draft, take);
     ms.note = n ? "Applied " + n + (n === 1 ? " setting" : " settings") + " to the draft. Review it, then press Save configuration."
       : "No settings were applied.";
+    const caution = vramCaution(rows, take);
+    if (caution) ms.note += " " + caution;
     ms.state = "idle";
     ms.edits.clear();
     ms.skip.clear();

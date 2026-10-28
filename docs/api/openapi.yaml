@@ -140,8 +140,10 @@ paths:
         returned as `"<redacted>"` by `GET` may be sent back unchanged and
         keep their stored secret, so a client can round-trip what it read.
         The config is validated, persisted atomically, applied, and audited.
-        The response reports whether the change needs a runtime reload or a
-        service restart.
+        A changed model file that is missing, not a regular file, or
+        inaccessible is rejected; one whose availability cannot be
+        determined is accepted with a `warnings` entry. The response reports
+        whether the change needs a runtime reload or a service restart.
       requestBody:
         required: true
         content:
@@ -149,7 +151,7 @@ paths:
             schema: { $ref: "#/components/schemas/Config" }
       responses:
         "200":
-          description: Applied. Config is redacted; `impact` is present.
+          description: Applied. Config is redacted; `impact` is present, and `warnings` lists problems that did not block saving.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ConfigResponse" }

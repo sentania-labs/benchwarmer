@@ -368,18 +368,59 @@ test('a new event on a background refresh rebuilds the list', async () => {
   mounted.unmount();
 });
 
+test('a deeper list is refilled in several capped pages', async () => {
+  const CAP = 5; // the API caps limit at 1000; a small cap exercises paging
+  const all = Array.from({ length: 12 }, (_, i) => ev(100 - i));
+  const calls = [];
+  globalThis.fetch = async (path) => {
+    calls.push(path);
+    const limit = Math.min(CAP, Number(new URL("http://x/" + path).searchParams.get("limit") || 50));
+    const before = Number(new URL("http://x/" + path).searchParams.get("before_id") || 0);
+    const pool = before ? all.filter((e) => e.id < before) : all;
+    const page = pool.slice(0, limit);
+    return {
+      ok: true, status: 200,
+      text: async () => JSON.stringify({
+        events: page,
+        ...(pool.length > page.length ? { next_before_id: page[page.length - 1].id } : {}),
+      }),
+    };
+  };
+  const { main, mounted } = mountEvents();
+  await settle();
+  const list = findAll(main, 'ol')[0];
+  assert.equal(list.children.length, 12, 'one page per response, all rows kept');
+  assert.equal(calls.length, 3, 'the depth took three capped pages');
+  assert.ok(calls.some((c) => c.includes('before_id=')), 'continuation pages used before_id');
+  // A background refresh keeps the rendered depth even though each response
+  // holds fewer events than that.
+  const ids = findAll(list, 'details').map((d) => d.dataset.id);
+  findAll(list.children[0], 'details')[0].open = true;
+  findAll(list.children[1], 'summary')[0].focus();
+  calls.length = 0;
+  mounted.visibility(true);
+  await settle();
+  assert.equal(list.children.length, 12, 'the refresh kept the depth it rendered');
+  assert.deepEqual(findAll(list, 'details').map((d) => d.dataset.id), ids);
+  assert.equal(findAll(list.children[0], 'details')[0].open, true, 'the expansion survived');
+  assert.equal(Node.active, findAll(list.children[1], 'summary')[0], 'focus stayed on the same row');
+  mounted.unmount();
+});
+
 test('Load older events clicked during a background fetch is not lost', async () => {
   let release;
   const gate = new Promise((r) => { release = r; });
   let slow = false;
+  const firstPage = Array.from({ length: 50 }, (_, i) => ev(200 - i));
   const calls = stubFetch(async (path) => {
-    if (path.includes('before_id=')) return { body: { events: [ev(1)] } };
+    if (path.includes('before_id=50')) return { body: { events: [ev(1)] } };
     if (slow) await gate;
-    return { body: { events: [ev(2)], next_before_id: 2 } };
+    return { body: { events: firstPage, next_before_id: 50 } };
   });
   const { main, mounted } = mountEvents();
   await settle();
   const list = findAll(main, 'ol')[0];
+  assert.equal(list.children.length, 50, 'the first fill rendered one page');
   const more = findAll(main, 'button').find((b) => b.children[0] === 'Load older events');
   slow = true;
   mounted.visibility(true);
@@ -388,8 +429,8 @@ test('Load older events clicked during a background fetch is not lost', async ()
   release();
   await settle();
   await settle();
-  assert.ok(calls.some((c) => c.includes('before_id=2')), 'the older page was requested');
-  assert.equal(list.children.length, 2);
+  assert.ok(calls.some((c) => c.includes('before_id=50')), 'the older page was requested');
+  assert.equal(list.children.length, 51);
   mounted.unmount();
 });
 

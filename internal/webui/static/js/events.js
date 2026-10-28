@@ -9,6 +9,9 @@ import { evidenceTable } from "./dashboard.js";
 
 const PAGE = 50;
 const REFRESH_MS = 5000;
+// One request never returns more than this: internal/api caps limit at
+// maxEventsLimit = 1000, so a deeper list needs more pages.
+const MAX_PAGE = 1000;
 
 let state = null;
 
@@ -74,6 +77,32 @@ function openIds(s) {
   return open;
 }
 
+// fetchPages reads one or more pages so a deep list keeps every row the
+// reader already has: one response holds at most MAX_PAGE events, and the
+// API answers next_before_id whenever an older page exists.
+async function fetchPages(filterValue, before, want) {
+  const out = [];
+  let cursor = before || 0;
+  let nextBefore = 0;
+  for (;;) {
+    const limit = Math.min(MAX_PAGE, want - out.length);
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (filterValue) q.set("type", filterValue);
+    if (cursor) q.set("before_id", String(cursor));
+    const res = await get("api/v1/events?" + q.toString(), { interactive: false });
+    const evs = res.events || [];
+    for (const e of evs) out.push(e);
+    nextBefore = res.next_before_id || 0;
+    if (out.length >= want || !nextBefore || !evs.length) return { events: out, next_before_id: nextBefore };
+    cursor = nextBefore;
+  }
+}
+
+// sameIds reports whether a fresh page holds exactly the rendered rows.
+function sameIds(evs, rows) {
+  return evs.length === rows.length && evs.every((e, i) => String(e.id) === rows[i].id);
+}
+
 async function load(reset, background) {
   const s = state;
   if (!s) return;
@@ -87,31 +116,28 @@ async function load(reset, background) {
   const filterValue = reset ? s.filter.value : s.shown || "";
   const fresh = reset && filterValue !== s.shown;
   const keep = reset && !fresh;
-  const focus = keep ? focusedId(s) : null;
-  const opened = new Set(keep ? openIds(s) : []);
-  const seen = keep ? s.rows.length : 0;
   // Only the first fill of a list announces: a polite live region that
   // repeats "Loading..." on every refresh is noise for a screen reader.
   if (fresh && !(background && s.failure)) s.status.textContent = "Loading...";
   // A refresh asks for at least the rows already on screen, so an automatic
-  // refresh cannot shrink a list the reader has paged through.
-  const limit = reset ? Math.max(PAGE, seen) : PAGE;
-  const q = new URLSearchParams({ limit: String(limit) });
-  if (filterValue) q.set("type", filterValue);
-  if (!reset && s.before) q.set("before_id", String(s.before));
+  // refresh cannot shrink a list the reader has paged through; that depth can
+  // exceed one response, so fetchPages reads the extra pages.
+  const want = reset ? Math.max(PAGE, keep ? s.rows.length : 0) : PAGE;
   try {
-    const res = await get("api/v1/events?" + q.toString(), { interactive: false });
+    const res = await fetchPages(filterValue, reset ? 0 : s.before, want);
     if (state !== s) return;
-    const events = res.events || [];
-    const unchanged = background && keep && events.length === s.rows.length &&
-      events.every((e, i) => String(e.id) === s.rows[i].id);
+    // Interaction is read after the awaits, immediately before the swap, so
+    // what the reader did during the fetch is what gets restored.
+    const focus = keep ? focusedId(s) : null;
+    const opened = new Set(keep ? openIds(s) : []);
+    const unchanged = background && keep && sameIds(res.events, s.rows);
     if (!unchanged) {
       // Rows are built off-DOM and swapped in whole, so a failed or slow fetch
       // leaves the current list, its scroll position and focus untouched.
       const rows = reset ? [] : s.rows;
       const summaries = reset ? new Map() : s.summaries;
       const items = [];
-      for (const e of events) {
+      for (const e of res.events) {
         const { li, details, summary } = row(e, new Date(), opened);
         items.push(li);
         rows.push({ id: String(e.id), details });

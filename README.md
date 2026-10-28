@@ -32,7 +32,7 @@ analysis and decisions.
 | `internal/runtime/llamacpp`, `internal/procgroup` | Runtime adapter and Job Object ownership |
 | `internal/store`, `internal/metrics`, `internal/webui` | SQLite, Prometheus, dashboard |
 | `installer/` | `install.ps1` / `uninstall.ps1` for the by-hand zip route (ADR 0012) |
-| `packaging/` | Release packaging: pinned llama.cpp runtime, WiX MSI source, build and smoke-test scripts |
+| `packaging/` | Release packaging: pinned llama-server runtime (Ollama's signed Windows build), WiX MSI source, build and smoke-test scripts |
 | `docs/` | ADRs, API schema (`docs/api/openapi.yaml`), Phase 0, deploy, troubleshooting, release |
 
 ## Install

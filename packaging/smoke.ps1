@@ -123,7 +123,7 @@ function Assert-Installed([string] $ExpectVersion) {
   if ($extra) { Fail "management token is readable beyond SYSTEM and Administrators: $($extra | Out-String)" }
 
   Step 'Checking files'
-  foreach ($f in 'benchwarmer.exe', 'bwtray.exe', 'bwprobe.exe', 'VERSION', 'runtime\vulkan\llama-server.exe', 'runtime\vulkan\ggml-vulkan.dll', 'licenses\LICENSE-llama.cpp') {
+  foreach ($f in 'benchwarmer.exe', 'bwtray.exe', 'bwprobe.exe', 'VERSION', 'runtime\vulkan\llama-server.exe', 'runtime\vulkan\vulkan\ggml-vulkan.dll', 'licenses\LICENSE-llama.cpp') {
     if (-not (Test-Path (Join-Path $Prog $f))) { Fail "missing $Prog\$f" }
   }
   Write-Host "VERSION: $((Get-Content (Join-Path $Prog 'VERSION') -Raw).Trim())"

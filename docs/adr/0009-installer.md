@@ -18,7 +18,7 @@ runners.
 - `install.ps1` (run elevated) is idempotent and does, in order:
   1. Stop the service if present.
   2. Copy binaries to `C:\Program Files\Benchwarmer\` (admin-only write; the
-     ASR exclusion path). The llama.cpp runtime lives in `...\runtime\`.
+     recommended ASR exclusion path). The llama-server runtime lives in `...\runtime\`.
   3. Create `C:\ProgramData\Benchwarmer\` with `models\`, `secrets\`, `logs\`,
      set ACLs: the service account and Administrators full; `secrets\agent.token`
      readable by interactive users; the management and inference tokens
@@ -43,7 +43,9 @@ runners.
   read before running, which matters on a GPO-managed machine.
 - Signing: the executables this repo builds, and the MSI, are Authenticode
   signed through the lab's Azure Artifact Signing profile; the bundled runtime
-  keeps upstream's signature. ASR is handled by the path exclusion, not by
-  reputation.
+  is Ollama's signed build and keeps its signature. The ASR path exclusion
+  is expected to be no longer required, and stays documented as a recommended
+  fallback until a fresh install is verified under rule 01443614 in Block mode
+  with no exclusion.
 - An MSI can be added later without changing the service, since service
   registration lives in `benchwarmer.exe`.

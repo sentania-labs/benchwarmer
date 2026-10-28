@@ -1,16 +1,22 @@
 # Policy requirements on managed Windows machines
 
 The executables Benchwarmer ships are Authenticode signed (`benchwarmer.exe`,
-`bwtray.exe`, `bwprobe.exe`, and the MSI); the bundled llama.cpp runtime keeps
-the signature upstream gave it. On a machine managed by Group Policy or Intune,
+`bwtray.exe`, `bwprobe.exe`, and the MSI); the bundled llama-server runtime is
+Ollama's own build, signed by Ollama Inc. On a machine managed by Group Policy or Intune,
 check these before installing.
 
-## Required when ASR rule 01443614 is in Block mode
+## Recommended when ASR rule 01443614 is in Block mode
 
 Defender attack surface reduction rule `01443614-cd74-433a-b99e-2ecdc07bfc25`
 ("Block executable files from running unless they meet a prevalence, age, or
-trusted list criterion") blocks `benchwarmer.exe`, `bwtray.exe`, and
-`llama-server.exe`. Add an ASR-only exclusion:
+trusted list criterion") blocked the old unsigned llama.cpp `llama-server.exe`
+(event 1121, "Access is denied" from CreateProcess). The bundled runtime is now
+Ollama's Authenticode-signed build and Benchwarmer's own executables and MSI
+are org-signed, so the exclusion is expected to be no longer required. A
+signature does not guarantee the rule allows a file, so it stays documented as a
+recommended fallback until a fresh install is verified on a machine with the
+rule in Block mode and no exclusion. If `benchwarmer.exe`, `bwtray.exe` or the
+runtime is blocked, add an ASR-only exclusion:
 
 - Setting: *Microsoft Defender Antivirus > Microsoft Defender Exploit Guard >
   Attack Surface Reduction > Exclude files and paths from Attack Surface

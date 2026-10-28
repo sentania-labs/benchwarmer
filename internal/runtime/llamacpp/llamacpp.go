@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -114,6 +115,46 @@ func Args(cfg config.Runtime) []string {
 	return append(a, cfg.Args...)
 }
 
+// Env returns the environment for the runtime: base, plus the pointer to
+// the Vulkan backend when the runtime ships one in a vulkan\ folder beside
+// llama-server (Ollama's lib\ollama layout). ggml loads the CPU backends
+// from the executable's own folder but the GPU backend only from
+// GGML_BACKEND_PATH, which is what Ollama itself sets when it launches this
+// llama-server. The backend's folder also goes first on PATH so its bundled
+// C++ runtime DLLs resolve. A value the operator already set is kept. A
+// runtime without a vulkan\ folder (a plain llama.cpp build) gets base
+// unchanged.
+func Env(exe string, base []string) []string {
+	backend := filepath.Join(filepath.Dir(exe), "vulkan", "ggml-vulkan.dll")
+	if fi, err := os.Stat(backend); err != nil || !fi.Mode().IsRegular() {
+		return base
+	}
+	out := make([]string, 0, len(base)+2)
+	havePath := false
+	haveBackend := false
+	for _, kv := range base {
+		k, v, _ := strings.Cut(kv, "=")
+		switch {
+		case strings.EqualFold(k, "GGML_BACKEND_PATH"):
+			if v == "" {
+				continue // an empty value is as good as unset
+			}
+			haveBackend = true
+		case strings.EqualFold(k, "PATH"):
+			havePath = true
+			kv = k + "=" + filepath.Dir(backend) + string(os.PathListSeparator) + v
+		}
+		out = append(out, kv)
+	}
+	if !havePath {
+		out = append(out, "PATH="+filepath.Dir(backend))
+	}
+	if !haveBackend {
+		out = append(out, "GGML_BACKEND_PATH="+backend)
+	}
+	return out
+}
+
 // Start validates cfg, refuses if the port is already bound, and launches
 // llama-server inside a new process-tree boundary.
 func (a *Adapter) Start(ctx context.Context, cfg config.Runtime) (runtime.Instance, error) {
@@ -145,6 +186,7 @@ func (a *Adapter) Start(ctx context.Context, cfg config.Runtime) (runtime.Instan
 		Path:   cfg.Executable,
 		Args:   Args(cfg),
 		Dir:    filepath.Dir(cfg.Executable),
+		Env:    Env(cfg.Executable, os.Environ()),
 		Stdout: i.out,
 		Stderr: i.out,
 		RunAs:  runAs(cfg.RunAs),

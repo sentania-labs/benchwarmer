@@ -14,14 +14,16 @@ has:
 | `benchwarmer-vX.Y.Z-windows-amd64.zip` | Installing by hand with `install.ps1` |
 | `SHA256SUMS` | Checking the downloads (`Get-FileHash <file>`) |
 
-The packages are not code-signed yet.
+The executables and the MSI are Authenticode signed by the lab's Azure Artifact
+Signing profile; the bundled runtime keeps Ollama Inc.'s signature.
 
 ## Before you install
 
-1. **Defender ASR exclusion.** On a managed PC where ASR rule
-   `01443614-cd74-433a-b99e-2ecdc07bfc25` is in Block mode, exclude
-   `C:\Program Files\Benchwarmer\` from ASR rules by Group Policy first, or
-   the service, tray and runtime are blocked. Details:
+1. **Defender ASR exclusion (recommended fallback).** Everything shipped is
+   signed, so the exclusion is expected to be no longer required. On a managed
+   PC where ASR rule `01443614-cd74-433a-b99e-2ecdc07bfc25` is in Block mode,
+   exclude `C:\Program Files\Benchwarmer\` by Group Policy if the service,
+   tray or runtime is blocked. Details:
    [policy requirements](policy-requirements.md).
 2. **GPU driver.** Some AMD driver releases (Adrenalin 26.5.1 and later) can
    hang the GPU when it idles or the display turns off, ending in a blue
@@ -121,7 +123,7 @@ run `.\uninstall.ps1`.
 | Where | What |
 |---|---|
 | `C:\Program Files\Benchwarmer\` | `benchwarmer.exe` (service), `bwtray.exe` (tray), `bwprobe.exe` (diagnostics), `VERSION`, `config.example.json` |
-| `...\runtime\vulkan\` | The bundled llama.cpp runtime (Vulkan build) |
+| `...\runtime\vulkan\` | The bundled llama-server runtime: Ollama's signed Windows build, with the Vulkan backend in `vulkan\` |
 | `...\licenses\` | Third-party licenses |
 | Service `Benchwarmer` | Runs as LocalSystem, starts automatically |
 | `HKLM\...\CurrentVersion\Run` value `Benchwarmer Tray` | Starts the tray in every user session |

@@ -5,7 +5,7 @@ name: release
 # routes have passed the smoke test on a clean Windows runner.
 #
 # Split across runners on purpose: Linux builds the binaries, fetches and
-# verifies the llama.cpp runtime, and zips the file set with the same
+# verifies the llama-server runtime, and zips the file set with the same
 # `make package` target CI and developers use; Windows unpacks that exact
 # zip (WiX and msiexec need Windows), Authenticode-signs this repo's own
 # executables before WiX packs them, signs the MSI, smoke-tests both install
@@ -20,10 +20,13 @@ name: release
 # org secret has no value, and windows-sign verifies every signature before
 # anything is published. SHA256SUMS is computed over the signed files.
 #
-# The bundled llama.cpp runtime is not re-signed: `make stage` unpacks the
-# upstream zip with its own signatures, and a second signature would overwrite
-# them. Only the files built from this repo (benchwarmer.exe, bwtray.exe,
-# bwprobe.exe) and the MSI carry the org signature.
+# The bundled llama-server runtime is not re-signed: `make stage` unpacks it
+# from Ollama's Windows release, which Ollama Inc. signed, and a second
+# signature would overwrite theirs. The msi job fails the release unless
+# packaging/verify-runtime.ps1 finds every runtime exe and DLL validly signed
+# by Ollama Inc., and packaging/smoke-runtime.ps1 starts the runtime with every
+# flag Benchwarmer passes. Only the files built from this repo (benchwarmer.exe,
+# bwtray.exe, bwprobe.exe) and the MSI carry the org signature.
 on:
   push:
     tags: ['v*.*.*']
@@ -69,6 +72,16 @@ jobs:
             echo "::error::Windows signing org secrets with no value:$missing"
             exit 1
           fi
+      # The full Ollama zip (1.6 GB) is cached by its pinned hash; the fetch
+      # script re-verifies it on every use and extracts only the members the
+      # runtime needs.
+      - name: Read the runtime pin
+        id: pin
+        run: echo "sha=$(jq -er .sha256 packaging/ollama-runtime.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/ollama-runtime
+          key: ollama-runtime-${{ steps.pin.outputs.sha }}
       - name: Check
         run: make check VERSION="$GITHUB_REF_NAME"
       - name: Package
@@ -96,11 +109,17 @@ jobs:
           Expand-Archive "dist\benchwarmer-$env:GITHUB_REF_NAME-windows-amd64.zip" -DestinationPath dist\zip
           "PKG_DIR=$((Resolve-Path "dist\zip\benchwarmer-$env:GITHUB_REF_NAME-windows-amd64").Path)" >> $env:GITHUB_ENV
           "MSI_VERSION=$($env:GITHUB_REF_NAME -replace '^v', '')" >> $env:GITHUB_ENV
+      - name: Verify the runtime is signed by Ollama Inc.
+        shell: pwsh
+        run: .\packaging\verify-runtime.ps1 -RuntimeDir "$env:PKG_DIR\runtime\vulkan"
+      - name: Smoke test the bundled runtime (every flag Benchwarmer passes)
+        shell: pwsh
+        run: .\packaging\smoke-runtime.ps1 -RuntimeDir "$env:PKG_DIR\runtime\vulkan" -LogDir logs\runtime
       - name: List the release files to sign
         shell: pwsh
         run: |
-          # Only this repo's own executables. The bundled llama.cpp runtime
-          # keeps the upstream signature (see the header).
+          # Only this repo's own executables. The bundled runtime keeps
+          # Ollama's signature (see the header).
           $names = 'benchwarmer.exe', 'bwtray.exe', 'bwprobe.exe'
           $paths = @()
           foreach ($n in $names) {
@@ -205,8 +224,8 @@ jobs:
 
           Benchwarmer's own Windows executables (\`benchwarmer.exe\`, \`bwtray.exe\`,
           \`bwprobe.exe\`) and the MSI are Authenticode signed; the publisher is
-          the org's Azure Artifact Signing profile. The bundled llama.cpp runtime
-          ships as upstream built it. Verify downloads against \`SHA256SUMS\`,
+          the org's Azure Artifact Signing profile. The bundled llama-server
+          runtime is Ollama's own signed build (publisher Ollama Inc.). Verify downloads against \`SHA256SUMS\`,
           computed over these files.
           EOF
       - name: Publish (idempotent per tag, never replaces assets)

@@ -225,7 +225,7 @@ const KIND_BY_SEVERITY = {
 // to a game) is the product working, not a fault.
 const TRANSITION_TYPES = new Set([
   "state_changed", "decision_changed", "mode_changed", "mode_expired",
-  "cooldown_reset", "suppression_started", "drain_started", "drain_completed",
+  "cooldown_started", "cooldown_reset", "suppression_started", "drain_started", "drain_completed",
   "grace_shortened", "preempted",
 ]);
 

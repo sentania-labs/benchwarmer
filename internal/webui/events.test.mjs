@@ -74,8 +74,9 @@ test('a critical or warning event is a problem whatever its type', () => {
 });
 
 test('a warning on a transition is a state change, not a problem', () => {
-  for (const t of ['state_changed', 'decision_changed', 'mode_changed', 'mode_expired', 'drain_started', 'drain_completed', 'preempted']) {
+  for (const t of ['state_changed', 'decision_changed', 'mode_changed', 'mode_expired', 'cooldown_started', 'cooldown_reset', 'suppression_started', 'drain_started', 'drain_completed', 'grace_shortened', 'preempted']) {
     assert.notEqual(fmt.eventKind({ type: t, severity: 'warning', state: 'YIELDING' }), 'problem', t);
+    assert.equal(fmt.eventKind({ type: t, severity: 'warning' }), fmt.eventKind({ type: t }), t);
   }
   assert.equal(fmt.eventKind({ type: 'decision_changed', severity: 'warning', state: 'COOLDOWN' }), 'change');
   assert.equal(fmt.eventKind({ type: 'drain_started', severity: 'warning' }), 'step');

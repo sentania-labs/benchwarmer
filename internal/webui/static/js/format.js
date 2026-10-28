@@ -220,11 +220,26 @@ const KIND_BY_SEVERITY = {
   critical: "problem", warning: "problem", notice: "change", info: "step",
 };
 
-// eventKind classifies one event as "problem", "change" or "step".
+// TRANSITION_TYPES are the events built from a policy decision or a mode
+// change. They inherit the decision's severity, so a warning on one (yielding
+// to a game) is the product working, not a fault.
+const TRANSITION_TYPES = new Set([
+  "state_changed", "decision_changed", "mode_changed", "mode_expired",
+  "cooldown_reset", "suppression_started", "drain_started", "drain_completed",
+  "grace_shortened", "preempted",
+]);
+
+// eventKind classifies one event as "problem", "change" or "step". A critical
+// or warning event is a problem, except that a transition is a problem only
+// when critical or when it lands in ERROR.
 export function eventKind(e) {
   const t = e && e.type;
   const sev = e && e.severity;
-  if (sev === "critical" || sev === "warning") return "problem";
+  if (t && TRANSITION_TYPES.has(t)) {
+    if (sev === "critical" || (e && e.state === "ERROR")) return "problem";
+  } else if (sev === "critical" || sev === "warning") {
+    return "problem";
+  }
   if (t && KIND_BY_TYPE[t]) return KIND_BY_TYPE[t];
   if (sev && KIND_BY_SEVERITY[sev]) return KIND_BY_SEVERITY[sev];
   return "step";

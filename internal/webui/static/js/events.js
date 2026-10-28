@@ -80,7 +80,8 @@ async function load(reset) {
   s.loading = true;
   // A different filter than the one the rows were fetched with starts over:
   // the old row count, expansions and focus belong to the old list.
-  const fresh = reset && s.filter.value !== s.shown;
+  const filterValue = s.filter.value;
+  const fresh = reset && filterValue !== s.shown;
   const keep = reset && !fresh;
   const focus = keep ? focusedId(s) : null;
   const opened = new Set(keep ? openIds(s) : []);
@@ -92,7 +93,7 @@ async function load(reset) {
   // refresh cannot shrink a list the reader has paged through.
   const limit = reset ? Math.max(PAGE, seen) : PAGE;
   const q = new URLSearchParams({ limit: String(limit) });
-  if (s.filter.value) q.set("type", s.filter.value);
+  if (filterValue) q.set("type", filterValue);
   if (!reset && s.before) q.set("before_id", String(s.before));
   try {
     const res = await get("api/v1/events?" + q.toString(), { interactive: false });
@@ -112,7 +113,7 @@ async function load(reset) {
     else s.list.append(...items);
     s.rows = rows;
     s.summaries = summaries;
-    s.shown = s.filter.value;
+    s.shown = filterValue;
     s.before = res.next_before_id || 0;
     s.more.hidden = !s.before;
     s.status.textContent = s.rows.length ? "" : "No events.";

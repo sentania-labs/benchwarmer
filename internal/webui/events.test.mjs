@@ -73,6 +73,17 @@ test('a critical or warning event is a problem whatever its type', () => {
   assert.equal(fmt.eventKind({ type: 'config_recovered', severity: 'notice' }), 'change');
 });
 
+test('a warning on a transition is a state change, not a problem', () => {
+  for (const t of ['state_changed', 'decision_changed', 'mode_changed', 'mode_expired', 'drain_started', 'drain_completed', 'preempted']) {
+    assert.notEqual(fmt.eventKind({ type: t, severity: 'warning', state: 'YIELDING' }), 'problem', t);
+  }
+  assert.equal(fmt.eventKind({ type: 'decision_changed', severity: 'warning', state: 'COOLDOWN' }), 'change');
+  assert.equal(fmt.eventKind({ type: 'drain_started', severity: 'warning' }), 'step');
+  assert.equal(fmt.eventKind({ type: 'state_changed', severity: 'critical', state: 'ERROR' }), 'problem');
+  assert.equal(fmt.eventKind({ type: 'state_changed', severity: 'notice', state: 'ERROR' }), 'problem');
+  assert.equal(fmt.eventKind({ type: 'decision_changed', severity: 'critical', state: 'STOPPED' }), 'problem');
+});
+
 test('state names are intelligible and unknown values are not blank', () => {
   assert.equal(fmt.stateLabel('COOLDOWN'), 'Waiting');
   assert.equal(fmt.stateLabel('DISABLED'), 'Paused');
@@ -253,5 +264,26 @@ test('an empty list does not re-announce Loading on every refresh', async () => 
   await settle();
   assert.equal(text, 'No events.');
   assert.ok(writes >= 1);
+  mounted.unmount();
+});
+
+test('a filter changed while a fetch is in flight is reloaded fresh on the next refresh', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const calls = stubFetch(async (path) => {
+    if (path.includes('type=load_failed')) return { body: { events: [ev(9, { type: 'load_failed', severity: 'critical' })] } };
+    await gate;
+    return { body: { events: [ev(2), ev(1)] } };
+  });
+  const { main, mounted } = mountEvents();
+  const select = findAll(main, 'select')[0];
+  select.value = 'load_failed';
+  release();
+  await settle();
+  mounted.visibility(true);
+  await settle();
+  const list = findAll(main, 'ol')[0];
+  assert.match(calls[calls.length - 1], /type=load_failed/);
+  assert.equal(list.children.length, 1);
   mounted.unmount();
 });

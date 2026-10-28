@@ -60,6 +60,17 @@ func New(o Options) http.Handler {
 		},
 		// Stream every chunk as soon as it arrives (SSE).
 		FlushInterval: -1,
+		ModifyResponse: func(resp *http.Response) error {
+			u, _ := resp.Request.Context().Value(usageKey{}).(*usage)
+			if u != nil {
+				u.streamed = streamedResponse(resp.Header)
+				// A compressed body cannot be read for counts; log without them.
+				if resp.Header.Get("Content-Encoding") == "" {
+					resp.Body = tap{ReadCloser: resp.Body, u: u}
+				}
+			}
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if cause := context.Cause(r.Context()); errors.Is(cause, ErrPreempted) || errors.Is(cause, errMaxDuration) {
 				// Abort without a clean end so the caller sees the cut.
@@ -69,8 +80,13 @@ func New(o Options) http.Handler {
 		},
 		ErrorLog: slog.NewLogLogger(o.Log.Handler(), slog.LevelDebug),
 	}
+	reject := func(r *http.Request, status int, outcome string, extra ...any) {
+		o.Log.Info("inference request rejected", append([]any{"peer", peerHost(r), "method", r.Method, "path", api.LogPath(r),
+			"status", status, "outcome", outcome}, extra...)...)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/v1/") {
+			reject(r, http.StatusNotFound, "not_found")
 			writeError(w, http.StatusNotFound, api.Error{Error: "not found", Code: "not_found"})
 			return
 		}
@@ -80,6 +96,7 @@ func New(o Options) http.Handler {
 		}
 		w.Header().Set(HeaderCondition, string(cond))
 		if !authorized(r, o) {
+			reject(r, http.StatusUnauthorized, "unauthorized")
 			writeError(w, http.StatusUnauthorized, api.Error{Error: "inference token required", Code: "unauthorized"})
 			return
 		}
@@ -88,11 +105,14 @@ func New(o Options) http.Handler {
 			if o.Observer != nil {
 				o.Observer.RequestRejected()
 			}
+			reject(r, http.StatusServiceUnavailable, "unavailable", "condition", string(closed.Condition), "reason", closed.Reason)
 			rejectUnavailable(w, closed)
 			return
 		}
 		start := time.Now()
 		outcome := "ok"
+		u := &usage{start: start}
+		sw := &statusWriter{ResponseWriter: w}
 		w.Header().Set(HeaderRequestID, t.ID)
 		defer func() {
 			d := time.Since(start)
@@ -101,8 +121,7 @@ func New(o Options) http.Handler {
 				if errors.Is(context.Cause(ctx), errMaxDuration) {
 					outcome = "timeout"
 				}
-				// Only metadata: never the path's query, body, or headers.
-				o.Log.Info("inference request cut", "request_id", t.ID, "outcome", outcome, "duration_ms", d.Milliseconds())
+				logRequest(o.Log, "inference request cut", r, t.ID, sw.status, outcome, d, u)
 				if o.Observer != nil {
 					o.Observer.RequestFinished(t.ID, d, outcome)
 				}
@@ -111,7 +130,7 @@ func New(o Options) http.Handler {
 				o.Gate.release(t)
 				panic(rec)
 			}
-			o.Log.Debug("inference request", "request_id", t.ID, "method", r.Method, "path", r.URL.Path, "outcome", outcome, "duration_ms", d.Milliseconds())
+			logRequest(o.Log, "inference request", r, t.ID, sw.status, outcome, d, u)
 			if o.Observer != nil {
 				o.Observer.RequestFinished(t.ID, d, outcome)
 			}
@@ -127,8 +146,8 @@ func New(o Options) http.Handler {
 		// is flushed. Prevent HTTP/1 from draining and closing that body out
 		// from under it. HTTP/2 already permits concurrent reads and writes.
 		_ = http.NewResponseController(w).EnableFullDuplex()
-		sw := &statusWriter{ResponseWriter: w}
-		rp.ServeHTTP(sw, r.WithContext(context.WithValue(ctx, ticketKey{}, t)))
+		ctx = context.WithValue(context.WithValue(ctx, ticketKey{}, t), usageKey{}, u)
+		rp.ServeHTTP(sw, r.WithContext(ctx))
 		switch {
 		case sw.status >= 500:
 			outcome = "upstream_error"

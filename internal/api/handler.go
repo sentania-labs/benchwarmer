@@ -107,9 +107,42 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	h.serve(rec, r)
 	if h.o.Logger != nil {
-		h.o.Logger.Info("management request", "method", r.Method, "path", r.URL.Path, "status", rec.status,
-			"peer", peerHost(r), "duration_ms", time.Since(start).Milliseconds())
+		h.o.Logger.Log(r.Context(), requestLogLevel(r, rec.status), "management request", "method", r.Method, "path", LogPath(r),
+			"status", rec.status, "peer", peerHost(r), "duration_ms", time.Since(start).Milliseconds())
 	}
+}
+
+// requestLogLevel keeps routine loopback traffic (the tray polling status and
+// posting agent reports) out of the INFO log, which would otherwise be almost
+// entirely those lines. Errors, state-changing writes, and any non-loopback
+// peer stay at INFO.
+func requestLogLevel(r *http.Request, status int) slog.Level {
+	if status >= http.StatusBadRequest || !isLoopbackPeer(r) {
+		return slog.LevelInfo
+	}
+	switch {
+	case r.Method == http.MethodGet || r.Method == http.MethodHead:
+		return slog.LevelDebug
+	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/report":
+		return slog.LevelDebug
+	}
+	return slog.LevelInfo
+}
+
+const maxLoggedPath = 256
+
+// LogPath returns the request path bounded for logging: a caller controls it
+// before any authentication, and a log line must not grow without limit.
+func LogPath(r *http.Request) string {
+	if p := r.URL.Path; len(p) > maxLoggedPath {
+		return p[:maxLoggedPath]
+	}
+	return r.URL.Path
+}
+
+func isLoopbackPeer(r *http.Request) bool {
+	ip := net.ParseIP(peerHost(r))
+	return ip != nil && ip.IsLoopback()
 }
 
 func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
@@ -219,7 +252,7 @@ func (h *handler) backendError(w http.ResponseWriter, r *http.Request, err error
 		writeError(w, re.Status, re.Code, re.Message)
 	default:
 		if h.o.Logger != nil {
-			h.o.Logger.Error("management request failed", "method", r.Method, "path", r.URL.Path, "error", err)
+			h.o.Logger.Error("management request failed", "method", r.Method, "path", LogPath(r), "error", err)
 		}
 		writeError(w, http.StatusInternalServerError, CodeInternal, "internal error; see the service log")
 	}

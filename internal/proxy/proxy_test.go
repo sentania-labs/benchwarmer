@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -425,5 +426,283 @@ func TestStreamingResponseDuringUpload(t *testing.T) {
 		}
 	default:
 		t.Fatal("upstream did not finish reading the upload")
+	}
+}
+
+// runtimeReply imitates llama-server's usage reporting.
+func runtimeReply(t *testing.T) *httptest.Server {
+	t.Helper()
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !bytes.Contains(body, []byte(`"stream":true`)) {
+			// The prompt echoes JSON-looking text; escaped, it must not count.
+			fmt.Fprint(w, `{"choices":[{"message":{"content":"said \"prompt_tokens\":999"}}],"model":"small-q4.gguf",`+
+				`"usage":{"prompt_tokens":12,"completion_tokens":34,"total_tokens":46}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fl := w.(http.Flusher)
+		fmt.Fprint(w, "data: {\"model\":\"small-q4.gguf\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
+		fl.Flush()
+		time.Sleep(20 * time.Millisecond)
+		// Long enough to push the head out of the tail window.
+		for i := 0; i < 2000; i++ {
+			fmt.Fprintf(w, "data: {\"model\":\"small-q4.gguf\",\"choices\":[{\"delta\":{\"content\":\"tok%d\"}}]}\n\n", i)
+		}
+		fmt.Fprint(w, "data: {\"model\":\"small-q4.gguf\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2001},\"timings\":{\"prompt_n\":1,\"predicted_n\":1999}}\n\ndata: [DONE]\n\n")
+	}))
+	t.Cleanup(s.Close)
+	return s
+}
+
+func logLine(t *testing.T, r *rig, msg string) string {
+	t.Helper()
+	var found string
+	waitFor(t, func() bool {
+		for _, l := range strings.Split(r.logText(), "\n") {
+			if strings.Contains(l, "msg=\""+msg+"\"") {
+				found = l
+				return true
+			}
+		}
+		return false
+	})
+	return found
+}
+
+func waitFor(t *testing.T, ok func() bool) {
+	t.Helper()
+	for i := 0; i < 200; i++ {
+		if ok() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("condition not reached")
+}
+
+func TestPlainRequestLogsOneLine(t *testing.T) {
+	r := newRig(t, runtimeReply(t))
+	req, _ := http.NewRequest(http.MethodPost, r.srv.URL+"/v1/chat/completions?key=hidden", strings.NewReader(`{"messages":[{"content":"top secret prompt"}]}`))
+	req.Header.Set("Authorization", "Bearer inference-secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	l := logLine(t, r, "inference request")
+	for _, want := range []string{"peer=127.0.0.1", "method=POST", "path=/v1/chat/completions", "status=200", "outcome=ok",
+		"streamed=false", "model=small-q4.gguf", "prompt_tokens=12", "completion_tokens=34", "ttft_ms=", "duration_ms="} {
+		if !strings.Contains(l, want) {
+			t.Errorf("log line lacks %q: %s", want, l)
+		}
+	}
+	for _, leak := range []string{"top secret", "hidden", "inference-secret", "said"} {
+		if strings.Contains(r.logText(), leak) {
+			t.Errorf("log leaks %q:\n%s", leak, r.logText())
+		}
+	}
+	if n := strings.Count(r.logText(), `msg="inference request"`); n != 1 {
+		t.Errorf("want exactly one line, got %d", n)
+	}
+}
+
+func TestStreamedRequestLogsUsageFromFinalChunk(t *testing.T) {
+	r := newRig(t, runtimeReply(t))
+	req, _ := http.NewRequest(http.MethodPost, r.srv.URL+"/v1/chat/completions", strings.NewReader(`{"stream":true}`))
+	req.Header.Set("Authorization", "Bearer inference-secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	l := logLine(t, r, "inference request")
+	for _, want := range []string{"streamed=true", "model=small-q4.gguf", "prompt_tokens=5", "completion_tokens=2001", "status=200"} {
+		if !strings.Contains(l, want) {
+			t.Errorf("log line lacks %q: %s", want, l)
+		}
+	}
+	if strings.Contains(r.logText(), "tok1999") {
+		t.Error("log leaks response text")
+	}
+}
+
+func TestRejectedWhileYieldingIsLogged(t *testing.T) {
+	r := newRig(t, nil)
+	r.gate.Close(Closed{Condition: state.Yielding, Reason: "a game is running"})
+	req, _ := http.NewRequest(http.MethodPost, r.srv.URL+"/v1/chat/completions", strings.NewReader(`{"messages":[{"content":"top secret prompt"}]}`))
+	req.Header.Set("Authorization", "Bearer inference-secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 503 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	l := logLine(t, r, "inference request rejected")
+	for _, want := range []string{"peer=127.0.0.1", "status=503", "condition=Yielding", `reason="a game is running"`, "path=/v1/chat/completions"} {
+		if !strings.Contains(l, want) {
+			t.Errorf("log line lacks %q: %s", want, l)
+		}
+	}
+	if strings.Contains(r.logText(), "top secret") {
+		t.Error("log leaks prompt")
+	}
+}
+
+func TestUsageAttrsPreferUsageOverTimings(t *testing.T) {
+	cases := []struct {
+		name, body string
+		want       []any
+	}{
+		{"usage wins over timings", `{"usage":{"prompt_tokens":900,"completion_tokens":7},"timings":{"prompt_n":3,"predicted_n":6}}`,
+			[]any{"prompt_tokens", 900, "completion_tokens", 7}},
+		{"timings alone", `{"timings":{"prompt_n":3,"predicted_n":6}}`,
+			[]any{"prompt_tokens", 3, "completion_tokens", 6}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			u := &usage{}
+			u.observe([]byte(c.body))
+			got := u.attrs()
+			var counts []any
+			for i := 0; i+1 < len(got); i += 2 {
+				if k := got[i]; k == "prompt_tokens" || k == "completion_tokens" {
+					counts = append(counts, k, got[i+1])
+				}
+			}
+			if fmt.Sprint(counts) != fmt.Sprint(c.want) {
+				t.Errorf("got %v, want %v", counts, c.want)
+			}
+		})
+	}
+}
+
+func TestCompressedStreamLogsStreamedWithoutCounts(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Content-Encoding", "gzip")
+		zw := gzip.NewWriter(w)
+		fmt.Fprint(zw, "data: {\"model\":\"small-q4.gguf\",\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":7}}\n\ndata: [DONE]\n\n")
+		zw.Close()
+	}))
+	t.Cleanup(up.Close)
+	r := newRig(t, up)
+	req, _ := http.NewRequest(http.MethodPost, r.srv.URL+"/v1/chat/completions", strings.NewReader(`{"stream":true}`))
+	req.Header.Set("Authorization", "Bearer inference-secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	l := logLine(t, r, "inference request")
+	if !strings.Contains(l, "streamed=true") {
+		t.Errorf("compressed SSE not logged as streamed: %s", l)
+	}
+	for _, no := range []string{"prompt_tokens", "completion_tokens", "model="} {
+		if strings.Contains(l, no) {
+			t.Errorf("counts read from compressed bytes (%s): %s", no, l)
+		}
+	}
+}
+
+func TestUnauthorizedRequestIsLoggedWithoutToken(t *testing.T) {
+	r := newRig(t, upstream(t, 1, 0))
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions?key=hidden", strings.NewReader(`{}`))
+	req.RemoteAddr = "192.168.1.50:5555"
+	req.Header.Set("Authorization", "Bearer wrong-token-value")
+	rec := httptest.NewRecorder()
+	r.srv.Config.Handler.ServeHTTP(rec, req)
+	if rec.Code != 401 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	l := logLine(t, r, "inference request rejected")
+	for _, want := range []string{"peer=192.168.1.50", "method=POST", "path=/v1/chat/completions", "status=401", "outcome=unauthorized"} {
+		if !strings.Contains(l, want) {
+			t.Errorf("log line lacks %q: %s", want, l)
+		}
+	}
+	for _, leak := range []string{"wrong-token-value", "inference-secret", "hidden"} {
+		if strings.Contains(r.logText(), leak) {
+			t.Errorf("log leaks %q:\n%s", leak, r.logText())
+		}
+	}
+	if n := strings.Count(r.logText(), "inference request"); n != 1 {
+		t.Errorf("want exactly one line, got %d:\n%s", n, r.logText())
+	}
+}
+
+func TestNotFoundRequestIsLogged(t *testing.T) {
+	r := newRig(t, upstream(t, 1, 0))
+	resp, err := http.Get(r.srv.URL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	l := logLine(t, r, "inference request rejected")
+	for _, want := range []string{"peer=127.0.0.1", "method=GET", "path=/health", "status=404", "outcome=not_found"} {
+		if !strings.Contains(l, want) {
+			t.Errorf("log line lacks %q: %s", want, l)
+		}
+	}
+	if n := strings.Count(r.logText(), "inference request"); n != 1 {
+		t.Errorf("want exactly one line, got %d:\n%s", n, r.logText())
+	}
+}
+
+func TestCutBeforeHeadersLogsDashStatus(t *testing.T) {
+	started := make(chan struct{})
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		close(started)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(up.Close)
+	r := newRig(t, up)
+	errc := make(chan error, 1)
+	go func() {
+		resp, err := post(r.srv.URL, `{}`)
+		if resp != nil {
+			resp.Body.Close()
+		}
+		errc <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("request never reached the runtime")
+	}
+	r.gate.Close(Closed{Condition: state.Yielding})
+	r.gate.ForceCloseAll()
+	if err := <-errc; err == nil {
+		t.Fatal("client should see the cut")
+	}
+	waitIdle(t, r.gate)
+	l := logLine(t, r, "inference request cut")
+	for _, want := range []string{"status=-", "outcome=force_closed"} {
+		if !strings.Contains(l, want) {
+			t.Errorf("log line lacks %q: %s", want, l)
+		}
+	}
+}
+
+func TestLoggedPathIsBounded(t *testing.T) {
+	r := newRig(t, upstream(t, 1, 0))
+	long := "/v1/" + strings.Repeat("a", 4000)
+	req := httptest.NewRequest(http.MethodPost, long, strings.NewReader(`{}`))
+	req.RemoteAddr = "192.168.1.50:5555"
+	r.srv.Config.Handler.ServeHTTP(httptest.NewRecorder(), req)
+	req = httptest.NewRequest(http.MethodGet, "/"+strings.Repeat("b", 4000), nil)
+	r.srv.Config.Handler.ServeHTTP(httptest.NewRecorder(), req)
+	logs := r.logText()
+	if got := strings.Count(logs, "inference request rejected"); got != 2 {
+		t.Fatalf("want two rejected lines, got %d", got)
+	}
+	if len(logs) > 2000 {
+		t.Errorf("logged paths not bounded: %d bytes", len(logs))
 	}
 }

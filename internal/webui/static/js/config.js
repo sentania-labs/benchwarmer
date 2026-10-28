@@ -720,7 +720,7 @@ function jsonSection() {
     ta, err,
     h("div", { class: "row-actions" },
       h("button", { type: "button", onclick: () => { if (applyJSON()) err.textContent = ""; } }, "Apply to draft"),
-      h("button", { type: "button", onclick: () => { ta.value = JSON.stringify(st.draft, null, 2); st.jsonText = null; err.hidden = true; syncSaveBar(); } }, "Reset from draft")),
+      h("button", { type: "button", onclick: () => { ta.value = JSON.stringify(st.draft, null, 2); st.jsonText = null; err.hidden = true; st.clientErrors.delete("json"); ctx.changed(); } }, "Reset from draft")),
   ];
 }
 
@@ -732,6 +732,7 @@ function applyJSON() {
     if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("the top level must be an object");
     st.draft = v;
     st.jsonText = null;
+    st.clientErrors.delete("json");
     err.hidden = true;
     ctx.changed();
     return true;

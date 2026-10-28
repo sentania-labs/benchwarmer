@@ -38,8 +38,12 @@ func (c *Controller) step(now time.Time, collect bool) {
 		}
 		c.timers.LastCompetingAt, c.timers.LastCompetingRule = now, d.Rule
 	}
-	if d.Rule != c.decision.Rule && !c.st.RuntimeRunning() && d.IdleState == c.st {
+	if d.Rule != c.decision.Rule && !c.st.RuntimeRunning() && d.IdleState == c.st &&
+		!(isGameRule(d.Rule) && isGameRule(c.decision.Rule)) {
 		// Same idle state, new reason (e.g. game -> cooldown): worth one event.
+		// Switching between game rules is not: a launcher handing off to its
+		// game flips early warning and confirmed several times, and the
+		// outcome is the same yield each time.
 		c.emit(events.FromDecision(events.DecisionChanged, now, d, c.gpu))
 	}
 	c.decision = d
@@ -50,6 +54,16 @@ func (c *Controller) step(now time.Time, collect bool) {
 	c.checkCrashReset(now)
 	c.publish(now)
 	c.persist()
+}
+
+// isGameRule reports whether rule explains a yield to a game, however firmly
+// the game is recognised.
+func isGameRule(rule string) bool {
+	switch rule {
+	case policy.RuleGameProcess, policy.RuleGameConfirmed, policy.RuleLauncherChildGPU:
+		return true
+	}
+	return false
 }
 
 // checkSetup confirms, while nothing is running, that the runtime could be

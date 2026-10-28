@@ -519,6 +519,37 @@ func TestIdleYieldStopsImmediately(t *testing.T) {
 	}
 }
 
+// A launcher handing off to its game flips between the early-warning and
+// confirmed rules; the yield is the same, so no decision_changed is logged.
+func TestGameRuleSwitchEmitsNoDecisionChanged(t *testing.T) {
+	r := newRig(t, nil)
+	r.toReady()
+	r.facts.set(func(_ *policy.GPUFacts, a *policy.AppFacts) { a.Games = []policy.AppMatch{game("launcher.exe")} })
+	r.stepUntil(state.Cooldown)
+	if r.c.decision.Rule != policy.RuleGameProcess {
+		t.Fatalf("rule %s, want %s", r.c.decision.Rule, policy.RuleGameProcess)
+	}
+	r.ev.reset()
+	confirmed, early := game("game.exe"), game("launcher.exe")
+	confirmed.VRAMMiB = 8192
+	for _, g := range []policy.AppMatch{confirmed, early, confirmed} {
+		r.facts.set(func(_ *policy.GPUFacts, a *policy.AppFacts) { a.Games = []policy.AppMatch{g} })
+		r.c.Step(true)
+	}
+	if r.c.decision.Rule != policy.RuleGameConfirmed {
+		t.Fatalf("rule %s, want %s", r.c.decision.Rule, policy.RuleGameConfirmed)
+	}
+	if n := r.ev.count(events.DecisionChanged); n != 0 {
+		t.Fatalf("%d decision_changed events for game rule switches; events %v", n, r.ev.types())
+	}
+	// Leaving the game for a different reason still reports.
+	r.facts.set(func(_ *policy.GPUFacts, a *policy.AppFacts) { a.Games = nil })
+	r.c.Step(true)
+	if n := r.ev.count(events.DecisionChanged); n != 1 {
+		t.Fatalf("%d decision_changed events after the game ended, want 1; events %v", n, r.ev.types())
+	}
+}
+
 func TestRepeatedPreemptionSuppresses(t *testing.T) {
 	r := newRig(t, nil)
 	r.toReady()

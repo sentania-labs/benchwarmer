@@ -184,7 +184,13 @@ func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, ex
 	if c.d.ConfigStore != nil {
 		var err error
 		if store, ok := c.d.ConfigStore.(historyStore); ok {
-			err = store.SaveVersion(c.cfg, nc, actor, now, restoreOf)
+			var reset string
+			reset, err = store.SaveVersion(c.cfg, nc, actor, now, restoreOf)
+			if err == nil && reset != "" {
+				c.emit(events.Event{Time: now, Type: events.ConfigChanged, Severity: policy.SeverityWarning,
+					Message: "Configuration history was unreadable and has been reset; the old file was moved to " + reset,
+					Data:    map[string]any{"actor": actor, "history_reset": true, "moved_to": reset}})
+			}
 		} else {
 			err = c.d.ConfigStore.Save(nc)
 		}
@@ -217,7 +223,7 @@ func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, ex
 }
 
 type historyStore interface {
-	SaveVersion(config.Config, config.Config, string, time.Time, string) error
+	SaveVersion(config.Config, config.Config, string, time.Time, string) (string, error)
 	History() ([]config.HistoryEntry, error)
 	HistoryConfig(string) (config.Config, error)
 	VerifyCurrent(config.Config) error

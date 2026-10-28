@@ -16,6 +16,7 @@ const HistoryLimit = 20
 
 var ErrHistoryNotFound = errors.New("configuration version not found")
 var ErrHistoryConflict = errors.New("configuration changed since preview")
+var errHistoryCorrupt = errors.New("configuration history is unreadable")
 var ErrHistoryPrimaryUnusable = errors.New("saved configuration file is missing or invalid")
 
 // HistoryEntry contains only values safe to show to a reader.
@@ -53,7 +54,7 @@ func (s *Store) readHistory() (historyFile, error) {
 		return h, err
 	}
 	if err = json.Unmarshal(b, &h); err != nil {
-		return h, fmt.Errorf("read config history: %w", err)
+		return historyFile{}, fmt.Errorf("%w: %v", errHistoryCorrupt, err)
 	}
 	// The pending entry is committed only if its primary file was installed.
 	if h.Pending != nil {
@@ -79,42 +80,52 @@ func (s *Store) writeHistory(h historyFile) error {
 
 // SaveVersion writes a recoverable journal before replacing the primary.
 // The journal is reconciled against the primary after a crash, so a failed
-// primary replacement never turns into a successful history entry.
-func (s *Store) SaveVersion(old, next Config, actor string, at time.Time, restoreOf string) error {
+// primary replacement never turns into a successful history entry. History is
+// auxiliary: an unreadable history file is renamed aside and replaced by a
+// fresh one so the save still goes through; the returned path names where the
+// old file went ("" when history was readable).
+func (s *Store) SaveVersion(old, next Config, actor string, at time.Time, restoreOf string) (string, error) {
 	if err := Validate(next); err != nil {
-		return err
+		return "", err
 	}
 	b, err := Marshal(next)
 	if err != nil {
-		return err
+		return "", err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	reset := ""
 	h, err := s.readHistory()
-	if err != nil {
-		return err
+	if errors.Is(err, errHistoryCorrupt) {
+		reset = fmt.Sprintf("%s.corrupt-%s", s.historyPath(), at.UTC().Format("20060102T150405.000000000Z"))
+		if err = os.Rename(s.historyPath(), reset); err != nil {
+			return "", err
+		}
+		h = historyFile{}
+	} else if err != nil {
+		return "", err
 	}
 	if len(h.Versions) == 0 {
 		id, e := historyID()
 		if e != nil {
-			return e
+			return "", e
 		}
 		ob, e := Marshal(old)
 		if e != nil {
-			return e
+			return "", e
 		}
 		h.Versions = append(h.Versions, historyVersion{Entry: HistoryEntry{ID: id, Time: at, Actor: "initial", Changes: []HistoryChange{}}, Config: ob})
 	}
 	id, err := historyID()
 	if err != nil {
-		return err
+		return "", err
 	}
 	h.Pending = &historyVersion{Entry: HistoryEntry{ID: id, Time: at, Actor: actor, RestoreOf: restoreOf, Changes: HistoryDiff(old, next)}, Config: b}
 	if err = s.writeHistory(h); err != nil {
-		return err
+		return "", err
 	}
 	if err = WriteFileAtomic(s.path, b, 0600); err != nil {
-		return err
+		return "", err
 	}
 	// A pending record is sufficient for recovery if either following write fails.
 	h.Versions = append(h.Versions, *h.Pending)
@@ -124,7 +135,7 @@ func (s *Store) SaveVersion(old, next Config, actor string, at time.Time, restor
 	}
 	_ = s.writeHistory(h)
 	_ = WriteFileAtomic(s.lastGood, b, 0600)
-	return nil
+	return reset, nil
 }
 func (s *Store) History() ([]HistoryEntry, error) {
 	s.mu.Lock()

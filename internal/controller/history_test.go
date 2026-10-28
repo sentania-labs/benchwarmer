@@ -87,3 +87,35 @@ func TestRestoreConflictValidationAndAudit(t *testing.T) {
 		t.Fatalf("missing primary accepted: %v", err)
 	}
 }
+
+func TestUnreadableHistoryDoesNotBlockSaveAndWarns(t *testing.T) {
+	store := config.NewStore(filepath.Join(t.TempDir(), "config.json"))
+	r := newRigWith(t, nil, func(d *Deps) { d.ConfigStore = store; d.FileExists = func(string) bool { return true } })
+	b, _ := config.Marshal(r.cfg)
+	if err := config.WriteFileAtomic(store.Path(), b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.Path()+".history", []byte("{"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	next := config.Clone(r.cfg)
+	next.Runtime.ContextSize = 4096
+	if _, err := r.c.UpdateConfig(context.Background(), next, "test"); err != nil {
+		t.Fatalf("save blocked by unreadable history: %v", err)
+	}
+	moved, err := filepath.Glob(store.Path() + ".history.corrupt-*")
+	if err != nil || len(moved) != 1 {
+		t.Fatalf("corrupt history not set aside: %v %v", moved, err)
+	}
+	var warned bool
+	r.ev.mu.Lock()
+	defer r.ev.mu.Unlock()
+	for _, e := range r.ev.ev {
+		if e.Data["history_reset"] == true && e.Data["moved_to"] == moved[0] && strings.Contains(e.Message, moved[0]) {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatal("missing history reset warning")
+	}
+}

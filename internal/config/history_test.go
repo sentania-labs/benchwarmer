@@ -23,7 +23,7 @@ func TestHistoryRetentionAndRestart(t *testing.T) {
 		next := Clone(current)
 		next.Runtime.ContextSize = 4096 + i
 		next.Runtime.Args = []string{"--api-key", fmt.Sprintf("secret-%d", i)}
-		if err = s.SaveVersion(current, next, "test", time.Unix(int64(i), 0), ""); err != nil {
+		if _, err = s.SaveVersion(current, next, "test", time.Unix(int64(i), 0), ""); err != nil {
 			t.Fatal(err)
 		}
 		current = next
@@ -87,7 +87,7 @@ func TestHistoryRecoversInterruptedSave(t *testing.T) {
 	}
 }
 
-func TestHistoryCorruptFileFailsClosed(t *testing.T) {
+func TestHistoryCorruptFileIsSetAsideAndSaveContinues(t *testing.T) {
 	s := NewStore(filepath.Join(t.TempDir(), "config.json"))
 	r, err := s.Load()
 	if err != nil {
@@ -98,16 +98,32 @@ func TestHistoryCorruptFileFailsClosed(t *testing.T) {
 	}
 	next := Clone(r.Config)
 	next.Runtime.ContextSize = 4096
-	if err = s.SaveVersion(r.Config, next, "test", time.Now(), ""); err == nil {
-		t.Fatal("corrupt history accepted")
+	moved, err := s.SaveVersion(r.Config, next, "test", time.Now(), "")
+	if err != nil {
+		t.Fatalf("corrupt history blocked save: %v", err)
+	}
+	if moved == "" || !strings.HasPrefix(moved, s.historyPath()+".corrupt-") {
+		t.Fatalf("unexpected moved path %q", moved)
+	}
+	if old, err := os.ReadFile(moved); err != nil || string(old) != "{" {
+		t.Fatalf("corrupt file not preserved: %q %v", old, err)
 	}
 	b, err := os.ReadFile(s.path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c, err := Parse(b)
-	if err != nil || c.Runtime.ContextSize != r.Config.Runtime.ContextSize {
-		t.Fatal("primary changed on failure")
+	if err != nil || c.Runtime.ContextSize != 4096 {
+		t.Fatal("primary not saved")
+	}
+	entries, err := s.History()
+	if err != nil || len(entries) != 2 || entries[0].Actor != "test" || entries[1].Actor != "initial" {
+		t.Fatalf("fresh history not started: %+v %v", entries, err)
+	}
+	again := Clone(next)
+	again.Runtime.ContextSize = 8192
+	if moved, err = s.SaveVersion(next, again, "test", time.Now(), ""); err != nil || moved != "" {
+		t.Fatalf("healthy history reported reset: %q %v", moved, err)
 	}
 }
 
@@ -127,7 +143,7 @@ func TestHistoryFailedPrimaryReplacementDoesNotCommitPending(t *testing.T) {
 	}
 	next := Clone(r.Config)
 	next.Runtime.ContextSize = 4096
-	if err = s.SaveVersion(r.Config, next, "test", time.Now(), ""); err == nil {
+	if _, err = s.SaveVersion(r.Config, next, "test", time.Now(), ""); err == nil {
 		t.Fatal("expected failed primary replacement")
 	}
 	if err = os.Remove(path); err != nil {
@@ -182,7 +198,7 @@ func TestVerifyCurrentIgnoresNormalizationButReportsUnusablePrimary(t *testing.T
 	next := Clone(initial.Config)
 	next.Listen.InferenceTLS.SelfSignedHosts = nil
 	next.Runtime.ContextSize++
-	if err = s.SaveVersion(initial.Config, next, "test", time.Unix(1, 0), ""); err != nil {
+	if _, err = s.SaveVersion(initial.Config, next, "test", time.Unix(1, 0), ""); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.VerifyCurrent(next); err != nil {

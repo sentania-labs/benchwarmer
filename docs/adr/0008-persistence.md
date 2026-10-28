@@ -25,7 +25,9 @@ recovery path from corruption.
   entry, then replaces `config.json`; after a crash the entry counts only if
   `config.json` matches it (`internal/config/history.go`). Restore creates a
   new version and fails with a conflict if `config.json` changed since the
-  preview.
+  preview. History is auxiliary: an unreadable history file is renamed to
+  `config.json.history.corrupt-<time>`, a fresh history starts, a warning event
+  names the moved file, and the save proceeds.
 - Retention: events pruned by age (`retention.events_days`) and count
   (`retention.events_max`), checked hourly. Stats are aggregated to hourly
   rows.

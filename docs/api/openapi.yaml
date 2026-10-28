@@ -268,6 +268,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ActionResponse" }
+        "200":
+          description: No runtime is loaded, so there was nothing to act on. Not an error; accepted is false and message says when the change takes effect.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActionResponse" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -287,6 +292,11 @@ paths:
       responses:
         "202":
           description: Accepted; the controller acts asynchronously.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActionResponse" }
+        "200":
+          description: No runtime is loaded, so there was nothing to act on. Not an error; accepted is false and message says when the change takes effect.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ActionResponse" }
@@ -660,7 +670,7 @@ components:
 
     Status:
       type: object
-      required: [time, version, condition, state, summary, mode, profile, runtime, gpu, decision, timers, agent, config_source]
+      required: [time, version, condition, state, summary, mode, profile, runtime, gpu, decision, timers, agent, config_source, mode_options]
       properties:
         time: { type: string, format: date-time }
         version: { type: string }
@@ -682,6 +692,17 @@ components:
           type: string
           enum: [primary, last_good, default]
           description: Anything but primary is a problem the UI must show.
+        config_problem:
+          type: string
+          description: Which field of config.json was rejected and why. Present only when the file was found but could not be used.
+        mode_options: { $ref: "#/components/schemas/ModeOptions" }
+    ModeOptions:
+      type: object
+      required: [pause_durations, ai_priority_durations]
+      description: The timed choices for the manual modes, from the modes section of the configuration. Clients add until_tomorrow and until_reboot.
+      properties:
+        pause_durations: { type: array, items: { type: string } }
+        ai_priority_durations: { type: array, items: { type: string } }
     ModeStatus:
       type: object
       required: [mode]
@@ -869,6 +890,7 @@ components:
         accepted: { type: boolean }
         action: { type: string, enum: [drain, reload] }
         reason: { type: string }
+        message: { type: string, description: Why nothing was done, when accepted is false. }
     SetupInfo:
       type: object
       required: [data_dir, models_dir, models, runtimes, certificates]

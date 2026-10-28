@@ -174,3 +174,18 @@ export function describeDurationChoice(v) {
   const ms = parseGoDuration(v);
   return ms == null ? v : humanDuration(ms);
 }
+
+// configNotice says which config.json problem the service is working around.
+// A file that was found and rejected is never described as missing.
+export function configNotice(st) {
+  const running = st.config_source === "last_good"
+    ? "Running on the last known good configuration"
+    : "Running on built-in defaults";
+  if (st.config_problem) {
+    return "config.json was found but not used. " + running + ". Fix this and save: " + st.config_problem + ".";
+  }
+  if (st.config_source === "last_good") {
+    return running + ", because config.json could not be used. Check the Events page for the reason, then fix and save the configuration.";
+  }
+  return running + ": no config.json existed, so the defaults were written. Review the configuration and save it.";
+}

@@ -80,7 +80,7 @@ func Evaluate(s Snapshot, c config.Config) Decision {
 		Mode:          e.mode,
 		Competing:     win.competing,
 		IdleState:     win.idle,
-		NextLoadAt:    e.nextLoadAt(win.competing),
+		NextLoadAt:    e.nextLoadAt(win),
 	}
 	for _, m := range matches {
 		if m.rule != win.rule {
@@ -485,14 +485,22 @@ func (e *eval) suppressEnd() time.Time {
 	return e.s.Timers.SuppressedAt.Add(e.c.AntiThrash.SuppressFor.D())
 }
 
-// nextLoadAt is the latest active timer; zero when no timer blocks loading.
-// While a competing workload is still present the cooldown has not started
-// counting, so it gives no bound: only recovery and suppression deadlines do.
-func (e *eval) nextLoadAt(competing bool) time.Time {
+// nextLoadAt is the time a load can really start: the latest active timer,
+// zero when no timer blocks loading or when no time can be promised. While a
+// competing workload is still present the cooldown has not started counting
+// and the load waits for that workload to end, so there is no time to give.
+// A manual pause holds the load until it ends, whatever the timers say.
+func (e *eval) nextLoadAt(win match) time.Time {
+	if win.competing {
+		return time.Time{}
+	}
 	var next time.Time
-	timers := []time.Time{e.s.Timers.RecoveryUntil, e.suppressEnd()}
-	if !competing {
-		timers = append(timers, e.cooldownEnd())
+	timers := []time.Time{e.s.Timers.RecoveryUntil, e.suppressEnd(), e.cooldownEnd()}
+	if win.rule == RulePause {
+		if e.s.Mode.Until == nil {
+			return time.Time{}
+		}
+		timers = append(timers, *e.s.Mode.Until)
 	}
 	for _, t := range timers {
 		if t.After(e.s.Now) && t.After(next) {

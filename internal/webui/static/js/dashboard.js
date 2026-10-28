@@ -2,27 +2,25 @@
 import { h, replace, conditionIcon, warnIcon } from "./dom.js";
 import { get, put, post, signIn, ApiError } from "./api.js";
 import { setBanner, clearBanner } from "./banners.js";
+import { adoptsOptions, defaultDuration, durationChoices, modeKey, followsServer, normalizeOptions } from "./modes.js";
 import {
-  clockTime, countdown, describeDurationChoice, humanDuration, mib, pct, parseTime,
+  clockTime, configNotice, countdown, describeDurationChoice, humanDuration, mib, pct, parseTime,
   profileSource, titleize, MODE_LABELS,
 } from "./format.js";
 
 const POLL_MS = 2000;
-const DURATIONS = ["30m0s", "1h0m0s", "2h0m0s", "4h0m0s", "until_tomorrow", "until_reboot"];
 
 let els = null;
 let pollTimer = null;
 let tickTimer = null;
 let skewMs = 0; // server clock minus browser clock
 let last = null;
-let controlsSeeded = false;
 let running = false;
 
 const serverNow = () => Date.now() + skewMs;
 
 export function mount(main) {
   running = true;
-  controlsSeeded = false;
   els = {
     head: h("section", { class: "card head", "aria-live": "polite", "aria-label": "Condition" }, h("p", null, "Loading status...")),
     notices: h("div", { class: "notices" }),
@@ -130,7 +128,7 @@ function dl(rows) {
 
 function render(st) {
   patch(els.head, [st.condition, st.summary, st.state], () => renderHead(st));
-  patch(els.notices, [st.config_source, st.gpu.confidence], () => renderNotices(st));
+  patch(els.notices, [st.config_source, st.config_problem, st.gpu.confidence, !!(st.decision && st.decision.rule === "eligibility.setup_required")], () => renderNotices(st));
   patch(els.mode, [st.mode, st.profile], () => renderMode(st));
   patch(els.runtime, [st.runtime, st.state], () => renderRuntime(st.runtime, st.state));
   patch(els.gpu, st.gpu, () => renderGPU(st.gpu));
@@ -159,11 +157,7 @@ function renderNotices(st) {
         h("a", { href: "#/config/runtime" }, "Configuration > Runtime"), ".")));
   }
   if (st.config_source && st.config_source !== "primary") {
-    const what = st.config_source === "last_good"
-      ? "the last known good configuration, because the primary config file could not be used"
-      : "built-in defaults, because no usable config file was found";
-    out.push(h("div", { class: "notice error", role: "alert" }, warnIcon(),
-      h("span", null, "Running on " + what + ". Check Recent errors and the Events page, then fix and save the configuration.")));
+    out.push(h("div", { class: "notice error", role: "alert" }, warnIcon(), h("span", null, configNotice(st))));
   }
   const c = st.gpu && st.gpu.confidence;
   if (c === "degraded") {
@@ -341,10 +335,17 @@ function buildControls() {
   const status = h("p", { class: "action-status", role: "status" });
   const radios = Object.entries(MODE_LABELS).map(([v, label]) =>
     h("label", { class: "seg-option" },
-      h("input", { type: "radio", name: "mode", value: v, onchange: () => fillDurations() }), h("span", null, label)));
+      h("input", { type: "radio", name: "mode", value: v, onchange: fillDurations }), h("span", null, label)));
   const durSel = h("select", { id: "mode-duration" });
   const durWrap = h("div", { class: "field" }, h("label", { for: "mode-duration" }, "For"), durSel);
   const apply = h("button", { type: "submit", class: "primary" }, "Apply mode");
+  // baseline is the form as it last followed the service (or was applied).
+  // The form is dirty only while it differs from that, so an abandoned or
+  // reverted edit lets polling take over again.
+  let baseline;
+  let options = { pause: [], ai_priority: [] };
+  let syncedMode = null;
+  let haveOptions = false;
   const form = h("form", { class: "mode-form", onsubmit: onApply },
     h("fieldset", { class: "segmented" }, h("legend", null, "Mode"), radios),
     durWrap, apply);
@@ -353,13 +354,18 @@ function buildControls() {
     const r = form.querySelector("input[name=mode]:checked");
     return r ? r.value : "auto";
   }
+  const formState = () => {
+    const m = selected();
+    return m === "auto" ? m : m + "|" + durSel.value;
+  };
   function fillDurations() {
     const m = selected();
     durWrap.hidden = m === "auto";
-    const opts = m === "pause" ? [...DURATIONS, ""] : DURATIONS;
-    const prev = durSel.value;
+    const opts = durationChoices(m, options);
+    // The seed fill runs before any options arrive; its value is not a choice.
+    const prev = haveOptions ? durSel.value : null;
     replace(durSel, opts.map((v) => h("option", { value: v }, describeDurationChoice(v))));
-    durSel.value = opts.includes(prev) ? prev : opts[1];
+    durSel.value = opts.includes(prev) ? prev : defaultDuration(m, options);
   }
   async function onApply(e) {
     e.preventDefault();
@@ -370,6 +376,7 @@ function buildControls() {
     status.textContent = "Applying...";
     try {
       await put("api/v1/mode", body);
+      baseline = formState();
       status.textContent = MODE_LABELS[mode] + " applied" + (mode !== "auto" ? " (" + describeDurationChoice(body.duration).toLowerCase() + ")" : "") + ".";
       poll();
     } catch (err) {
@@ -382,14 +389,16 @@ function buildControls() {
     if (!window.confirm(question)) return;
     status.textContent = "Sending...";
     try {
-      await post(path);
-      status.textContent = done;
+      const res = await post(path);
+      // 200 with accepted false: no runtime was loaded, which is not a failure.
+      status.textContent = res && res.accepted === false && res.message ? res.message : done;
       poll();
     } catch (err) {
       status.textContent = "Request failed: " + err.message;
     }
   }
   fillDurations();
+  baseline = formState();
   const el = h("section", { class: "card controls" }, h("h2", null, "Controls"), form,
     h("div", { class: "row-actions" },
       h("button", { type: "button", onclick: () => action("api/v1/drain",
@@ -399,17 +408,35 @@ function buildControls() {
         "Reload the runtime? It drains first, then restarts llama-server with the current configuration.",
         "Reload requested.") }, "Reload runtime")),
     status);
-  el.seed = (mode) => {
-    const r = form.querySelector("input[value=" + (MODE_LABELS[mode] ? mode : "auto") + "]");
-    if (r) r.checked = true;
-    fillDurations();
+  // sync follows the service: the configured durations, and the active mode
+  // when it changed (a tray click, a pause that ran out). It never touches a
+  // form the visitor is part-way through, and only checks a radio, so focus
+  // stays where it is.
+  el.sync = (st) => {
+    const dirty = formState() !== baseline;
+    // Configured durations are not applied under an edit in progress: the
+    // select would be rebuilt and the visitor's choice changed. They are
+    // compared again on every poll, so they land once the form is clean.
+    const next = normalizeOptions(st.mode_options);
+    const optionsChanged = adoptsOptions(haveOptions, dirty, options, next);
+    if (optionsChanged) options = next;
+    const m = st.mode || {};
+    const key = modeKey(m);
+    if (followsServer(dirty, syncedMode, key)) {
+      const r = form.querySelector("input[value=" + (MODE_LABELS[m.mode] ? m.mode : "auto") + "]");
+      if (r) r.checked = true;
+      syncedMode = key;
+      fillDurations();
+      baseline = formState();
+    } else if (optionsChanged) {
+      fillDurations();
+      baseline = formState();
+    }
+    haveOptions = true;
   };
   return el;
 }
 
 function updateControls(st) {
-  if (!controlsSeeded && st.mode) {
-    els.controls.seed(st.mode.mode);
-    controlsSeeded = true;
-  }
+  els.controls.sync(st);
 }

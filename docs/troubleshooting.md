@@ -17,7 +17,7 @@ most questions. The Events page shows every decision in order.
 | Yields while only a launcher is open | Evidence `process` and `class` | A launcher helper is unclassified; add it as `launcher` under Configuration > Applications. |
 | A game is not detected | Status top external processes | Add an application rule (`game`) by exe name or path. |
 | Session agent "not connected" | Tray running? | `bwtray.exe` starts at logon from the Run key; it needs read access to `secrets\agent.token`. |
-| Config changes ignored after restart | `config_recovered` event, banner | `config.json` failed validation; the service runs on `config.last-good.json`. Fix the file or save from the UI. |
+| Config changes ignored after restart | `config_recovered` event, banner | `config.json` failed validation; the service runs on `config.last-good.json`. The banner names the rejected field. Fix the file or save from the UI. |
 
 Logs: `C:\ProgramData\Benchwarmer\logs\benchwarmer.log` (rotated, size
 bounded by `retention.log_max_mb` x `retention.log_files`). Logs never contain

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -49,11 +50,20 @@ func Rejectf(format string, a ...any) *RequestError {
 	return &RequestError{Status: http.StatusConflict, Code: CodeRejected, Message: fmt.Sprintf(format, a...)}
 }
 
-// ActionResponse is the 202 body of POST /api/v1/drain and /api/v1/reload.
+// ErrRuntimeNotRunning is what a Backend returns for a drain or reload when
+// no runtime is loaded. It is not a failure: the handler answers 200 and
+// says the change takes effect at the next load.
+var ErrRuntimeNotRunning = errors.New("runtime is not running")
+
+// ActionResponse is the body of POST /api/v1/drain and /api/v1/reload: 202
+// when the controller took the action, 200 with accepted false when there
+// was no runtime to act on.
 type ActionResponse struct {
 	Accepted bool   `json:"accepted"`
 	Action   string `json:"action"`
 	Reason   string `json:"reason"`
+	// Message explains an action that was not needed.
+	Message string `json:"message,omitempty"`
 }
 
 // ActionRequest is the optional body of POST /api/v1/drain and

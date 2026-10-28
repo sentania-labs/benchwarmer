@@ -151,7 +151,8 @@ function renderImpact(im) {
       " for " + (im.restart_sections || []).join(", ") + ". ",
       h("button", { type: "button", onclick: restartService }, "Restart service now")));
   }
-  if (changed.length && !im.runtime_reload && !im.service_restart) items.push(h("li", null, "Applied live, nothing to restart."));
+  if (im.note) items.push(h("li", null, im.note));
+  if (changed.length && !im.runtime_reload && !im.service_restart && !im.note) items.push(h("li", null, "Applied live, nothing to restart."));
   return h("div", { class: "notice ok", role: "status" },
     h("div", null, h("strong", null, "Saved at " + clockTime(st.impact.at) + "."), h("ul", null, items)));
 }
@@ -159,9 +160,12 @@ function renderImpact(im) {
 async function reloadRuntime() {
   if (!window.confirm("Reload the runtime now? It drains first, then restarts llama-server.")) return;
   try {
-    await post("api/v1/reload");
+    const res = await post("api/v1/reload");
     st.message = null;
-    st.impact = { ...st.impact, runtime_reload: false, changed: st.impact.changed };
+    // accepted false: the runtime was not running, so nothing needed to
+    // reload. The saved settings are used the next time it loads.
+    const note = res && res.accepted === false ? res.message : null;
+    st.impact = { ...st.impact, runtime_reload: false, changed: st.impact.changed, note };
     renderTop();
   } catch (e) {
     st.message = "Reload failed: " + e.message;

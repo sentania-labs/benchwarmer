@@ -47,6 +47,18 @@ type Status struct {
 	// ConfigSource is "primary", "last_good", or "default"; anything but
 	// primary is a problem the UI must show.
 	ConfigSource string `json:"config_source"`
+	// ConfigProblem says which field of config.json failed and why, when
+	// the service is running on a fallback because the file was rejected.
+	ConfigProblem string `json:"config_problem,omitempty"`
+	// ModeOptions are the durations the Controls card offers, from the
+	// modes section of the configuration.
+	ModeOptions ModeOptions `json:"mode_options"`
+}
+
+// ModeOptions lists the timed choices for the manual modes.
+type ModeOptions struct {
+	PauseDurations      []config.Duration `json:"pause_durations"`
+	AIPriorityDurations []config.Duration `json:"ai_priority_durations"`
 }
 
 // ModeStatus describes the manual mode.

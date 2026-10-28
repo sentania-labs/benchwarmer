@@ -620,3 +620,36 @@ func TestLockedSessionStillYieldsToGamesAndMemoryPressure(t *testing.T) {
 	s.GPU.ExternalVRAMMiB = 4000
 	check(t, Evaluate(s, c), want{action: ActionPreempt, rule: RuleCriticalVRAMExt})
 }
+
+// A manual pause holds the load until the pause ends, so that is the only
+// "next load" time that is true; the cooldown running underneath it is not.
+func TestNextLoadAtDuringPause(t *testing.T) {
+	cfg := config.Default()
+	until := evening.Add(time.Hour)
+
+	s := idle(evening)
+	s.Mode = ModeFacts{Mode: ModePause, Until: &until}
+	s.Timers.LastCompetingAt, s.Timers.LastCompetingRule = evening.Add(-time.Minute), RuleGameProcess
+	d := Evaluate(s, cfg)
+	check(t, d, want{action: ActionHold, rule: RulePause, nextLoadAt: until})
+
+	// A cooldown that outlasts the pause still wins: the load cannot start
+	// before it ends.
+	s.Mode.Until = new(evening.Add(time.Minute))
+	d = Evaluate(s, cfg)
+	if want := s.Timers.LastCompetingAt.Add(cfg.Profiles[d.Profile].Cooldown.D()); !d.NextLoadAt.Equal(want) {
+		t.Errorf("next load %s, want the cooldown end %s", d.NextLoadAt, want)
+	}
+
+	s.Mode.Until = nil
+	check(t, Evaluate(s, cfg), want{action: ActionHold, rule: RulePause, nextLoadZero: true})
+}
+
+// While a game is running the cooldown has not started and the load waits for
+// the game to end, so no time is promised, whatever recovery timer is running.
+func TestNextLoadAtWhileCompeting(t *testing.T) {
+	s := idle(evening)
+	s.Apps.Games = []AppMatch{game("eldenring.exe")}
+	s.Timers.RecoveryUntil = evening.Add(time.Minute)
+	check(t, Evaluate(s, config.Default()), want{action: ActionHold, rule: RuleGameProcess, competing: yes(), nextLoadZero: true})
+}

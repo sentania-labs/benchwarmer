@@ -9,7 +9,6 @@ package controller
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -114,17 +113,23 @@ type Metrics interface {
 type Deps struct {
 	Config       config.Config
 	ConfigSource string // "primary", "last_good", "default"
-	ConfigStore  ConfigStore
-	Adapter      runtime.Adapter
-	Telemetry    TelemetrySource // optional
-	Processes    func() ([]signals.Process, error)
-	Facts        FactBuilder
-	Gate         *proxy.Gate
-	Events       events.Sink
-	EventReader  EventReader // optional
-	Persist      Persist     // optional
-	Metrics      Metrics     // optional
-	Now          func() time.Time
+	// ConfigProblem says why config.json was rejected, when it was found
+	// but a fallback is running instead.
+	ConfigProblem string
+	// FileExists reports whether a model file is there, so a config change
+	// pointing at a missing one is refused. Nil skips the check.
+	FileExists  func(path string) bool
+	ConfigStore ConfigStore
+	Adapter     runtime.Adapter
+	Telemetry   TelemetrySource // optional
+	Processes   func() ([]signals.Process, error)
+	Facts       FactBuilder
+	Gate        *proxy.Gate
+	Events      events.Sink
+	EventReader EventReader // optional
+	Persist     Persist     // optional
+	Metrics     Metrics     // optional
+	Now         func() time.Time
 	// GPUResets reports GPU driver resets detected since the last call
 	// (optional). Any reset stops the runtime at once (ADR 0011).
 	GPUResets func() []gpureset.Reset
@@ -162,6 +167,7 @@ type Controller struct {
 
 	cfg           config.Config
 	cfgSource     string
+	cfgProblem    string // why config.json was rejected; empty once a save replaces it
 	restartNeeded bool
 
 	st         state.State
@@ -249,7 +255,7 @@ func New(d Deps) *Controller {
 		d.Events = events.SinkFunc(func(events.Event) {})
 	}
 	c := &Controller{
-		d: d, cfg: d.Config, cfgSource: d.ConfigSource, st: state.Stopped,
+		d: d, cfg: d.Config, cfgSource: d.ConfigSource, cfgProblem: d.ConfigProblem, st: state.Stopped,
 		readyCh: make(chan loadResult, 1), stopCh: make(chan stopResult, 4), wake: make(chan struct{}, 1),
 		mode: policy.ModeFacts{Mode: policy.ModeAuto},
 	}
@@ -474,5 +480,6 @@ func faultRecovery(reason string) bool {
 	return false
 }
 
-// errNotRunning is returned for manual actions that need a runtime.
-var errNotRunning = errors.New("runtime is not running")
+// errNotRunning is returned for manual actions that need a runtime. The API
+// reports it as "nothing to do", not as a failure.
+var errNotRunning = api.ErrRuntimeNotRunning

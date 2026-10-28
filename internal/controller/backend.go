@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -121,10 +122,26 @@ func (c *Controller) requestManual(kind, reason string) error {
 
 // UpdateConfig validates, persists, applies, and audits a new config.
 func (c *Controller) UpdateConfig(_ context.Context, nc config.Config, actor string) (config.Impact, error) {
+	// Only a changed model path is checked, so an unrelated save is not
+	// blocked by a model that has gone missing since. The stat can hang on
+	// an unreachable network path, so it runs before the controller lock.
+	modelMissing := false
+	if c.d.FileExists != nil {
+		c.mu.Lock()
+		changed := nc.Runtime.ModelPath != c.cfg.Runtime.ModelPath
+		c.mu.Unlock()
+		modelMissing = changed && !c.d.FileExists(nc.Runtime.ModelPath)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.d.Now()
 	if err := config.ValidateChange(nc); err != nil {
+		c.emit(events.Event{Time: now, Type: events.ConfigRejected, Severity: policy.SeverityNotice,
+			Message: "Configuration change rejected: " + err.Error(), Data: map[string]any{"actor": actor}})
+		return config.Impact{}, err
+	}
+	if modelMissing {
+		err := &config.ValidationError{Errors: []config.FieldError{{Field: "runtime.model_path", Message: "no file exists at this path"}}}
 		c.emit(events.Event{Time: now, Type: events.ConfigRejected, Severity: policy.SeverityNotice,
 			Message: "Configuration change rejected: " + err.Error(), Data: map[string]any{"actor": actor}})
 		return config.Impact{}, err
@@ -135,7 +152,7 @@ func (c *Controller) UpdateConfig(_ context.Context, nc config.Config, actor str
 		}
 	}
 	im := config.Classify(c.cfg, nc)
-	c.cfg, c.cfgSource = nc, "primary"
+	c.cfg, c.cfgSource, c.cfgProblem = nc, "primary", ""
 	c.schedCacheValid = false
 	c.lastSetupCheck, c.setupResult = time.Time{}, nil // re-check the runtime and model files now, ignoring a check of the old paths
 	if im.ServiceRestart {
@@ -191,7 +208,8 @@ func (c *Controller) Status() api.Status {
 		Time: now, Version: c.d.Version, Condition: c.st.Condition(), State: c.st,
 		Mode:         api.ModeStatus{Mode: c.mode.Mode, Until: c.mode.Until, SetBy: c.mode.SetBy, SetAt: c.modeSetAt},
 		Decision:     d,
-		ConfigSource: c.cfgSource,
+		ConfigSource: c.cfgSource, ConfigProblem: c.cfgProblem,
+		ModeOptions:  api.ModeOptions{PauseDurations: slices.Clone(c.cfg.Modes.PauseDurations), AIPriorityDurations: slices.Clone(c.cfg.Modes.AIPriorityDurations)},
 		RecentErrors: append([]events.Event(nil), c.recentErrors...),
 	}
 	name, src := c.activeProfile(now)
@@ -249,7 +267,9 @@ func (c *Controller) timerStatus(now time.Time, d policy.Decision) api.TimerStat
 		t.GraceUntil = ptr(c.drainDeadline)
 	}
 	p := c.cfg.Profiles[d.Profile]
-	if !c.timers.LastCompetingAt.IsZero() {
+	if !c.timers.LastCompetingAt.IsZero() && !d.Competing {
+		// While the competing workload is present the cooldown has not
+		// started; showing a rolling end time would contradict "no next load".
 		t.CooldownUntil = ptr(c.timers.LastCompetingAt.Add(p.Cooldown.D()))
 	}
 	if !c.timers.SuppressedAt.IsZero() {

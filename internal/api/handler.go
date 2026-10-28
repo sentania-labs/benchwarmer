@@ -479,6 +479,11 @@ func (h *handler) action(w http.ResponseWriter, r *http.Request, name string, fn
 		return
 	}
 	if err := fn(reason); err != nil {
+		if errors.Is(err, ErrRuntimeNotRunning) {
+			msg := "The AI runtime is not running, so there is nothing to " + name + ". Configuration changes are picked up the next time it loads."
+			writeJSON(w, http.StatusOK, ActionResponse{Accepted: false, Action: name, Reason: reason, Message: msg})
+			return
+		}
 		h.backendError(w, r, err)
 		return
 	}

@@ -149,7 +149,7 @@ func New(o Options) (*Service, error) {
 		s.log.Error("cannot read GPU watchdog dump folders: GPU driver resets will not be detected", "dirs", blind)
 	}
 	s.ctl = controller.New(controller.Deps{
-		Config: s.cfg, ConfigSource: lr.Source, ConfigStore: auditingStore{cs: cs, st: st, met: s.met},
+		Config: s.cfg, ConfigSource: lr.Source, ConfigProblem: configProblem(lr), FileExists: fileExists, ConfigStore: auditingStore{cs: cs, st: st, met: s.met},
 		Adapter: llamacpp.New(), Telemetry: s.tel, Processes: procs, Facts: facts, Gate: s.gate,
 		Events: events.SinkFunc(s.sink.Emit), EventReader: eventReader{st}, Persist: persister{st},
 		Metrics: s.met, Log: s.log, Version: version.Version, BootTime: signals.BootTime,
@@ -505,3 +505,27 @@ func (r requestObserver) RequestFinished(_ string, d time.Duration, outcome stri
 	r.m.ObserveRequestSeconds(outcome, d.Seconds())
 }
 func (r requestObserver) RequestRejected() { r.m.IncRequestsRejected() }
+
+// configProblem says, in the dashboard's words, why config.json was set
+// aside. A validation failure names the field; anything else (bad JSON, an
+// unreadable file) is reported as it came.
+func configProblem(lr config.LoadResult) string {
+	if lr.PrimaryErr == nil {
+		return ""
+	}
+	var ve *config.ValidationError
+	if errors.As(lr.PrimaryErr, &ve) && len(ve.Errors) > 0 {
+		parts := make([]string, len(ve.Errors))
+		for i, f := range ve.Errors {
+			parts[i] = f.Field + ": " + f.Message
+		}
+		return strings.Join(parts, "; ")
+	}
+	return lr.PrimaryErr.Error()
+}
+
+// fileExists reports whether path names an existing regular file.
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
+}

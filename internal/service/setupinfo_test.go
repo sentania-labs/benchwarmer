@@ -1,9 +1,14 @@
 package service
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
+
+	"github.com/sentania-labs/benchwarmer/internal/config"
 )
 
 func TestListModelsAndRuntimes(t *testing.T) {
@@ -33,5 +38,44 @@ func TestListModelsAndRuntimes(t *testing.T) {
 	rt := listRuntimes(dir)
 	if len(rt) != 1 || rt[0].Name != "vulkan" {
 		t.Fatalf("runtimes %+v", rt)
+	}
+}
+
+func TestConfigProblemNamesTheRejectedField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	c := config.Default()
+	c.Listen.Management = "127.0.0.1:" + strconv.Itoa(c.Runtime.Port)
+	b, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lr, err := config.NewStore(path).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lr.Source != "default" {
+		t.Fatalf("source %q", lr.Source)
+	}
+	got := configProblem(lr)
+	if !strings.Contains(got, "listen.management") || !strings.Contains(got, "already used by runtime.port") {
+		t.Fatalf("problem %q does not say which field and why", got)
+	}
+	if configProblem(config.LoadResult{Source: "primary"}) != "" {
+		t.Fatal("a clean load reported a problem")
+	}
+}
+
+func TestFileExistsIgnoresDirectories(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "m.gguf")
+	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !fileExists(f) || fileExists(dir) || fileExists(filepath.Join(dir, "nope.gguf")) {
+		t.Fatal("fileExists wrong")
 	}
 }

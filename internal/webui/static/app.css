@@ -234,6 +234,9 @@ ol.events { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 
 .event summary { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 12px; cursor: pointer; align-items: baseline; }
 .event summary time { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 7.5em; }
 .event .etype { font-weight: 700; }
+.ekind { font-size: 0.82em; font-weight: 700; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); }
+.ekind-problem { background: var(--bad-bg); color: var(--bad-ink); border-color: var(--bad-mark); }
+.ekind-change { background: var(--info-bg); color: var(--info-ink); border-color: var(--total); }
 .event .change { font-family: ui-monospace, Consolas, monospace; font-size: 0.88em; }
 .event .erule { color: var(--muted); }
 .event .msg { flex-basis: 100%; }

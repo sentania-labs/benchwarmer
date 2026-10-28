@@ -170,23 +170,25 @@ export function field(ctx, def) {
     case "argv": {
       // Each existing token gets its own row: guessing which flags take values
       // would change arbitrary argv. A row can explicitly add a value token.
-      const rows = (value || []).map((token) => ({ token, hasValue: false, value: "" }));
+      const rows = (value || []).map((token) => ({ token, hasValue: false, value: "", fresh: false }));
       const list = h("div", { class: "argv-rows" });
-      const update = () => set(rows.flatMap((r) => r.hasValue ? [r.token, r.value] : [r.token]));
-      const render = (focus) => {
+      const update = () => set(rows.filter((r) => !r.fresh).flatMap((r) => r.hasValue ? [r.token, r.value] : [r.token]));
+      const render = (focusRow, focusValue) => {
+        const refs = [];
         list.replaceChildren(...rows.map((r, i) => {
-          const token = h("input", { id: i === 0 ? id : null, type: "text", value: r.token, "aria-label": "Argument " + (i + 1), oninput: (e) => { r.token = e.target.value; update(); } });
-          const val = h("input", { type: "text", value: r.value, "aria-label": "Value for argument " + (i + 1), oninput: (e) => { r.value = e.target.value; update(); } });
+          const token = h("input", { id: i === 0 ? id : null, type: "text", value: r.token, "aria-label": "Argument " + (i + 1), oninput: (e) => { r.fresh = false; r.token = e.target.value; update(); } });
+          const val = h("input", { type: "text", value: r.value, "aria-label": "Value for argument " + (i + 1), oninput: (e) => { r.fresh = false; r.value = e.target.value; update(); } });
+          refs.push({ token, val });
           return h("div", { class: "argv-row" }, token,
-            h("label", null, h("input", { type: "checkbox", checked: r.hasValue, onchange: (e) => { r.hasValue = e.target.checked; update(); render(i); } }), " Has value"),
+            h("label", null, h("input", { type: "checkbox", checked: r.hasValue, onchange: (e) => { r.fresh = false; r.hasValue = e.target.checked; update(); render(i, r.hasValue); } }), " Has value"),
             r.hasValue && val,
             h("button", { type: "button", onclick: () => { rows.splice(i, 1); update(); render(Math.min(i, rows.length - 1)); } }, "Remove"));
         }));
-        if (focus >= 0) list.querySelectorAll('.argv-row input[type="text"]')[focus]?.focus();
+        if (focusRow >= 0) refs[focusRow]?.[focusValue ? "val" : "token"].focus();
       };
       render(-1);
       control = h("div", { role: "group", "aria-labelledby": id + "-label", "aria-describedby": describedBy }, list,
-        h("button", { type: "button", onclick: () => { rows.push({ token: "", hasValue: false, value: "" }); update(); render(rows.length - 1); } }, "Add argument"));
+        h("button", { type: "button", onclick: () => { rows.push({ token: "", hasValue: false, value: "", fresh: true }); render(rows.length - 1); } }, "Add argument"));
       break;
     }
     case "lines": {

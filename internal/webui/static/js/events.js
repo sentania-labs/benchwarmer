@@ -3,7 +3,7 @@ import { h, replace } from "./dom.js";
 import { get, signIn, ApiError } from "./api.js";
 import {
   KIND_LABELS, TYPE_GROUPS, clockTime, eventKind, mib, pct, parseTime,
-  titleize, transitionText,
+  eventRawStateText, eventStateText, titleize,
 } from "./format.js";
 import { evidenceTable } from "./dashboard.js";
 
@@ -163,7 +163,7 @@ function kindBadge(kind) {
 export function row(e, now, opened) {
   const t = parseTime(e.time);
   const kind = eventKind(e);
-  const hasChange = Boolean(e.prev_state || e.state);
+  const stateText = eventStateText(e);
   const body = [];
   if (e.evidence && e.evidence.length) body.push(h("h3", null, "Evidence"), evidenceTable(e.evidence));
   if (e.telemetry) body.push(h("h3", null, "Telemetry"), telemetryTable(e.telemetry));
@@ -181,14 +181,14 @@ export function row(e, now, opened) {
     e.request_id && "Request: " + e.request_id,
     "Event #" + e.id,
     e.type && "Type: " + e.type,
-    hasChange && "Raw states: " + (e.prev_state || "\u2014") + " \u2192 " + (e.state || "\u2014"),
+    eventRawStateText(e),
   ].filter(Boolean).join(" \u00b7 ");
   body.push(h("p", { class: "muted small" }, meta));
   const summary = h("summary", { tabindex: "0" },
     h("time", { datetime: e.time }, t ? clockTime(t, now, { seconds: true }) : ""),
     kindBadge(kind),
     h("span", { class: "etype" }, titleize(e.type)),
-    hasChange && h("span", { class: "change" }, transitionText(e.prev_state, e.state)),
+    stateText && h("span", { class: "change" }, stateText),
     e.rule && h("code", { class: "erule" }, e.rule),
     h("span", { class: "msg" }, e.message || ""));
   const details = h("details", { open: opened && opened.has(String(e.id)) },

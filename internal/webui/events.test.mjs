@@ -153,6 +153,21 @@ test('a row shows the kind and a readable transition, and keeps raw diagnostics'
   assert.match(body, /9900/);
 });
 
+test('an event stamped with only a current state is context, not a transition', () => {
+  const e = { id: 21, time: '2026-10-28T00:22:31Z', type: 'mode_changed', severity: 'info', state: 'COOLDOWN', message: 'paused' };
+  assert.equal(fmt.eventStateText(e), 'Service state: Waiting');
+  assert.equal(fmt.eventRawStateText(e), 'Raw state: COOLDOWN');
+  const { details, summary } = events.row(e, new Date('2026-10-28T00:23:00Z'), null);
+  const head = JSON.stringify(summary);
+  assert.match(head, /Service state: Waiting/);
+  assert.doesNotMatch(head, /\u2192/);
+  const body = JSON.stringify(details.children[1]);
+  assert.match(body, /Raw state: COOLDOWN/);
+  assert.doesNotMatch(body, /Raw states:/);
+  assert.equal(fmt.eventStateText({ type: 'load_started' }), '');
+  assert.equal(fmt.eventStateText({ prev_state: 'STOPPED', state: 'COOLDOWN' }), 'Idle \u2192 Waiting');
+});
+
 test('an expanded event stays expanded across a refresh', () => {
   const e = { id: 12, time: '2026-10-28T00:22:31Z', type: 'mode_changed', severity: 'info', message: 'x' };
   const open = new Set(['12']);

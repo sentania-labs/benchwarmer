@@ -255,11 +255,25 @@ export const TYPE_GROUPS = [
   { label: "Steps", kind: "step", types: ["service_started", "service_stopping", "load_started", "load_completed", "drain_started", "drain_completed", "grace_shortened", "preempted", "runtime_stopped", "vram_released", "power_suspend_stop", "tls_certificate_loaded"] },
 ];
 
-// transitionText renders prev -> next with the owner names, "\u2014" for a side
-// with no state yet (the first recorded transition).
+// transitionText renders prev -> next with the owner names, "\u2014" for a
+// missing side.
 export function transitionText(prev, next) {
   const fmt = (s) => (s ? stateLabel(s) : "\u2014");
   return fmt(prev) + " \u2192 " + fmt(next);
+}
+
+// eventStateText says what an event records about the service state. Only an
+// event with a previous state is a transition; every other event is stamped
+// with the controller's current state, which is shown as plain context.
+export function eventStateText(e) {
+  if (e.prev_state) return transitionText(e.prev_state, e.state);
+  return e.state ? "Service state: " + stateLabel(e.state) : "";
+}
+
+// eventRawStateText is eventStateText with the raw state names.
+export function eventRawStateText(e) {
+  if (e.prev_state) return "Raw states: " + e.prev_state + " \u2192 " + (e.state || "\u2014");
+  return e.state ? "Raw state: " + e.state : "";
 }
 
 // describeDurationChoice labels a PUT /mode duration value. Given the time

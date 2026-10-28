@@ -60,6 +60,17 @@ export function errorSlot(ctx, path) {
   return el;
 }
 
+export function refreshErrors(ctx, root) {
+  for (const el of root.querySelectorAll("[data-path]")) {
+    const slot = el.querySelector(":scope > .field-error");
+    if (!slot) continue;
+    const msgs = errorsFor(ctx, el.dataset.path);
+    slot.textContent = msgs.join("; ");
+    slot.hidden = !msgs.length;
+    if (el.classList.contains("field")) el.classList.toggle("invalid", msgs.length > 0);
+  }
+}
+
 function setClientError(ctx, path, wrap, msg) {
   if (msg) ctx.clientErrors.set(path, msg);
   else ctx.clientErrors.delete(path);
@@ -217,10 +228,7 @@ export function field(ctx, def) {
         list: def.list, autocomplete: "off",
         oninput: (e) => {
           set(e.target.value);
-          if (path === "runtime.model_path") {
-            const picker = document.querySelector('[data-model-picker]');
-            if (picker) { const option = h("option", { value: e.target.value }, e.target.value || "Choose an installed model"); picker.prepend(option); picker.value = e.target.value; }
-          }
+          if (path === "runtime.model_path") ctx.modelPathChanged?.();
         },
       });
     }

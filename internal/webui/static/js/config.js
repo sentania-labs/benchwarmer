@@ -7,7 +7,7 @@ import { compatibilityMessage } from "./compatibility.js";
 import { h, replace, warnIcon } from "./dom.js";
 import { get, put, post, signIn, ApiError } from "./api.js";
 import { clockTime, titleize } from "./format.js";
-import { field, fields, getPath, idFor, errorSlot } from "./fields.js";
+import { field, fields, getPath, idFor, errorSlot, refreshErrors } from "./fields.js";
 import { SECTIONS, sectionFor, sectionDefs } from "./configdefs.js";
 
 // Kept across page visits so unsaved edits survive a trip to the dashboard.
@@ -19,13 +19,14 @@ let els = null;
 let modelChoices = [];
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
-const dirty = () => st.draft && (JSON.stringify(st.draft) !== JSON.stringify(st.cfg) || (els?.json && st.section === "json" && els.json.ta.value !== JSON.stringify(st.draft, null, 2)));
+const dirty = () => st.draft && (JSON.stringify(st.draft) !== JSON.stringify(st.cfg) || st.jsonText != null);
 
 const ctx = {
   get draft() { return st.draft; },
   errors: st.errors,
   clientErrors: st.clientErrors,
   changed: () => { syncSaveBar(); updateCompatibility(); },
+  modelPathChanged: () => updateModelChoices(),
 };
 
 export function mount(main, rest) {
@@ -40,13 +41,12 @@ export function mount(main, rest) {
   };
   replace(main, h("h1", null, "Configuration"), els.top, els.nav, els.body, els.bar);
   window.addEventListener("beforeunload", beforeUnload);
-  if (!st.draft || (!dirty() && !st.jsonText)) load();
+  if (!st.draft || !dirty()) load();
   else renderAll();
   return {
     title: "Configuration",
     update: (r) => switchSection(r[0]),
     unmount: () => {
-      if (st.section === "json" && els?.json) { st.jsonText = els.json.ta.value; }
       window.removeEventListener("beforeunload", beforeUnload);
       els = null;
     },
@@ -662,12 +662,16 @@ async function save() {
     return;
   }
   const submitted = clone(st.draft);
+  let replaced = false;
   st.saving = true;
   try {
     const res = await put("api/v1/config", submitted);
-    const unchanged = JSON.stringify(st.draft) === JSON.stringify(submitted) && !(st.section === "json" && els?.json && els.json.ta.value !== JSON.stringify(submitted, null, 2));
+    const unchanged = JSON.stringify(st.draft) === JSON.stringify(submitted) && st.jsonText == null;
     st.cfg = res.config;
-    if (unchanged) st.draft = clone(res.config);
+    if (unchanged && JSON.stringify(res.config) !== JSON.stringify(st.draft)) {
+      st.draft = clone(res.config);
+      replaced = true;
+    }
     st.source = res.source || st.source;
     st.errors.clear();
     st.impact = { ...(res.impact || { changed: [] }), at: new Date() };
@@ -681,8 +685,18 @@ async function save() {
     }
   }
   st.saving = false;
-  // Never replace the editor or move focus when a response arrives.
-  if (els) { renderTop(); if (st.errors.size) renderNav(); syncSaveBar(); }
+  if (els) {
+    renderTop();
+    renderNav();
+    if (replaced) {
+      const focusId = document.activeElement?.id;
+      renderSection();
+      if (focusId) document.getElementById(focusId)?.focus();
+    } else {
+      refreshErrors(ctx, els.body);
+    }
+    syncSaveBar();
+  }
   if (st.errors.size) focusSummary();
 }
 

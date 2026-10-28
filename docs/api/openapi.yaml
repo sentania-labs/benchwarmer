@@ -908,11 +908,14 @@ components:
         path: { type: string }
         size_bytes: { type: integer, format: int64 }
         modified: { type: string, format: date-time }
+        architecture: { type: string, description: GGUF general.architecture when readable. }
     RuntimeInstall:
       type: object
       properties:
         name: { type: string }
         path: { type: string }
+        llama_cpp_tag: { type: string, description: Packaged build identity when runtime files match the package manifest. }
+        ollama_version: { type: string, description: Packaged Ollama version when runtime files match. }
     StoreCertificate:
       type: object
       properties:

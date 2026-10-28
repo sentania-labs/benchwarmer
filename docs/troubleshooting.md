@@ -13,7 +13,7 @@ most questions. The Events page shows every decision in order.
 | ERROR with `eligibility.recovery` "crash backoff" | `runtime_crashed` / `load_failed` events, `diagnostics_tail` | Bad model path or args, driver problem. Backoff doubles up to `recovery.crash_backoff_max`. |
 | ERROR with `safety.runtime_unverified` | `kill_failed` events | A runtime process could not be confirmed terminated; the service retries and will not start another meanwhile. |
 | Runtime still loaded when the PC slept, or `kill_failed` after wake | `power_suspend_stop` event (`stopped`, `late`, `elapsed_ms`, `budget_ms`), then `runtime_stopped` / `kill_failed` | The stop did not finish inside the 1.5 s suspend budget (`late` means it finished only after the budget); it continues and is verified after resume. See ADR 0013. |
-| Runtime never starts, "Access is denied" | Defender event 1121 | ASR prevalence rule; see [policy requirements](deploy/policy-requirements.md). |
+| Runtime never starts, "Access is denied" | Defender event 1121 | Windows security policy may be blocking the runtime (for example ASR rule 01443614); a matching Defender event 1121 for the runtime path confirms it. The error text only suggests the cause. A signature or install path does not guarantee access; see [policy requirements](deploy/policy-requirements.md). |
 | Yields while only a launcher is open | Evidence `process` and `class` | A launcher helper is unclassified; add it as `launcher` under Configuration > Applications. |
 | A game is not detected | Status top external processes | Add an application rule (`game`) by exe name or path. |
 | Session agent "not connected" | Tray running? | `bwtray.exe` starts at logon from the Run key; it needs read access to `secrets\agent.token`. |

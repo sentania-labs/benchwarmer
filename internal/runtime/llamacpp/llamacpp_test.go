@@ -489,3 +489,14 @@ func TestEnvVulkanBackend(t *testing.T) {
 		t.Fatalf("empty value not replaced: %v", got)
 	}
 }
+
+func TestStartPermissionErrorProvidesContext(t *testing.T) {
+	err := startError("runtime.exe", os.ErrPermission)
+	if !errors.Is(err, os.ErrPermission) || !strings.Contains(err.Error(), "security policy") || !strings.Contains(err.Error(), "runtime.exe") {
+		t.Fatalf("permission guidance: %v", err)
+	}
+	other := errors.New("other failure")
+	if startError("runtime.exe", other) != other {
+		t.Fatal("unrelated errors should pass through")
+	}
+}

@@ -23,16 +23,19 @@ type SetupInfo struct {
 
 // ModelFile is a model the runtime could load.
 type ModelFile struct {
-	Name      string    `json:"name"`
-	Path      string    `json:"path"`
-	SizeBytes int64     `json:"size_bytes"`
-	Modified  time.Time `json:"modified"`
+	Name         string    `json:"name"`
+	Path         string    `json:"path"`
+	SizeBytes    int64     `json:"size_bytes"`
+	Modified     time.Time `json:"modified"`
+	Architecture string    `json:"architecture,omitempty"`
 }
 
 // RuntimeInstall is an installed llama-server build.
 type RuntimeInstall struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
+	Name          string `json:"name"`
+	Path          string `json:"path"`
+	LlamaTag      string `json:"llama_cpp_tag,omitempty"`
+	OllamaVersion string `json:"ollama_version,omitempty"`
 }
 
 // StoreCertificate is a certificate the inference listener could use.

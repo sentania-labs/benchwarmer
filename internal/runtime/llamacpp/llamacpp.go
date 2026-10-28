@@ -194,7 +194,7 @@ func (a *Adapter) Start(ctx context.Context, cfg config.Runtime) (runtime.Instan
 		ShareConsole: cfg.StopMode == config.StopGraceful && procgroup.HasConsole(),
 	})
 	if err != nil {
-		return nil, err
+		return nil, startError(cfg.Executable, err)
 	}
 	i.g = g
 	if cfg.StopMode == config.StopGraceful && procgroup.HasConsole() {
@@ -204,6 +204,13 @@ func (a *Adapter) Start(ctx context.Context, cfg config.Runtime) (runtime.Instan
 	a.owned[i] = struct{}{}
 	a.mu.Unlock()
 	return i, nil
+}
+
+func startError(exe string, err error) error {
+	if errors.Is(err, fs.ErrPermission) {
+		return fmt.Errorf("could not start runtime %s: access denied; check file permissions and Windows security policy (including Defender ASR event logs): %w", exe, err)
+	}
+	return err
 }
 
 func (a *Adapter) release(i *Instance) {

@@ -43,7 +43,7 @@ func listModels(dir string) []api.ModelFile {
 	out := []api.ModelFile{}
 	add := func(p string, fi os.FileInfo) {
 		if fi.Mode().IsRegular() && strings.EqualFold(filepath.Ext(p), ".gguf") {
-			out = append(out, api.ModelFile{Name: filepath.Base(p), Path: p, SizeBytes: fi.Size(), Modified: fi.ModTime()})
+			out = append(out, api.ModelFile{Name: filepath.Base(p), Path: p, SizeBytes: fi.Size(), Modified: fi.ModTime(), Architecture: ggufArchitecture(p)})
 		}
 	}
 	ents, _ := os.ReadDir(dir)
@@ -80,7 +80,8 @@ func listRuntimes(dir string) []api.RuntimeInstall {
 		for _, exe := range []string{"llama-server.exe", "llama-server"} {
 			p := filepath.Join(dir, "runtime", e.Name(), exe)
 			if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
-				out = append(out, api.RuntimeInstall{Name: e.Name(), Path: p})
+				tag, version := runtimeIdentity(filepath.Dir(p), p)
+				out = append(out, api.RuntimeInstall{Name: e.Name(), Path: p, LlamaTag: tag, OllamaVersion: version})
 				break
 			}
 		}

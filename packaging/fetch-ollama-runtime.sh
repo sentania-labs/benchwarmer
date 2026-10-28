@@ -9,8 +9,8 @@
 #   runtime/vulkan/vulkan/ggml-vulkan.dll  the Vulkan backend ggml loads from here
 #
 # Why Ollama's build: it is Authenticode signed by Ollama Inc., which the
-# upstream llama.cpp Windows builds are not (ASR rule 01443614 blocks
-# unsigned executables outside an excluded path). The signatures are checked
+# upstream llama.cpp Windows builds are not. Windows security policy may
+# still block a signed binary. The signatures are checked
 # on a Windows machine by packaging/verify-runtime.ps1.
 #
 # Licenses (Ollama's, llama.cpp's, and the files the zip carries) go to
@@ -85,6 +85,14 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 unzip -q "$cache/$asset" "${members[@]}" -d "$tmp"
 cp -r "$tmp/lib/ollama/." "$rt/"
+
+# The archive hash binds these file hashes to the pin. Windows CI separately
+# checks every executable signature before the package can ship.
+manifest_files=$(find "$rt" -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0 | sort -z | while IFS= read -r -d '' f; do
+    printf '%s\t%s\n' "${f#"$rt"/}" "$(sha256sum "$f" | cut -d' ' -f1)"
+done | jq -Rn '[inputs | split("\t") | {path: .[0], sha256: .[1]}]')
+jq -n --arg build "$llama_tag" --arg version "$version" --argjson files "$manifest_files" \
+    '{llama_cpp_tag: $build, ollama_version: $version, files: $files}' > "$rt/benchwarmer-runtime.json"
 
 cp "$cache/LICENSE-ollama-$version" "$stage/licenses/LICENSE-ollama"
 cp "$cache/LICENSE-llama.cpp-$llama_tag" "$stage/licenses/LICENSE-llama.cpp"

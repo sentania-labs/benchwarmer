@@ -14,9 +14,9 @@
   case also serves one completion.
 
   What this cannot prove: the GitHub runner has no GPU, so the model runs on
-  the CPU backend. The script checks that the CPU backends load from the
-  runtime folder and that the Vulkan backend DLL is found and loaded when the
-  machine has a Vulkan loader (vulkan-1.dll); it only warns otherwise. Serving
+  the CPU backend. The script checks that the Vulkan backend DLL is found and
+  loaded from the runtime folder when the machine has a Vulkan loader
+  (vulkan-1.dll); it only warns otherwise. Serving
   on a GPU needs a real machine.
 .PARAMETER RuntimeDir
   The runtime folder containing llama-server.exe (runtime\vulkan).
@@ -68,8 +68,11 @@ function Show-Log([string] $Path) {
   if (Test-Path $Path) { Write-Host "---- $Path"; Get-Content $Path -Tail 60 | ForEach-Object { Write-Host $_ } }
 }
 
-# Backends: ggml must find the CPU backends beside llama-server.exe, and the
-# Vulkan backend through GGML_BACKEND_PATH.
+# Backends: ggml must find the Vulkan backend through GGML_BACKEND_PATH. The
+# CPU backend needs no log check: every case below serves a completion on it.
+# At the default log level ggml prints no "loaded" lines, so the evidence is
+# a listed Vulkan device (a machine with a GPU) or the error ggml prints when
+# it loaded vulkan\ggml-vulkan.dll from the runtime folder but found no GPU.
 Step 'Backend discovery (--list-devices)'
 $out = Join-Path $LogDir 'list-devices.log'
 $p = Start-Process $Exe -ArgumentList '--list-devices' -NoNewWindow -Wait -PassThru -RedirectStandardOutput $out -RedirectStandardError "$out.err"
@@ -77,12 +80,13 @@ $text = (Get-Content $out, "$out.err" -ErrorAction SilentlyContinue) -join "`n"
 Set-Content $out $text
 Show-Log $out
 if ($p.ExitCode -ne 0) { Fail "llama-server --list-devices exited $($p.ExitCode)" }
-if ($text -notmatch 'loaded CPU backend') { Fail 'the CPU backend was not loaded from the runtime folder' }
 $vkLoader = Test-Path (Join-Path $env:windir 'System32\vulkan-1.dll')
-if ($text -match 'loaded Vulkan backend') {
-  Write-Host 'Vulkan backend DLL loaded.'
+if ($text -match 'Vulkan\d+:') {
+  Write-Host 'Vulkan device listed.'
+} elseif ($text -match 'initialize backend from .*ggml-vulkan\.dll') {
+  Write-Host 'Vulkan backend DLL found and loaded from the runtime folder; no GPU on this runner to initialize it.'
 } elseif ($vkLoader) {
-  Fail 'this machine has a Vulkan loader but the Vulkan backend was not loaded (GGML_BACKEND_PATH / vulkan\ layout)'
+  Fail 'this machine has a Vulkan loader but the Vulkan backend was not found (GGML_BACKEND_PATH / vulkan\ layout)'
 } else {
   Write-Host '::warning::No Vulkan loader (vulkan-1.dll) on this runner; the Vulkan backend could not be exercised. Check it on a machine with a GPU.'
 }

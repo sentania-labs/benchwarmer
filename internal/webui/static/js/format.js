@@ -188,8 +188,9 @@ export function stateLabel(s) {
   return STATE_LABELS[s] || titleize(s);
 }
 
-// Event kinds: a state transition is not an error. KIND_BY_TYPE is the
-// reference for internal/events.Type; severity is the fallback for a type
+// Event kinds: a state transition is not an error, but a critical or warning
+// event is always a problem whatever its type. For the rest, KIND_BY_TYPE is
+// the reference for internal/events.Type; severity is the fallback for a type
 // this build does not know.
 export const KIND_LABELS = { problem: "Problem", change: "State change", step: "Step" };
 
@@ -222,8 +223,9 @@ const KIND_BY_SEVERITY = {
 // eventKind classifies one event as "problem", "change" or "step".
 export function eventKind(e) {
   const t = e && e.type;
-  if (t && KIND_BY_TYPE[t]) return KIND_BY_TYPE[t];
   const sev = e && e.severity;
+  if (sev === "critical" || sev === "warning") return "problem";
+  if (t && KIND_BY_TYPE[t]) return KIND_BY_TYPE[t];
   if (sev && KIND_BY_SEVERITY[sev]) return KIND_BY_SEVERITY[sev];
   return "step";
 }

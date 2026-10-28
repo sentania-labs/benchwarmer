@@ -64,6 +64,15 @@ test('an unknown type falls back to its severity, then to step', () => {
   assert.equal(fmt.eventKind(undefined), 'step');
 });
 
+test('a critical or warning event is a problem whatever its type', () => {
+  assert.equal(fmt.eventKind({ type: 'config_recovered', severity: 'critical' }), 'problem');
+  assert.equal(fmt.eventKind({ type: 'state_changed', severity: 'critical' }), 'problem');
+  assert.equal(fmt.eventKind({ type: 'telemetry_degraded', severity: 'warning' }), 'problem');
+  assert.equal(fmt.eventKind({ type: 'power_suspend_stop', severity: 'warning' }), 'problem');
+  assert.equal(fmt.eventKind({ type: 'power_suspend_stop', severity: 'info' }), 'step');
+  assert.equal(fmt.eventKind({ type: 'config_recovered', severity: 'notice' }), 'change');
+});
+
 test('state names are intelligible and unknown values are not blank', () => {
   assert.equal(fmt.stateLabel('COOLDOWN'), 'Waiting');
   assert.equal(fmt.stateLabel('DISABLED'), 'Paused');

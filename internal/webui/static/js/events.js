@@ -19,7 +19,7 @@ export function mount(main) {
   const more = h("button", { type: "button", hidden: true, onclick: () => load(false) }, "Load older events");
   const status = h("p", { class: "muted", role: "status" });
   state = {
-    filter, list, more, status, before: 0, loading: false, timer: null,
+    filter, list, more, status, before: 0, shown: "", loading: false, timer: null,
     rows: [], summaries: new Map(), // id -> summary element, for focus restore
   };
   replace(main,
@@ -29,7 +29,7 @@ export function mount(main) {
     status, list, more);
   load(true);
   start();
-  return { title: "Events", unmount, visibility: (v) => (v ? start() : stop()) };
+  return { title: "Events", unmount, visibility: (v) => { if (v) { start(); load(true); } else stop(); } };
 }
 
 function unmount() {
@@ -70,7 +70,7 @@ function focusedId(s) {
 // openIds lists the events whose details the reader had expanded.
 function openIds(s) {
   const open = [];
-  for (const r of s.rows) if (r.open) open.push(r.id);
+  for (const r of s.rows) if (r.details.open) open.push(r.id);
   return open;
 }
 
@@ -78,39 +78,45 @@ async function load(reset) {
   const s = state;
   if (!s || s.loading) return;
   s.loading = true;
-  const focus = focusedId(s);
-  const opened = new Set(openIds(s));
-  const seen = s.rows.length;
-  if (reset) {
-    s.before = 0;
-    s.rows = [];
-    s.summaries = new Map();
-    replace(s.list);
-  }
+  // A different filter than the one the rows were fetched with starts over:
+  // the old row count, expansions and focus belong to the old list.
+  const fresh = reset && s.filter.value !== s.shown;
+  const keep = reset && !fresh;
+  const focus = keep ? focusedId(s) : null;
+  const opened = new Set(keep ? openIds(s) : []);
+  const seen = keep ? s.rows.length : 0;
   // Only the first fill announces: a polite live region that repeats
   // "Loading..." on every refresh is noise for a screen reader.
-  if (!seen) s.status.textContent = "Loading...";
+  if (!s.rows.length || fresh) s.status.textContent = "Loading...";
   // A refresh asks for at least the rows already on screen, so an automatic
   // refresh cannot shrink a list the reader has paged through.
   const limit = reset ? Math.max(PAGE, seen) : PAGE;
   const q = new URLSearchParams({ limit: String(limit) });
   if (s.filter.value) q.set("type", s.filter.value);
-  if (s.before) q.set("before_id", String(s.before));
+  if (!reset && s.before) q.set("before_id", String(s.before));
   try {
     const res = await get("api/v1/events?" + q.toString(), { interactive: false });
     if (state !== s) return;
+    // Rows are built off-DOM and swapped in whole, so a failed or slow fetch
+    // leaves the current list, its scroll position and focus untouched.
+    const rows = reset ? [] : s.rows;
+    const summaries = reset ? new Map() : s.summaries;
+    const items = [];
     for (const e of res.events || []) {
       const { li, details, summary } = row(e, new Date(), opened);
-      s.list.append(li);
-      s.rows.push({ id: String(e.id), open: details.open });
-      s.summaries.set(String(e.id), summary);
+      items.push(li);
+      rows.push({ id: String(e.id), details });
+      summaries.set(String(e.id), summary);
     }
+    if (reset) replace(s.list, items);
+    else s.list.append(...items);
+    s.rows = rows;
+    s.summaries = summaries;
+    s.shown = s.filter.value;
     s.before = res.next_before_id || 0;
     s.more.hidden = !s.before;
     s.status.textContent = s.rows.length ? "" : "No events.";
-    // Only a focus that was inside the rebuilt list is moved back; the
-    // toolbar keeps its own element identity and needs nothing.
-    if (focus && s.summaries.has(focus)) s.summaries.get(focus).focus();
+    if (focus && s.summaries.has(focus)) s.summaries.get(focus).focus({ preventScroll: true });
   } catch (e) {
     if (state !== s) return;
     if (e instanceof ApiError && e.status === 401) {

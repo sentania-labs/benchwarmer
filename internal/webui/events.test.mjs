@@ -15,6 +15,9 @@ class Node {
   }
   focus() { Node.active = this; }
   get firstElementChild() { return this.children[0] || null; }
+  get firstChild() { return this.children[0] || null; }
+  removeChild(c) { this.children.splice(this.children.indexOf(c), 1); }
+  addEventListener() {}
   setAttribute(k, v) { this.attributes[k] = v; }
   contains(n) {
     return n === this || this.children.some((c) => c && (c === n || (c instanceof Node && c.contains(n))));
@@ -130,4 +133,97 @@ test('an expanded event stays expanded across a refresh', () => {
   const open = new Set(['12']);
   assert.equal(events.row(e, new Date(), open).details.open, true);
   assert.equal(events.row(e, new Date(), new Set()).details.open, false);
+});
+
+function ev(id, extra) {
+  return { id, time: '2026-10-28T00:22:31Z', type: 'mode_changed', severity: 'info', message: 'm' + id, ...extra };
+}
+
+function stubFetch(handler) {
+  const calls = [];
+  globalThis.fetch = async (path) => {
+    calls.push(path);
+    const r = await handler(path);
+    return { ok: r.ok !== false, status: r.status || 200, text: async () => JSON.stringify(r.body || {}) };
+  };
+  return calls;
+}
+
+function mountEvents(page) {
+  const main = new Node('main');
+  const mounted = events.mount(main);
+  return { main, mounted, filter: page };
+}
+
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+function findAll(n, tag, out = []) {
+  if (!(n instanceof Node)) return out;
+  if (n.tagName === tag) out.push(n);
+  for (const c of n.children) findAll(c, tag, out);
+  return out;
+}
+
+test('a failed refresh keeps the list, expansions and focus', async () => {
+  let fail = false;
+  stubFetch(() => (fail
+    ? { ok: false, status: 503, body: { error: 'down' } }
+    : { body: { events: [ev(2), ev(1)] } }));
+  const { main, mounted } = mountEvents();
+  await settle();
+  const list = findAll(main, 'ol')[0];
+  const [first, second] = findAll(list, 'li');
+  assert.equal(list.children.length, 2);
+  const detailsBefore = findAll(second, 'details')[0];
+  detailsBefore.open = true;
+  findAll(first, 'summary')[0].focus();
+  const focused = Node.active;
+  fail = true;
+  mounted.visibility(true);
+  await settle();
+  assert.equal(list.children.length, 2, 'the list survives a failed fetch');
+  assert.equal(list.children[1], second, 'rows are not rebuilt on failure');
+  assert.equal(Node.active, focused);
+  assert.match(findAll(main, 'p')[0].textContent, /Could not load events/);
+  mounted.unmount();
+});
+
+test('a successful refresh keeps expansions and focus on the rebuilt rows', async () => {
+  stubFetch(() => ({ body: { events: [ev(3), ev(2), ev(1)] } }));
+  const { main, mounted } = mountEvents();
+  await settle();
+  const list = findAll(main, 'ol')[0];
+  findAll(list.children[1], 'details')[0].open = true;
+  findAll(list.children[2], 'summary')[0].focus();
+  const focused = Node.active;
+  mounted.visibility(true);
+  await settle();
+  assert.equal(list.children.length, 3);
+  assert.equal(findAll(list.children[1], 'details')[0].open, true);
+  assert.equal(findAll(list.children[0], 'details')[0].open, false);
+  assert.notEqual(Node.active, focused, 'the summary is a new element');
+  assert.equal(Node.active, findAll(list.children[2], 'summary')[0]);
+  mounted.unmount();
+});
+
+test('changing the filter starts over instead of inheriting the old list', async () => {
+  const many = Array.from({ length: 60 }, (_, i) => ev(100 - i));
+  const calls = stubFetch((path) => (path.includes('type=load_failed')
+    ? { body: { events: [ev(9, { type: 'load_failed', severity: 'critical' })] } }
+    : { body: { events: many, next_before_id: 41 } }));
+  const { main, mounted } = mountEvents();
+  await settle();
+  const select = findAll(main, 'select')[0];
+  const list = findAll(main, 'ol')[0];
+  findAll(list.children[0], 'details')[0].open = true;
+  findAll(list.children[0], 'summary')[0].focus();
+  select.value = 'load_failed';
+  mounted.visibility(true);
+  await settle();
+  const last = calls[calls.length - 1];
+  assert.match(last, /limit=50(&|$)/, 'the page size is not inherited from the old filter');
+  assert.match(last, /type=load_failed/);
+  assert.equal(list.children.length, 1);
+  assert.equal(findAll(list.children[0], 'details')[0].open, false);
+  mounted.unmount();
 });

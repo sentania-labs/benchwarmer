@@ -18,7 +18,7 @@ runners.
 - `install.ps1` (run elevated) is idempotent and does, in order:
   1. Stop the service if present.
   2. Copy binaries to `C:\Program Files\Benchwarmer\` (admin-only write; the
-     ASR exclusion path). The llama.cpp runtime lives in `...\runtime\`.
+     recommended ASR exclusion path). The llama-server runtime lives in `...\runtime\`.
   3. Create `C:\ProgramData\Benchwarmer\` with `models\`, `secrets\`, `logs\`,
      set ACLs: the service account and Administrators full; `secrets\agent.token`
      readable by interactive users; the management and inference tokens

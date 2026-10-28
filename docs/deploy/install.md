@@ -14,7 +14,8 @@ has:
 | `benchwarmer-vX.Y.Z-windows-amd64.zip` | Installing by hand with `install.ps1` |
 | `SHA256SUMS` | Checking the downloads (`Get-FileHash <file>`) |
 
-The packages are not code-signed yet.
+The executables and the MSI are Authenticode signed by the lab's Azure Artifact
+Signing profile; the bundled runtime keeps Ollama Inc.'s signature.
 
 ## Before you install
 

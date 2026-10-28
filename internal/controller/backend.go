@@ -160,7 +160,7 @@ func (c *Controller) updateConfig(_ context.Context, nc config.Config, actor, ex
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.d.Now()
-	if expected != "" && expected != c.revisionLocked() {
+	if restoreOf != "" && (expected == "" || expected != c.revisionLocked()) {
 		return config.Impact{}, config.ErrHistoryConflict
 	}
 	if restoreOf != "" {
@@ -266,7 +266,7 @@ func (c *Controller) RestoreConfig(ctx context.Context, id, revision, actor stri
 		return config.Impact{}, err
 	}
 	parts := strings.Split(revision, ":")
-	if len(parts) != 2 || parts[1] != configDigest(target) {
+	if len(parts) != 2 || parts[0] == "" || parts[1] != configDigest(target) {
 		return config.Impact{}, config.ErrHistoryConflict
 	}
 	return c.updateConfig(ctx, target, actor, parts[0], id)

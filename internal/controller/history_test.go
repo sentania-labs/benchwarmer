@@ -39,6 +39,13 @@ func TestRestoreConflictValidationAndAudit(t *testing.T) {
 	if _, err = r.c.UpdateConfig(context.Background(), other, "test"); err != nil {
 		t.Fatal(err)
 	}
+	_, digest, _ := strings.Cut(preview.Revision, ":")
+	if _, err = r.c.RestoreConfig(context.Background(), preview.ID, ":"+digest, "test"); !errors.Is(err, config.ErrHistoryConflict) {
+		t.Fatalf("empty revision token accepted: %v", err)
+	}
+	if current, _ := r.c.Config(); current.Runtime.ContextSize != other.Runtime.ContextSize {
+		t.Fatal("empty token overwrote newer config")
+	}
 	if _, err = r.c.RestoreConfig(context.Background(), preview.ID, preview.Revision, "test"); !errors.Is(err, config.ErrHistoryConflict) {
 		t.Fatalf("stale preview: %v", err)
 	}
